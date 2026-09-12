@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id, t.external_order_id, o.external_order_id AS order_ref,\n               pl.platform_name, o.sla_type, o.sla_deadline, t.status,\n               t.assigned_to_user_id, u.name AS \"assigned_to_name?\",\n               t.assigned_at, t.completed_at, t.notes\n        FROM tickets t\n        JOIN external_orders o ON o.id = t.external_order_id\n        JOIN platforms pl ON pl.id = o.platform_id\n        LEFT JOIN users u ON u.id = t.assigned_to_user_id\n        WHERE ($1::text IS NULL OR t.status = $1)\n          AND ($2::uuid IS NULL OR t.assigned_to_user_id = $2)\n        ORDER BY o.sla_deadline ASC NULLS LAST, t.created_at ASC\n        LIMIT 100\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "external_order_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "order_ref",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "platform_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "sla_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "sla_deadline",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "assigned_to_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "assigned_to_name?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "assigned_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "notes",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "0570e7c4a1ae823847736a0626453769077330862d849cf948794e5d520db779"
+}

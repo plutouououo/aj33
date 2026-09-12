@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(SELECT 1 FROM categories WHERE lower(name) = lower($1)) AS \"ada!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ada!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c12fd234710bff21e734a57fbcbbac6557c6444ab15f08a11919f0b38ce2801a"
+}

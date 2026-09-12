@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE tickets SET\n            status       = $2,\n            completed_at = CASE WHEN $3 THEN now() ELSE completed_at END,\n            updated_at   = now()\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f1287cd034c6fb834742f05f2a0f4e288b3a18604557ae0f476f3993066356f5"
+}

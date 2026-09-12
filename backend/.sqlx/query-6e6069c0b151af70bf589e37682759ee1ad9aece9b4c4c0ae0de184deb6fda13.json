@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE platforms SET last_synced_at = now(), last_sync_status = 'success' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6e6069c0b151af70bf589e37682759ee1ad9aece9b4c4c0ae0de184deb6fda13"
+}

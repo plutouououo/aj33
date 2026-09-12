@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id, t.external_order_id, o.external_order_id AS order_ref,\n               pl.platform_name, o.sla_type, o.sla_deadline, t.status,\n               t.assigned_to_user_id, u.name AS \"assigned_to_name?\",\n               t.assigned_at, t.completed_at, t.notes\n        FROM tickets t\n        JOIN external_orders o ON o.id = t.external_order_id\n        JOIN platforms pl ON pl.id = o.platform_id\n        LEFT JOIN users u ON u.id = t.assigned_to_user_id\n        WHERE t.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "external_order_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "order_ref",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "platform_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "sla_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "sla_deadline",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "assigned_to_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "assigned_to_name?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "assigned_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "notes",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "c4e4f2385e6f25422de059ae647ec59fddc0924ed4ec21bb862da1122281db16"
+}

@@ -1,0 +1,184 @@
+---
+import AppShell from '../layouts/AppShell.astro';
+import { api, ApiRequestError, type PaginatedProducts, type Transaction } from '../lib/api';
+import { rupiah } from '../lib/format';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+if (user.role === 'pengepak') {
+  return Astro.redirect('/tiket', 302);
+}
+
+let galat: string | null = null;
+let struk: Transaction | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+
+  // Keranjang dikirim sebagai pasangan produk+jumlah dari form. Baris dengan
+  // jumlah 0 dibuang di sini; produk yang sama muncul dua kali tetap aman --
+  // backend yang menggabungkannya sebelum stok diperiksa.
+  const items = form
+    .getAll('product_id')
+    .map((id, i) => ({
+      product_id: String(id),
+      qty: Number(form.getAll('qty')[i] ?? 0),
+    }))
+    .filter((it) => Number.isFinite(it.qty) && it.qty > 0);
+
+  const metode = String(form.get('payment_method') ?? 'cash');
+  const dibayar = Number(form.get('amount_paid'));
+
+  // Kunci idempotensi dibuat server saat form dirender dan ikut terkirim,
+  // jadi menekan "Bayar" dua kali atau me-refresh halaman hasil POST tidak
+  // membuat transaksi kedua.
+  const idempotencyKey = String(form.get('idempotency_key') ?? '');
+
+  if (items.length === 0) {
+    galat = 'Keranjang masih kosong.';
+  } else if (!idempotencyKey) {
+    galat = 'Sesi kasir tidak valid. Muat ulang halaman.';
+  } else {
+    try {
+      struk = await api<Transaction>('/transactions', {
+        method: 'POST',
+        token,
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: {
+          payment_method: metode,
+          amount_paid: metode === 'cash' && Number.isFinite(dibayar) ? dibayar : undefined,
+          items,
+        },
+      });
+    } catch (err) {
+      galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan transaksi.';
+    }
+  }
+}
+
+const daftar = await api<PaginatedProducts>('/products?limit=100', { token });
+const kunciBaru = crypto.randomUUID();
+---
+
+<AppShell judul="Kasir" user={user}>
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+
+  {
+    struk && (
+      <div class="kartu mb-6 border-emerald-200 bg-emerald-50">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 class="font-bold text-emerald-900">Transaksi berhasil</h2>
+          <span class="text-xs text-emerald-700">#{struk.id.slice(0, 8)}</span>
+        </div>
+
+        <table class="mt-4 w-full text-sm">
+          <tbody>
+            {struk.items.map((it) => (
+              <tr>
+                <td class="py-1">
+                  {it.product_name_snapshot}
+                  <span class="text-stone-500"> × {it.qty}</span>
+                </td>
+                <td class="py-1 text-right tabular-nums">{rupiah(it.subtotal)}</td>
+              </tr>
+            ))}
+            <tr class="border-t border-emerald-200 font-semibold">
+              <td class="py-2">Total</td>
+              <td class="py-2 text-right tabular-nums">{rupiah(struk.total_amount)}</td>
+            </tr>
+            {struk.amount_paid !== null && (
+              <>
+                <tr>
+                  <td class="py-1 text-stone-600">Dibayar</td>
+                  <td class="py-1 text-right tabular-nums">{rupiah(struk.amount_paid)}</td>
+                </tr>
+                <tr>
+                  <td class="py-1 text-stone-600">Kembali</td>
+                  <td class="py-1 text-right tabular-nums">{rupiah(struk.change_amount ?? 0)}</td>
+                </tr>
+              </>
+            )}
+          </tbody>
+        </table>
+
+        <a href="/kasir" class="tombol-utama mt-5 w-full">Transaksi baru</a>
+      </div>
+    )
+  }
+
+  <form method="POST" class="grid gap-6 lg:grid-cols-[1fr_20rem]">
+    <input type="hidden" name="idempotency_key" value={kunciBaru} />
+
+    <div class="kartu">
+      <h2 class="mb-4 font-semibold">Pilih barang</h2>
+
+      <div class="grid gap-3 sm:grid-cols-2">
+        {
+          daftar.data.map((p) => {
+            const habis = p.stock_qty < 1;
+            return (
+              <label
+                class:list={[
+                  'flex items-center gap-3 rounded-lg border p-3',
+                  habis
+                    ? 'border-stone-200 bg-stone-50 opacity-60'
+                    : 'border-[var(--color-garis)] bg-white',
+                ]}
+              >
+                <input type="hidden" name="product_id" value={p.id} />
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium">{p.name}</p>
+                  <p class="text-xs text-stone-500">
+                    {rupiah(p.price)} · stok {p.stock_qty}
+                  </p>
+                </div>
+                <input
+                  class="kolom w-16 text-center"
+                  type="number"
+                  name="qty"
+                  min="0"
+                  max={p.stock_qty}
+                  value="0"
+                  disabled={habis}
+                  aria-label={`Jumlah ${p.name}`}
+                />
+              </label>
+            );
+          })
+        }
+      </div>
+    </div>
+
+    <div class="kartu h-fit lg:sticky lg:top-6">
+      <h2 class="mb-4 font-semibold">Pembayaran</h2>
+
+      <div class="mb-4">
+        <label class="label" for="payment_method">Metode</label>
+        <select class="kolom" id="payment_method" name="payment_method">
+          <option value="cash">Tunai</option>
+          <option value="transfer">Transfer</option>
+          <option value="ewallet">E-wallet</option>
+        </select>
+      </div>
+
+      <div class="mb-5">
+        <label class="label" for="amount_paid">Nominal dibayar (tunai)</label>
+        <input
+          class="kolom"
+          id="amount_paid"
+          name="amount_paid"
+          type="number"
+          min="0"
+          step="1"
+          placeholder="0"
+        />
+        <p class="mt-1.5 text-xs text-stone-500">
+          Diisi hanya untuk pembayaran tunai. Kembalian dihitung server.
+        </p>
+      </div>
+
+      <button class="tombol-utama w-full" type="submit">Bayar</button>
+    </div>
+  </form>
+</AppShell>

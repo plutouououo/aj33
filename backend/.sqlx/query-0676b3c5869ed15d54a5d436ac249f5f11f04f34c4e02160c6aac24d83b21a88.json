@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT cl.id, cl.platform_id, pl.platform_name, cl.product_id,\n               cl.external_item_id, cl.external_sku\n        FROM channel_listings cl\n        JOIN platforms pl ON pl.id = cl.platform_id\n        WHERE cl.product_id = $1\n        ORDER BY pl.platform_name, cl.external_item_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "platform_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "product_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "external_item_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "external_sku",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "0676b3c5869ed15d54a5d436ac249f5f11f04f34c4e02160c6aac24d83b21a88"
+}

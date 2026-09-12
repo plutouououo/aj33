@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE tickets SET\n            assigned_to_user_id = $2,\n            assigned_by         = $3,\n            assigned_at         = now(),\n            status              = 'assigned',\n            updated_at          = now()\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5dd7fa21f60ea933b4dc7e3d4d80c1f3a24ea1c1abf8ccfc09afafd3b7796c2b"
+}

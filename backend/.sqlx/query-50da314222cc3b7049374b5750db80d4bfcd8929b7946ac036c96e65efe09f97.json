@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO tickets (external_order_id, status, notes)\n        VALUES ($1, 'unassigned', $2)\n        ON CONFLICT (external_order_id) DO NOTHING\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "50da314222cc3b7049374b5750db80d4bfcd8929b7946ac036c96e65efe09f97"
+}

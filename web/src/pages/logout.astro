@@ -1,0 +1,16 @@
+---
+import { api } from '../lib/api';
+import { hapusSesi } from '../lib/session';
+
+if (Astro.request.method === 'POST') {
+  const token = Astro.locals.token;
+  if (token) {
+    // Kegagalan di sini tidak boleh menghalangi logout: yang benar-benar
+    // mengakhiri sesi adalah cookie yang dihapus di bawah.
+    await api('/auth/logout', { method: 'POST', token }).catch(() => {});
+  }
+  hapusSesi(Astro.cookies);
+}
+
+return Astro.redirect('/login', 302);
+---

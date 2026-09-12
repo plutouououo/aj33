@@ -1,0 +1,26 @@
+---
+import '../styles/theme.css';
+---
+
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tidak ada koneksi · BOZZ</title>
+    <meta name="theme-color" content="#b02a20" />
+  </head>
+  <body class="grid min-h-screen place-items-center px-4">
+    <div class="kartu max-w-sm text-center">
+      <span class="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-xl bg-kuning-400 text-xl">
+        !
+      </span>
+      <h1 class="text-lg font-bold">Tidak ada koneksi</h1>
+      <p class="mt-2 text-sm text-stone-600">
+        BOZZ butuh koneksi internet untuk menampilkan data terbaru dan
+        menyimpan transaksi. Halaman akan kembali normal begitu koneksi pulih.
+      </p>
+      <button class="tombol-utama mt-5 w-full" onclick="location.reload()">Coba lagi</button>
+    </div>
+  </body>
+</html>

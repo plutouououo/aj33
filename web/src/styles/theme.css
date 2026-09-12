@@ -1,0 +1,251 @@
+@import "tailwindcss";
+
+/*
+  Sistem visual BOZZ. Rujukannya docs/panduan-ui.md -- kalau menambah token
+  atau komponen di sini, tambahkan juga penjelasannya di sana.
+
+  Dua merah yang berbeda, dan jangan ditukar:
+
+    merah-*  warna merek. Dipakai untuk aksi utama, navigasi aktif, kepala
+             tabel. Gelap dan pekat, jadi teks putih di atasnya lolos WCAG AA.
+    bahaya   merah terang bawaan Tailwind (red-600). Khusus galat, stok
+             menipis, dan aksi merusak.
+
+  Kalau keduanya memakai merah yang sama, tombol "Simpan" jadi tidak bisa
+  dibedakan dari peringatan -- pengguna berhenti memperhatikan warna merah
+  sama sekali.
+*/
+@theme {
+  /* Merek: bata tua. 600 untuk tombol, 800 untuk kepala tabel. */
+  --color-merah-50: #fdf2f1;
+  --color-merah-100: #fbe4e1;
+  --color-merah-200: #f5c6c0;
+  --color-merah-300: #eb9f95;
+  --color-merah-400: #d96a5c;
+  --color-merah-500: #c4453a;
+  --color-merah-600: #b02a20;
+  --color-merah-700: #96231b;
+  --color-merah-800: #7c1d17;
+  --color-merah-900: #641814;
+
+  /* Kuning dipakai hemat: hanya status "menunggu tindakan". Luminansinya
+     tinggi, jadi selalu berpasangan dengan teks gelap, tidak pernah putih. */
+  --color-kuning-50: #fffbeb;
+  --color-kuning-100: #fef3c7;
+  --color-kuning-500: #f59e0b;
+  --color-kuning-700: #b45309;
+
+  /* Netral. Latar aplikasi abu sangat muda supaya kartu putih di atasnya
+     punya tepi tanpa perlu bayangan tebal. */
+  --color-dasar: #f7f7f8;
+  --color-permukaan: #ffffff;
+  --color-garis: #e8e6e4;
+  --color-garis-lembut: #f1efee;
+
+  --color-teks: #1c1917;
+  --color-teks-lembut: #78716c;
+  --color-teks-samar: #a8a29e;
+
+  /* Lebar sidebar dipakai layout dan tombol ciutkan, jadi satu angka saja. */
+  --lebar-sidebar: 15rem;
+}
+
+@layer base {
+  html {
+    background-color: var(--color-dasar);
+    color: var(--color-teks);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+  }
+
+  /* Fokus keyboard harus selalu terlihat. Tanpa ini, pengguna yang
+     bernavigasi dengan Tab kehilangan jejak posisinya. */
+  :focus-visible {
+    outline: 2px solid var(--color-merah-600);
+    outline-offset: 2px;
+  }
+}
+
+/*
+  `tombol` dan `lencana` dideklarasikan sebagai @utility, bukan kelas biasa di
+  @layer components. Di Tailwind v4, `@apply` hanya menerima utility -- kelas
+  komponen buatan sendiri ditolak. Dengan @utility, varian di bawah bisa
+  membangun di atasnya tanpa menyalin ulang deklarasi dasarnya.
+*/
+@utility tombol {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5
+         text-sm font-semibold transition-colors
+         disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility lencana {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+}
+
+@layer components {
+  /* --- Tombol ------------------------------------------------------- */
+
+  /* Aksi utama halaman. Satu saja per layar: kalau ada dua, keduanya
+     berhenti terbaca sebagai "yang ini dulu". */
+  .tombol-utama {
+    @apply tombol bg-merah-600 text-white hover:bg-merah-700;
+  }
+
+  /* Aksi pendamping yang setara pentingnya (mis. "Import" di sebelah
+     "Tambah"): sama besar, tapi tidak menarik mata lebih dulu. */
+  .tombol-halus {
+    @apply tombol border border-[var(--color-garis)] bg-white text-stone-700
+           hover:border-merah-200 hover:bg-merah-50 hover:text-merah-700;
+  }
+
+  /* Aksi merusak yang tidak bisa dibatalkan. Memakai merah bahaya, bukan
+     merah merek. */
+  .tombol-bahaya {
+    @apply tombol bg-red-600 text-white hover:bg-red-700;
+  }
+
+  /* Aksi di dalam baris tabel. Ditulis kecil dan kalem supaya tidak
+     bersaing dengan isi barisnya sendiri. */
+  .aksi-baris {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm
+           text-stone-500 transition-colors hover:bg-merah-50 hover:text-merah-700
+           disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent
+           disabled:hover:text-stone-500;
+  }
+
+  /* <summary> yang tampil sebagai tombol. `list-none` saja tidak cukup:
+     Safari menggambar segitiganya lewat pseudo-element sendiri. */
+  summary.tombol-utama::-webkit-details-marker,
+  summary.tombol-halus::-webkit-details-marker {
+    display: none;
+  }
+
+  /* --- Wadah -------------------------------------------------------- */
+
+  .kartu {
+    @apply rounded-xl border border-[var(--color-garis)] bg-[var(--color-permukaan)]
+           p-5 shadow-sm;
+  }
+
+  /* Kartu tanpa padding, untuk isi yang mengatur paddingnya sendiri
+     (tabel, daftar berpembatas). */
+  .kartu-rapat {
+    @apply overflow-hidden rounded-xl border border-[var(--color-garis)]
+           bg-[var(--color-permukaan)] shadow-sm;
+  }
+
+  /* --- Kolom isian --------------------------------------------------- */
+
+  .kolom {
+    @apply w-full rounded-lg border border-[var(--color-garis)] bg-white px-3 py-2.5
+           text-sm text-stone-900 placeholder:text-[var(--color-teks-samar)]
+           focus:border-merah-500 focus:outline-none focus:ring-2 focus:ring-merah-100;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-stone-700;
+  }
+
+  /* --- Tabel --------------------------------------------------------- */
+
+  /* Kepala tabel memakai merah merek pekat dengan teks putih. Kontras
+     tinggi ini yang memisahkan judul kolom dari ratusan baris di bawahnya
+     tanpa perlu garis tebal. */
+  .tabel {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .tabel thead th {
+    @apply bg-merah-800 px-4 py-3 text-left text-xs font-semibold uppercase
+           tracking-wider text-white first:rounded-tl-lg last:rounded-tr-lg;
+  }
+
+  .tabel tbody td {
+    @apply border-b border-[var(--color-garis-lembut)] px-4 py-3 align-middle;
+  }
+
+  .tabel tbody tr:hover td {
+    @apply bg-merah-50/40;
+  }
+
+  /* Kolom angka selalu rata kanan dan tabular, supaya digit sejajar dan
+     selisih besaran terlihat dari panjangnya. */
+  .sel-angka {
+    @apply text-right tabular-nums;
+  }
+
+  /* --- Lencana status ------------------------------------------------ */
+
+  /* Kuning menunggu tindakan orang, merah merek sedang berjalan, hijau
+     selesai, merah bahaya gagal. Dipakai konsisten untuk status tiket,
+     pesanan, produk, dan stok. */
+  .lencana-perlu-tindakan {
+    @apply lencana bg-kuning-100 text-kuning-700;
+  }
+  .lencana-berjalan {
+    @apply lencana bg-merah-100 text-merah-700;
+  }
+  .lencana-selesai {
+    @apply lencana bg-emerald-100 text-emerald-700;
+  }
+  .lencana-gagal {
+    @apply lencana bg-red-100 text-red-700;
+  }
+  /* Bukan status kerja, melainkan "dimatikan" -- abu, bukan warna apa pun,
+     supaya tidak terbaca sebagai peringatan. */
+  .lencana-nonaktif {
+    @apply lencana bg-stone-100 text-stone-500;
+  }
+
+  /* --- Pesan --------------------------------------------------------- */
+
+  .galat {
+    @apply rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800;
+  }
+
+  .sukses {
+    @apply rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm
+           text-emerald-800;
+  }
+
+  /* --- Navigasi sisi -------------------------------------------------- */
+
+  .nav-judul {
+    @apply px-3 pb-1.5 pt-5 text-xs font-semibold uppercase tracking-wider
+           text-[var(--color-teks-samar)];
+  }
+
+  .nav-tautan {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium
+           text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900;
+  }
+
+  /* Halaman aktif ditandai latar merah muda DAN teks merah pekat, bukan
+     salah satunya: latar saja terlalu samar di layar toko yang terang. */
+  .nav-tautan-aktif {
+    @apply flex items-center gap-3 rounded-lg bg-merah-50 px-3 py-2.5 text-sm
+           font-semibold text-merah-700;
+  }
+}
+
+/*
+  Sidebar ciut menyisakan ikon saja. Lebarnya diubah lewat variabel yang sama
+  dengan yang dipakai margin konten, jadi keduanya tidak bisa lepas sinkron.
+
+  Ditaruh di sini, bukan di <style> milik AppShell, karena style Astro
+  ter-scope per komponen dan `:root` bukan milik komponen mana pun.
+*/
+:root[data-sidebar='ciut'] {
+  --lebar-sidebar: 4.25rem;
+}
+:root[data-sidebar='ciut'] .teks-sidebar {
+  display: none;
+}
+:root[data-sidebar='ciut'] .nav-judul {
+  padding-top: 1rem;
+}

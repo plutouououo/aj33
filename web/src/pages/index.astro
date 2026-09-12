@@ -1,0 +1,8 @@
+---
+import { berandaUntuk } from '../lib/session';
+
+// Middleware sudah memastikan ada user di sini; tanpa itu request sudah
+// dialihkan ke /login sebelum sampai ke halaman ini.
+const user = Astro.locals.user!;
+return Astro.redirect(berandaUntuk(user.role), 302);
+---

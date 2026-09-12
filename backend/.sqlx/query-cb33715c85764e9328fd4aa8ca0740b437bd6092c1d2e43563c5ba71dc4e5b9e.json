@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO channel_listings (platform_id, product_id, external_item_id, external_sku)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (platform_id, external_item_id) DO UPDATE SET\n            product_id   = EXCLUDED.product_id,\n            external_sku = EXCLUDED.external_sku,\n            updated_at   = now()\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cb33715c85764e9328fd4aa8ca0740b437bd6092c1d2e43563c5ba71dc4e5b9e"
+}

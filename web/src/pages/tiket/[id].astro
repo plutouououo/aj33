@@ -1,0 +1,214 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import { api, ApiRequestError, type Ticket } from '../../lib/api';
+import { waktu } from '../../lib/format';
+import { berandaUntuk } from '../../lib/session';
+import { LABEL_STATUS, kelasLencana, langkahBerikutnya, masihBisaDiambil } from '../../lib/tiket';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+if (user.role === 'kasir') {
+  return Astro.redirect(berandaUntuk(user.role), 302);
+}
+
+const { id } = Astro.params;
+
+let galat: string | null = null;
+let tiket: Ticket | null = null;
+
+// Setiap aksi dijawab backend dengan tiket utuh yang baru, jadi hasilnya
+// langsung dipakai merender -- tidak ada jeda di mana layar menampilkan
+// keadaan lama karena permintaan kedua gagal.
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = String(form.get('aksi') ?? '');
+
+  try {
+    if (aksi === 'ambil') {
+      tiket = await api<Ticket>(`/tickets/${id}/assign`, { method: 'POST', token, body: {} });
+    } else if (aksi === 'status') {
+      tiket = await api<Ticket>(`/tickets/${id}/status`, {
+        method: 'PATCH',
+        token,
+        body: { status: String(form.get('status') ?? '') },
+      });
+    } else if (aksi === 'item') {
+      const itemId = String(form.get('item_id') ?? '');
+      tiket = await api<Ticket>(`/tickets/${id}/items/${itemId}`, {
+        method: 'PATCH',
+        token,
+        body: { is_packed: form.get('is_packed') === '1' },
+      });
+    }
+  } catch (err) {
+    galat = err instanceof ApiRequestError ? err.message : 'Aksi gagal dijalankan.';
+  }
+}
+
+// Aksi yang gagal menyisakan `tiket` kosong: keadaannya dibaca ulang supaya
+// galat ditampilkan di atas tiket sebagaimana adanya sekarang, bukan
+// sebagaimana dikira saat tombolnya ditekan.
+if (!tiket) {
+  try {
+    tiket = await api<Ticket>(`/tickets/${id}`, { token });
+  } catch (err) {
+    if (err instanceof ApiRequestError && err.status === 404) {
+      Astro.response.status = 404;
+    } else {
+      throw err;
+    }
+  }
+}
+
+// Owner boleh mengerjakan tiket mana pun, pengepak hanya miliknya sendiri --
+// sama dengan `pastikan_boleh_mengerjakan` di backend.
+const boleh = tiket !== null && (user.role === 'owner' || tiket.assigned_to_user_id === user.id);
+const lanjut = tiket && boleh ? langkahBerikutnya(tiket.status) : null;
+const bisaDiambil =
+  tiket !== null && masihBisaDiambil(tiket.status) && tiket.assigned_to_user_id !== user.id;
+const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
+---
+
+<AppShell judul={tiket?.order_ref ?? 'Tiket'} user={user}>
+  <a
+    class="text-sm text-stone-500 underline-offset-2 hover:text-merah-700 hover:underline"
+    href="/tiket"
+  >
+    ← Antrean tiket
+  </a>
+
+  {galat && <p class="galat mt-4" role="alert">{galat}</p>}
+
+  {
+    tiket === null ? (
+      <p class="mt-4 text-stone-500">Tiket tidak ditemukan.</p>
+    ) : (
+      <>
+        <div class="mb-6 mt-4 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p class="text-sm text-[var(--color-teks-lembut)]">
+              {tiket.platform_name} · SLA {tiket.sla_type}
+              {tiket.sla_deadline && ` · tenggat ${waktu(tiket.sla_deadline)}`}
+            </p>
+          </div>
+          <span class={kelasLencana(tiket.status)}>{LABEL_STATUS[tiket.status]}</span>
+        </div>
+
+        {tiket.notes && (
+          <p class="kartu mb-6 border-kuning-200 bg-kuning-50 text-sm text-stone-800">
+            <span class="font-semibold">Catatan: </span>
+            {tiket.notes}
+          </p>
+        )}
+
+        <div class="grid gap-6 lg:grid-cols-[1fr_18rem]">
+          <div class="kartu">
+            <div class="mb-4 flex items-baseline justify-between gap-4">
+              <h2 class="font-semibold">Barang</h2>
+              <span class="text-sm tabular-nums text-stone-500">
+                {dikemas}/{tiket.items.length} dikemas
+              </span>
+            </div>
+
+            <ul class="divide-y divide-[var(--color-garis)]">
+              {tiket.items.map((it) => (
+                <li class="flex items-center gap-3 py-3">
+                  <span
+                    class:list={[
+                      'grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold',
+                      it.is_packed
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-stone-100 text-stone-400',
+                    ]}
+                    aria-hidden="true"
+                  >
+                    {it.is_packed ? '✓' : ''}
+                  </span>
+
+                  <div class="min-w-0 flex-1">
+                    <p
+                      class:list={[
+                        'text-sm font-medium',
+                        it.is_packed && 'text-stone-500 line-through',
+                      ]}
+                    >
+                      {it.product_name_snapshot}
+                    </p>
+                    <p class="text-xs text-stone-500">Ambil {it.qty}</p>
+                  </div>
+
+                  {/* Centang hanya bisa diubah saat tiket sedang dikemas.
+                      Setelah `packed`, pemeriksaan "semua barang sudah
+                      dikemas" yang meloloskannya tidak boleh dibatalkan. */}
+                  {boleh && tiket.status === 'packing' && (
+                    <form method="POST">
+                      <input type="hidden" name="aksi" value="item" />
+                      <input type="hidden" name="item_id" value={it.id} />
+                      <input type="hidden" name="is_packed" value={it.is_packed ? '0' : '1'} />
+                      <button class="tombol-halus" type="submit">
+                        {it.is_packed ? 'Batalkan' : 'Sudah diambil'}
+                      </button>
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div class="kartu h-fit lg:sticky lg:top-6">
+            <h2 class="mb-4 font-semibold">Pengerjaan</h2>
+
+            <p class="mb-5 text-sm text-stone-600">
+              {tiket.assigned_to_name ? (
+                <>
+                  Dipegang <span class="font-medium text-stone-900">{tiket.assigned_to_name}</span>
+                  {tiket.assigned_at && (
+                    <span class="block text-xs text-stone-500">
+                      sejak {waktu(tiket.assigned_at)}
+                    </span>
+                  )}
+                </>
+              ) : (
+                'Belum ada yang mengambil tiket ini.'
+              )}
+            </p>
+
+            {bisaDiambil && (
+              <form method="POST" class="mb-3">
+                <input type="hidden" name="aksi" value="ambil" />
+                <button
+                  class:list={[lanjut ? 'tombol-halus' : 'tombol-utama', 'w-full']}
+                  type="submit"
+                >
+                  {tiket.assigned_to_user_id ? 'Ambil alih' : 'Ambil tiket'}
+                </button>
+              </form>
+            )}
+
+            {lanjut && (
+              <form method="POST">
+                <input type="hidden" name="aksi" value="status" />
+                <input type="hidden" name="status" value={lanjut.status} />
+                <button class="tombol-utama w-full" type="submit">
+                  {lanjut.label}
+                </button>
+              </form>
+            )}
+
+            {tiket.status === 'handed_over' && (
+              <p class="text-sm text-emerald-800">
+                Selesai{tiket.completed_at && ` pada ${waktu(tiket.completed_at)}`}. Stok sudah
+                dikurangi.
+              </p>
+            )}
+
+            {!boleh && !bisaDiambil && tiket.status !== 'handed_over' && (
+              <p class="text-sm text-stone-500">Tiket ini dikerjakan orang lain.</p>
+            )}
+          </div>
+        </div>
+      </>
+    )
+  }
+</AppShell>

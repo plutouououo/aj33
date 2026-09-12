@@ -1,0 +1,133 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import { api, type Ticket } from '../../lib/api';
+import { waktu } from '../../lib/format';
+import { berandaUntuk } from '../../lib/session';
+import { LABEL_STATUS, URUTAN_STATUS, kelasLencana } from '../../lib/tiket';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+// Kasir tidak punya urusan dengan antrean packing. Backend menolaknya dengan
+// 403; mengalihkannya di sini membuat penolakan itu tidak pernah perlu
+// ditampilkan sebagai galat.
+if (user.role === 'kasir') {
+  return Astro.redirect(berandaUntuk(user.role), 302);
+}
+
+const params = Astro.url.searchParams;
+const status = params.get('status') ?? '';
+
+// Pengepak membuka halaman ini untuk bertanya "mana pekerjaanku", owner untuk
+// mengawasi seluruh antrean -- jadi bawaannya berbeda per peran. Nilainya
+// selalu ikut terkirim lewat <select>, supaya pilihan "semua" tidak jatuh
+// kembali ke bawaan.
+const punyaku = params.has('punyaku') ? params.get('punyaku') === '1' : user.role === 'pengepak';
+
+const kueri = new URLSearchParams();
+if (status) kueri.set('status', status);
+if (punyaku) kueri.set('mine', 'true');
+const terkirim = kueri.toString();
+
+const daftar = await api<Ticket[]>(`/tickets${terkirim ? `?${terkirim}` : ''}`, { token });
+const sekarang = Date.now();
+---
+
+<AppShell judul="Tiket" user={user}>
+  <div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+    <p class="text-sm text-[var(--color-teks-lembut)]">
+      {daftar.length} tiket · yang paling mendesak di atas
+    </p>
+
+    <form method="GET" class="flex flex-wrap gap-2">
+      <select class="kolom w-44" name="punyaku" aria-label="Cakupan tiket">
+        <option value="1" selected={punyaku}>Tiket saya</option>
+        <option value="0" selected={!punyaku}>Semua tiket</option>
+      </select>
+
+      <select class="kolom w-44" name="status" aria-label="Saring status">
+        <option value="" selected={!status}>Semua status</option>
+        {
+          URUTAN_STATUS.map((s) => (
+            <option value={s} selected={status === s}>
+              {LABEL_STATUS[s]}
+            </option>
+          ))
+        }
+      </select>
+
+      <button class="tombol-halus" type="submit">Saring</button>
+    </form>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full border-collapse text-sm">
+      <thead>
+        <tr class="border-b border-[var(--color-garis)] text-left text-xs uppercase tracking-wide text-stone-500">
+          <th class="py-2.5 pr-4 font-semibold">Pesanan</th>
+          <th class="py-2.5 pr-4 font-semibold">Platform</th>
+          <th class="py-2.5 pr-4 font-semibold">Tenggat</th>
+          <th class="py-2.5 pr-4 font-semibold">Status</th>
+          <th class="py-2.5 pr-4 font-semibold">Pengepak</th>
+          <th class="py-2.5 font-semibold"><span class="sr-only">Aksi</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          daftar.map((t) => {
+            const dikemas = t.items.filter((it) => it.is_packed).length;
+            // Tenggat yang lewat hanya menjadi peringatan selama tiketnya
+            // belum diserahkan -- setelah itu tidak ada lagi yang bisa
+            // dikerjakan, dan warna merah cuma jadi kebisingan.
+            const telat =
+              t.sla_deadline !== null &&
+              t.status !== 'handed_over' &&
+              new Date(t.sla_deadline).getTime() < sekarang;
+
+            return (
+              <tr class="border-b border-[var(--color-garis)]">
+                <td class="py-3 pr-4">
+                  <a class="font-medium hover:text-merah-700 hover:underline" href={`/tiket/${t.id}`}>
+                    {t.order_ref}
+                  </a>
+                  <p class="text-xs text-stone-500">
+                    {dikemas}/{t.items.length} barang dikemas
+                  </p>
+                </td>
+                <td class="py-3 pr-4 text-stone-500">{t.platform_name}</td>
+                <td class="py-3 pr-4">
+                  {t.sla_deadline ? (
+                    <span class:list={['tabular-nums', telat ? 'font-semibold text-red-700' : 'text-stone-600']}>
+                      {waktu(t.sla_deadline)}
+                      {telat && ' · lewat'}
+                    </span>
+                  ) : (
+                    <span class="text-stone-400">—</span>
+                  )}
+                </td>
+                <td class="py-3 pr-4">
+                  <span class={kelasLencana(t.status)}>{LABEL_STATUS[t.status]}</span>
+                </td>
+                <td class="py-3 pr-4 text-stone-500">{t.assigned_to_name ?? '—'}</td>
+                <td class="py-3 text-right">
+                  <a class="tombol-halus" href={`/tiket/${t.id}`}>Buka</a>
+                </td>
+              </tr>
+            );
+          })
+        }
+        {
+          daftar.length === 0 && (
+            <tr>
+              <td colspan="6" class="py-10 text-center text-stone-500">
+                {punyaku
+                  ? 'Belum ada tiket yang ditugaskan ke kamu. Pilih "Semua tiket" untuk melihat antrean.'
+                  : 'Belum ada tiket packing.'}
+              </td>
+            </tr>
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</AppShell>

@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.sku,\n            p.price, p.cost_price, p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.unit, p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "category_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "category_name?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "sku",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "cost_price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "stock_qty",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "low_stock_threshold",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "image_url",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "unit",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "163e73489addeb71cf0e4fd5ec2e989f71bd2c1b3a1147555a9da9b681ae614b"
+}

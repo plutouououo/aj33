@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, platform_name, is_connected, shop_id_external,\n               last_synced_at, token_expires_at\n        FROM platforms\n        ORDER BY platform_name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_connected",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "shop_id_external",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_synced_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "token_expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f9d46a83dd00c6d111249c56208ba9e489ffcdc7e2559c651e952299a4d8813e"
+}

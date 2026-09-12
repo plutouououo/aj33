@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE platforms SET\n            shop_id_external        = $2,\n            access_token_encrypted  = $3,\n            refresh_token_encrypted = $4,\n            token_expires_at        = $5,\n            is_connected            = true,\n            updated_at              = now()\n        WHERE platform_name = $1\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Varchar",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "10ee242b57a72b75bfdfbd9b6b27b4f42cce90ad1e4056e89c079f2f2283f531"
+}

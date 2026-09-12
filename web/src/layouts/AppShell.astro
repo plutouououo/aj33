@@ -1,0 +1,231 @@
+---
+import '../styles/theme.css';
+import type { User } from '../lib/api';
+
+interface Props {
+  judul: string;
+  user?: User;
+}
+
+const { judul, user } = Astro.props;
+const path = Astro.url.pathname;
+
+/**
+ * Menu dibatasi per peran, sama seperti pembatasan di backend.
+ *
+ * Dikelompokkan supaya daftar yang memanjang tetap bisa dipindai: "bisnis"
+ * untuk yang ditata sekali lalu jarang disentuh, "operasional" untuk yang
+ * dibuka tiap hari.
+ */
+const grup = [
+  {
+    judul: 'Bisnis',
+    menu: [
+      { href: '/produk', label: 'Produk', ikon: 'kotak', untuk: ['owner', 'kasir'] },
+      { href: '/pengaturan/platform', label: 'Platform', ikon: 'tautan', untuk: ['owner'] },
+    ],
+  },
+  {
+    judul: 'Operasional',
+    menu: [
+      { href: '/kasir', label: 'Kasir', ikon: 'keranjang', untuk: ['owner', 'kasir'] },
+      { href: '/pesanan', label: 'Pesanan Masuk', ikon: 'amplop', untuk: ['owner'] },
+      { href: '/tiket', label: 'Tiket Packing', ikon: 'papan', untuk: ['owner', 'pengepak'] },
+    ],
+  },
+];
+
+/** Ikon garis, 20px, stroke mengikuti warna teks induknya. */
+const IKON: Record<string, string> = {
+  kotak: 'M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8',
+  tautan: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1',
+  keranjang: 'M3 4h2l2 12h11l2-8H7M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm9 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
+  amplop: 'M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7zm0 1l9 6 9-6',
+  papan: 'M9 3h6v3H9V3zm-2 3H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1M9 12h6M9 16h4',
+};
+
+const grupTampil = user
+  ? grup
+      .map((g) => ({ ...g, menu: g.menu.filter((m) => m.untuk.includes(user.role)) }))
+      .filter((g) => g.menu.length > 0)
+  : [];
+
+const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
+---
+
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{judul} · BOZZ</title>
+    <meta
+      name="description"
+      content="Operasi toko: kasir, stok, dan pesanan marketplace dalam satu alur."
+    />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#b02a20" />
+    <link rel="icon" href="/ikon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/ikon-192.png" />
+
+    <script is:inline>
+      // Dibaca sebelum halaman digambar, bukan setelahnya: tiap klik menu di
+      // aplikasi ini memuat halaman baru, jadi kalau pilihan ciut dipasang
+      // belakangan sidebar akan berkedip lebar-lalu-menyempit tiap navigasi.
+      try {
+        if (localStorage.getItem('bozz_sidebar') === 'ciut') {
+          document.documentElement.dataset.sidebar = 'ciut';
+        }
+      } catch {
+        // localStorage diblokir (mode privat). Sidebar tampil lebar, dan itu
+        // keadaan yang benar -- tidak ada yang perlu ditangani.
+      }
+    </script>
+  </head>
+
+  <body class="min-h-screen">
+    {
+      user ? (
+        <div class="flex min-h-screen">
+          <aside
+            id="sidebar"
+            class="fixed inset-y-0 left-0 z-20 flex w-[var(--lebar-sidebar)] flex-col
+                   border-r border-[var(--color-garis)] bg-white transition-[width]"
+          >
+            <div class="flex items-center gap-2.5 px-4 py-4">
+              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-merah-600 text-sm font-bold text-white">
+                B
+              </span>
+              <span class="teks-sidebar min-w-0 flex-1">
+                <span class="block truncate text-sm font-bold leading-tight">Bozz Elektronik</span>
+                <span class="block truncate text-xs text-[var(--color-teks-lembut)]">
+                  POS Multi-Platform
+                </span>
+              </span>
+            </div>
+
+            <nav class="flex-1 overflow-y-auto px-2 pb-4">
+              {grupTampil.map((g) => (
+                <>
+                  <p class="nav-judul teks-sidebar">{g.judul}</p>
+                  {g.menu.map((m) => {
+                    const aktif = path === m.href || path.startsWith(`${m.href}/`);
+                    return (
+                      <a
+                        href={m.href}
+                        title={m.label}
+                        aria-current={aktif ? 'page' : undefined}
+                        class={aktif ? 'nav-tautan-aktif' : 'nav-tautan'}
+                      >
+                        <svg
+                          class="h-5 w-5 shrink-0"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.75"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d={IKON[m.ikon]} />
+                        </svg>
+                        <span class="teks-sidebar truncate">{m.label}</span>
+                      </a>
+                    );
+                  })}
+                </>
+              ))}
+            </nav>
+
+            <button
+              id="ciutkan"
+              type="button"
+              class="flex items-center gap-3 border-t border-[var(--color-garis)] px-5 py-3.5
+                     text-sm text-[var(--color-teks-lembut)] hover:text-merah-700"
+              aria-controls="sidebar"
+              aria-expanded="true"
+            >
+              <span id="ciutkan-ikon" class="text-base leading-none">«</span>
+              <span class="teks-sidebar">Ciutkan</span>
+            </button>
+          </aside>
+
+          <div class="ml-[var(--lebar-sidebar)] flex min-w-0 flex-1 flex-col transition-[margin]">
+            <header class="flex items-center justify-between gap-4 border-b border-[var(--color-garis)] bg-white px-6 py-4">
+              <h1 class="truncate text-2xl font-bold tracking-tight">{judul}</h1>
+
+              <div class="flex shrink-0 items-center gap-3">
+                <span class="grid h-9 w-9 place-items-center rounded-full bg-merah-600 text-sm font-bold text-white">
+                  {inisial}
+                </span>
+                <span class="hidden text-sm leading-tight sm:block">
+                  <span class="block font-semibold">{user.name}</span>
+                  <span class="block text-xs capitalize text-[var(--color-teks-lembut)]">
+                    {user.role}
+                  </span>
+                </span>
+                <form method="POST" action="/logout">
+                  <button class="aksi-baris">Keluar</button>
+                </form>
+              </div>
+            </header>
+
+            <main class="flex-1 px-6 py-6">
+              <slot />
+            </main>
+          </div>
+        </div>
+      ) : (
+        <main class="mx-auto max-w-6xl px-4 py-8">
+          <slot />
+        </main>
+      )
+    }
+
+
+    <script is:inline>
+      // Tombol ciutkan. Pilihannya disimpan supaya bertahan lintas halaman --
+      // tanpa itu tombolnya tidak ada gunanya di aplikasi yang memuat ulang
+      // halaman tiap klik menu.
+      (() => {
+        const tombol = document.getElementById('ciutkan');
+        const ikon = document.getElementById('ciutkan-ikon');
+        if (!tombol) return;
+
+        const gambar = () => {
+          const ciut = document.documentElement.dataset.sidebar === 'ciut';
+          tombol.setAttribute('aria-expanded', String(!ciut));
+          tombol.setAttribute('aria-label', ciut ? 'Lebarkan menu' : 'Ciutkan menu');
+          if (ikon) ikon.textContent = ciut ? '»' : '«';
+        };
+
+        tombol.addEventListener('click', () => {
+          const ciut = document.documentElement.dataset.sidebar === 'ciut';
+          if (ciut) delete document.documentElement.dataset.sidebar;
+          else document.documentElement.dataset.sidebar = 'ciut';
+
+          try {
+            localStorage.setItem('bozz_sidebar', ciut ? 'lebar' : 'ciut');
+          } catch {
+            // Tidak bisa disimpan: pilihannya tetap berlaku untuk halaman ini.
+          }
+          gambar();
+        });
+
+        gambar();
+      })();
+
+      // Service worker didaftarkan setelah halaman selesai dimuat supaya
+      // tidak bersaing dengan permintaan yang menampilkan isi halaman.
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {
+            // Registrasi gagal (mis. mode privat) tidak boleh mengganggu
+            // apa pun -- aplikasi tetap berjalan tanpa service worker.
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

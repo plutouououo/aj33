@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE external_order_items i SET product_id = $2\n        FROM external_orders o\n        WHERE i.external_order_id = o.id\n          AND o.platform_id = $1\n          AND i.external_item_ref = $3\n          AND i.product_id IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a1a1a6931faa27b4de57f9240f52a863cb6301468c993e18129d44a44e25476a"
+}

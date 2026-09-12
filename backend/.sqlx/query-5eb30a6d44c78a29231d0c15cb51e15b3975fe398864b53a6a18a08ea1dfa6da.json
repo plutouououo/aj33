@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(SELECT 1 FROM products WHERE sku = $1 AND ($2::uuid IS NULL OR id <> $2)) AS \"ada!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ada!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5eb30a6d44c78a29231d0c15cb51e15b3975fe398864b53a6a18a08ea1dfa6da"
+}

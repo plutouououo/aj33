@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id,\n               o.status, o.sla_type, o.sla_deadline, o.total_amount,\n               o.shipping_carrier, o.received_at AS \"received_at!\",\n               t.id AS \"ticket_id?\"\n        FROM external_orders o\n        JOIN platforms pl ON pl.id = o.platform_id\n        LEFT JOIN tickets t ON t.external_order_id = o.id\n        WHERE o.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "platform_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "external_order_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "sla_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "sla_deadline",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "total_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "shipping_carrier",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "received_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "ticket_id?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "e4fd79284c0035380d8a543b0032d5d5dba0e23e3b5b697585f8b1b4064aec00"
+}
