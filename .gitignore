@@ -4,6 +4,7 @@
 # Node / Astro
 node_modules/
 /web/dist/
+/web/.vercel/
 /web/.astro/
 
 # Env

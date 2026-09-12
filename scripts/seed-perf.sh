@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 psql() {
-  docker compose exec -T postgres psql -U postgres -d bozz -v ON_ERROR_STOP=1 -q "$@"
+  docker compose exec -T postgres psql -U postgres -d aj33 -v ON_ERROR_STOP=1 -q "$@"
 }
 
 if [[ "${1:-}" == "--bersihkan" ]]; then

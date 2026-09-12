@@ -58,7 +58,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{judul} · BOZZ</title>
+    <title>{judul} · AJ33</title>
     <meta
       name="description"
       content="Operasi toko: kasir, stok, dan pesanan marketplace dalam satu alur."
@@ -74,7 +74,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
       // aplikasi ini memuat halaman baru, jadi kalau pilihan ciut dipasang
       // belakangan sidebar akan berkedip lebar-lalu-menyempit tiap navigasi.
       try {
-        if (localStorage.getItem('bozz_sidebar') === 'ciut') {
+        if (localStorage.getItem('aj33_sidebar') === 'ciut') {
           document.documentElement.dataset.sidebar = 'ciut';
         }
       } catch {
@@ -98,7 +98,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
                 B
               </span>
               <span class="teks-sidebar min-w-0 flex-1">
-                <span class="block truncate text-sm font-bold leading-tight">Bozz Elektronik</span>
+                <span class="block truncate text-sm font-bold leading-tight">Aj33 Elektronik</span>
                 <span class="block truncate text-xs text-[var(--color-teks-lembut)]">
                   POS Multi-Platform
                 </span>
@@ -206,7 +206,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
           else document.documentElement.dataset.sidebar = 'ciut';
 
           try {
-            localStorage.setItem('bozz_sidebar', ciut ? 'lebar' : 'ciut');
+            localStorage.setItem('aj33_sidebar', ciut ? 'lebar' : 'ciut');
           } catch {
             // Tidak bisa disimpan: pilihannya tetap berlaku untuk halaman ini.
           }

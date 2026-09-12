@@ -13,6 +13,14 @@ pub struct TicketItem {
     pub product_name_snapshot: String,
     pub qty: i32,
     pub is_packed: bool,
+    /// Rak tempat barang diambil, dibaca LANGSUNG dari produk -- bukan
+    /// disalin ke `ticket_items` seperti namanya.
+    ///
+    /// Nama disalin karena nota lama harus tetap menyebut barang sebagaimana
+    /// saat dipesan. Lokasi kebalikannya: pengepak butuh rak tempat barang
+    /// berada SEKARANG. Salinan lama justru menyuruhnya ke rak yang salah
+    /// begitu barang dipindah.
+    pub storage_location: Option<String>,
 }
 
 /// Tiket beserta secuil data pesanannya.
@@ -56,10 +64,15 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
     let items = sqlx::query_as!(
         TicketItem,
         r#"
-        SELECT id, product_id, product_name_snapshot, qty, is_packed
-        FROM ticket_items
-        WHERE ticket_id = $1
-        ORDER BY product_name_snapshot, id
+        SELECT ti.id, ti.product_id, ti.product_name_snapshot, ti.qty,
+               ti.is_packed, p.storage_location
+        FROM ticket_items ti
+        LEFT JOIN products p ON p.id = ti.product_id
+        WHERE ti.ticket_id = $1
+        -- Diurutkan per rak, bukan per nama: pengepak menyusuri gudang
+        -- sekali jalan alih-alih bolak-balik. Barang tanpa lokasi jatuh ke
+        -- bawah, supaya yang bisa dipandu tetap berurutan.
+        ORDER BY p.storage_location ASC NULLS LAST, ti.product_name_snapshot, ti.id
         "#,
         head.id
     )

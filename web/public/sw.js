@@ -12,7 +12,7 @@
   rencana refactor.
 */
 
-const VERSI = 'bozz-v1';
+const VERSI = 'aj33-v1';
 const HALAMAN_OFFLINE = '/offline';
 
 const ASET_AWAL = [HALAMAN_OFFLINE, '/manifest.webmanifest', '/ikon.svg'];

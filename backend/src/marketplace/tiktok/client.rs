@@ -117,7 +117,7 @@ async fn panggil<T: for<'de> Deserialize<'de>>(
 
 /// Mengambil toko pertama yang mengizinkan aplikasi ini.
 ///
-/// Satu aplikasi bisa diberi izin oleh beberapa toko, tapi BOZZ mengelola
+/// Satu aplikasi bisa diberi izin oleh beberapa toko, tapi AJ33 mengelola
 /// satu toko. Mengambil yang pertama adalah pembatasan yang disengaja;
 /// mendukung banyak toko berarti mengubah `platforms` jadi satu baris per
 /// toko, bukan satu baris per platform.

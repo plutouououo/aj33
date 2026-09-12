@@ -1,185 +1,287 @@
-# Panduan Deploy & Menghubungkan ke Supabase
+# Panduan Deploy AJ33 di VPS
 
-Susunan yang dipakai — semuanya tier gratis:
+Semua berjalan di satu mesin: 1 vCPU, 2 GB RAM, 60 GB disk, Debian.
 
 ```
-browser ──▶ Vercel (web, Astro SSR) ──▶ Render (backend, Rust/Axum) ──▶ Supabase (Postgres)
-              Hobby                        Free                           Free
+                        ┌──────────────── VPS ────────────────┐
+internet ──443──▶ Caddy │ ──▶ web :4321 (Astro/Node)          │
+                  (TLS) │        └──▶ backend :3000 (Rust)    │
+                        │                └──▶ Postgres :5432  │
+                        └─────────────────────────────────────┘
 ```
 
-Tiga penyedia, tiga proses. **Pilih region yang sama untuk ketiganya**
-(Singapura, yang terdekat dari Indonesia). Tiap render halaman melewati
-ketiganya berurutan, jadi kalau tersebar di benua berbeda, setiap klik menu
-membayar perjalanan bolak-balik yang tidak perlu.
+**Hanya Caddy yang menghadap internet.** Web, backend, dan Postgres semuanya
+mendengar di `127.0.0.1` saja — tidak bisa dijangkau dari luar, titik. Itu
+menghapus seluruh permukaan serangan terhadap API dan database sekaligus.
 
-## Dua hal yang perlu diketahui sejak awal
+Perkiraan pemakaian RAM saat jalan: OS ~120 MB, Postgres ~200 MB, Node ~200 MB,
+backend Rust ~40 MB, Caddy ~25 MB — sekitar **600 MB dari 2 GB**.
 
-**Backend terbuka ke internet, dan itu bisa diterima.** Browser tidak pernah
-memanggil backend langsung — semua permintaan API terjadi di dalam server
-Astro saat merender (`web/src/lib/api.ts`). Tapi karena web di Vercel dan
-backend di Render, keduanya tidak bisa satu jaringan privat, jadi backend
-harus punya alamat publik. Ini aman karena dari seluruh endpoint, hanya empat
-yang tidak menuntut token login: `POST /api/auth/login`, `GET /api/health`,
-dan dua endpoint TikTok (`/platforms/tiktok/callback` dan `/webhooks/tiktok`,
-yang diverifikasi tanda tangan). Semua endpoint produk, kasir, pesanan, dan
-tiket menolak permintaan tanpa JWT.
+## Prasyarat
 
-Yang belum ada pengamanannya: **rate limit di endpoint login**. Lihat §9.
+- **Nama domain, dan sudah diarahkan ke IP VPS.** Bukan opsional — lihat di
+  bawah.
+- Repo sudah ada di GitHub, termasuk `backend/.sqlx/` (cache query sqlx) dan
+  `db/migrations/`.
 
-**Vercel Hobby melarang penggunaan komersial.** Fair Use Guidelines mereka
-(per 29 Juli 2026) menyebut Hobby "restricted to non-commercial personal use
-only", dengan definisi komersial mencakup *"any method of requesting or
-processing payment from visitors of the site"*. POS toko masuk definisi itu.
-Panduan ini tetap memakai Hobby karena itu keputusan pemilik proyek, tapi
-risikonya nyata: akun bisa diminta upgrade atau dihentikan. Kalau suatu saat
-pindah, bagian §6 yang perlu diganti — sisanya tetap.
+### Kenapa domain wajib
+
+Caddy mengambil sertifikat TLS otomatis dari Let's Encrypt, dan Let's Encrypt
+hanya menerbitkan sertifikat untuk nama domain — alamat IP tidak bisa.
+
+Dan TLS sendiri tidak bisa dilewati: cookie sesi dipasang `secure: true` pada
+build produksi (`web/src/lib/session.ts`). Di atas HTTP polos, browser
+menerima cookie itu lalu membuangnya diam-diam — login seolah berhasil, tapi
+halaman berikutnya melempar balik ke `/login` tanpa pesan apa pun. Gejalanya
+menyesatkan dan bisa menghabiskan waktu berjam-jam kalau tidak tahu sebabnya.
+
+Domain `.my.id` harganya belasan ribu rupiah setahun. Registrarnya bisa
+DomaiNesia, Niagahoster, Rumahweb, IDwebhost. Catatan: `.my.id` hanya untuk
+warga Indonesia dan pendaftarannya **meminta unggahan KTP** — biasanya
+diverifikasi dalam hitungan jam. Kalau ingin langsung aktif tanpa verifikasi,
+ambil `.com` atau `.id` biasa.
+
+### Mengarahkan domain ke VPS
+
+**1. Cari IP publik VPS.** Ada di dashboard Biznet Gio, atau tanyakan dari
+dalam VPS-nya:
+
+```bash
+curl -4 ifconfig.me
+```
+
+**2. Buka panel DNS di registrar** tempat domain dibeli — biasanya bernama
+"DNS Management", "Kelola DNS", atau "Zone Editor". Tambahkan dua record:
+
+| Tipe | Nama / Host | Nilai | TTL |
+| --- | --- | --- | --- |
+| A | `@` | `203.0.113.10` (IP VPS-mu) | 3600 |
+| A | `www` | `203.0.113.10` | 3600 |
+
+`@` berarti domain telanjang (`tokoku.my.id`); baris kedua membuat
+`www.tokoku.my.id` ikut bekerja. Hapus record A atau CNAME bawaan yang
+mengarah ke hosting/parking registrar, kalau ada — dua record yang
+bertentangan membuat hasilnya berganti-ganti.
+
+**Kalau memakai Cloudflare**, setel awan di sebelah record jadi **abu-abu
+(DNS only)**, bukan oranye. Mode proxy oranye membuat Cloudflare yang
+menyajikan TLS ke pengunjung, dan sertifikat yang diambil Caddy jadi tidak
+pernah terpakai — lebih membingungkan daripada berguna saat menyiapkan ini
+pertama kali. Nyalakan proxy-nya belakangan kalau memang mau.
+
+**3. Tunggu sampai benar-benar terselesaikan.** Biasanya beberapa menit.
+Periksa dari mesinmu, bukan dari browser (browser menyimpan cache DNS):
+
+```bash
+dig +short tokoku.my.id
+nslookup tokoku.my.id 8.8.8.8
+```
+
+Keduanya harus menjawab dengan IP VPS-mu.
+
+> **Jangan pasang Caddy sebelum perintah di atas menjawab benar.** Let's
+> Encrypt membatasi kegagalan validasi — sekitar 5 kali per host per jam.
+> Menjalankan Caddy saat DNS belum siap menghabiskan jatah itu, dan kamu
+> terkunci satu jam meski DNS-nya sudah benar sesudahnya.
+
+**4. Pastikan port 80 terbuka.** Let's Encrypt memvalidasi kepemilikan domain
+dengan menghubungi port 80. Langkah firewall di §1 sudah membukanya bersama
+443 — kalau kamu menutup 80 karena merasa semua sudah HTTPS, pengambilan
+sertifikat gagal dan perpanjangannya nanti juga gagal.
 
 ---
 
-## 1. Menyiapkan database Supabase
+## 1. Siapkan VPS
 
-### 1.1 Ambil connection string yang benar
+Aplikasi tidak pernah berjalan sebagai root. Biznet Gio sudah membuatkan
+pengguna biasa — di panduan ini `tokoaj33` — yang memegang sudo dan kunci SSH
+yang kamu pakai login. Pakai itu; tidak perlu membuat pengguna baru.
 
-Di dashboard Supabase: **Project → Connect**. Ada tiga pilihan, dan hanya satu
-yang tepat untuk backend ini.
+Pastikan sudonya memang aktif:
 
-| Pilihan | Port | Pakai? |
-| --- | --- | --- |
-| **Session pooler** | 5432 | ✅ **Ini yang dipakai** |
-| Direct connection | 5432 | Hanya kalau host punya IPv6. Render tidak menjamin itu |
-| Transaction pooler | 6543 | ❌ **Jangan** |
-
-**Kenapa bukan transaction pooler.** Port 6543 adalah PgBouncer mode
-*transaction*, yang tidak mendukung prepared statement. sqlx — yang dipakai
-backend ini — menyiapkan tiap query sebagai prepared statement. Sambungannya
-akan hidup, lalu query mulai gagal tidak beraturan dengan galat semacam
-`prepared statement "sqlx_s_1" already exists` begitu ada dua permintaan
-bersamaan. Session pooler memegang satu koneksi Postgres per klien, jadi
-prepared statement bertahan sebagaimana mestinya.
-
-```
-postgresql://postgres.<project-ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+```bash
+sudo -v
 ```
 
-Username-nya `postgres.<project-ref>`, bukan `postgres` saja — itu khas pooler
-Supabase. Kalau password berisi karakter non-alfanumerik, URL-encode dulu
-(`@` → `%40`, `#` → `%23`, dan seterusnya).
+Lalu matikan login password supaya SSH hanya menerima kunci:
 
-### 1.2 Role-nya harus `postgres`
+```bash
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart ssh
+```
 
-> **Ini yang paling mudah salah dan paling sulit didiagnosis.**
+> **Jangan tutup sesi SSH ini** sampai kamu berhasil membuka sesi kedua di
+> jendela lain. Kalau setelannya salah dan kamu sudah keluar, satu-satunya
+> jalan masuk yang tersisa adalah konsol darurat di dashboard Biznet.
+
+Catatan kalau penyedia hanya memberimu root: buat dulu pengguna biasanya
+dengan `adduser`, masukkan ke grup `sudo`, salin kunci SSH ke
+`/home/<nama>/.ssh`, lalu lanjutkan sebagai dia. `adduser` ada di
+`/usr/sbin`, yang tidak masuk PATH pengguna biasa — panggil lewat `sudo
+adduser` atau sebut jalur lengkapnya.
+
+### Swap
+
+Menjalankan aplikasi ini muat di 2 GB, tapi tahap *linking* saat compile Rust
+bisa melonjak mendekati batas itu sendirian. Tanpa swap, build mati di tengah
+dengan pesan yang tidak menyebut memori sama sekali.
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+### Zona waktu dan firewall
+
+```bash
+sudo timedatectl set-timezone Asia/Jakarta
+
+sudo apt update && sudo apt install -y ufw
+sudo ufw allow OpenSSH
+sudo ufw allow 80,443/tcp
+sudo ufw enable
+```
+
+Postgres **tidak** dibuka. Bawaan Debian sudah membuatnya mendengar di
+localhost saja, dan memang di situlah tempatnya.
+
+---
+
+## 2. Pasang komponen
+
+```bash
+sudo apt install -y build-essential pkg-config git curl postgresql
+
+# Rust lewat rustup, bukan apt -- versi apt sering tertinggal jauh.
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+. "$HOME/.cargo/env"
+
+# Node 22 lewat NodeSource.
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# Caddy lewat repo resminya.
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+```
+
+Cek versinya: `rustc --version`, `node --version`, `psql --version`,
+`caddy version`.
+
+---
+
+## 3. Database
+
+> **Bagian paling mudah salah di seluruh panduan ini.**
 
 `db/migrations/0002_rls_and_checks.sql` menyalakan Row Level Security di 30
-tabel **tanpa satu pun policy**. Artinya hanya role pemilik tabel yang bisa
-membaca isinya. Kalau `DATABASE_URL` memakai role lain, backend tetap hidup,
-health check tetap hijau, login tetap memanggil database — dan **semua query
-mengembalikan nol baris tanpa pesan error apa pun**. Gejalanya: login gagal
-terus dengan "Username atau password salah" padahal datanya jelas ada.
+tabel **tanpa satu pun policy**. Hanya role pemilik tabel yang bisa membaca
+isinya. Kalau migrasi dijalankan oleh satu role tapi aplikasi menyambung
+dengan role lain, backend tetap hidup, `/api/health` tetap hijau, dan **semua
+query mengembalikan nol baris tanpa pesan error apa pun**. Gejalanya: login
+selalu ditolak "Username atau password salah" padahal datanya jelas ada.
 
-Pakai role `postgres` (yang menjalankan migrasi, sehingga memiliki tabelnya).
-Jangan `anon`, `authenticated`, atau `service_role` — itu role untuk
-PostgREST, bukan untuk koneksi Postgres langsung.
-
-Peringatan yang sama ada di `backend/src/db.rs`.
-
-### 1.3 Batas tier gratis yang relevan
-
-| | Free |
-| --- | --- |
-| Ukuran database | 500 MB |
-| Egress | 5 GB + 5 GB cached |
-| Koneksi | 60 langsung, **200 lewat pooler** |
-| Backup otomatis | **Tidak ada** |
-| Project aktif | 2 (yang terjeda tidak dihitung) |
-
-Pool backend disetel 10 koneksi (`backend/src/db.rs`) — jauh di bawah 200,
-aman.
-
-**Tidak ada backup otomatis di tier gratis.** Untuk data penjualan toko, itu
-lubang yang sebaiknya kamu tutup sendiri, minimal `pg_dump` berkala ke mesin
-lokal.
-
-### 1.4 Project terjeda setelah 7 hari menganggur
-
-Supabase menjeda project gratis setelah **7 hari aktivitas rendah**.
-Membangunkannya **harus manual** lewat dashboard — tidak bangun sendiri saat
-ada koneksi masuk. Beberapa permintaan database per hari sudah cukup untuk
-mencegahnya, dan ping keep-alive di §7 mengurus ini sekaligus.
-
-Kalau sampai terjeda: backend yang restart akan gagal connect dan **langsung
-keluar** (`backend/src/main.rs` sengaja mati cepat), lalu Render crash-loop.
-Pulihnya: unpause di dashboard Supabase, lalu restart service di Render.
-
-### 1.5 Migrasi jalan sendiri
-
-Backend menjalankan `sqlx::migrate!` sebelum membuka port, jadi versi baru
-tidak pernah menerima trafik di atas skema lama. Aman dipanggil berulang —
-sqlx mencatat yang sudah jalan di tabel `_sqlx_migrations`.
-
-Dua hal yang perlu dipastikan:
-
-1. **Role harus boleh `CREATE EXTENSION`.** Migrasi `0004` memasang `pg_trgm`
-   untuk indeks pencarian produk. Role `postgres` di Supabase bisa.
-2. **Rebuild kalau menambah file migrasi.** `sqlx::migrate!` menanam isi
-   folder `db/migrations` saat *compile*, bukan saat run. Binary lama yang
-   di-restart akan diam-diam melewati migrasi baru tanpa galat. Deploy dari
-   Git mengurus ini sendiri karena tiap push memicu build ulang.
-
-Setelah start pertama, periksa:
-
-```sql
-select version, description from _sqlx_migrations order by version;
-select extname, nspname from pg_extension e
-  join pg_namespace n on n.oid = e.extnamespace where extname = 'pg_trgm';
-```
-
-Kalau `pg_trgm` terpasang di schema `extensions` (mis. pernah diaktifkan lewat
-dashboard), pastikan `extensions` ada di `search_path` role-nya — tanpa itu
-`gin_trgm_ops` tidak ketemu dan migrasi indeks gagal.
-
-### 1.6 Buat akun owner pertama
-
-Tidak ada endpoint pendaftaran — akun pertama dibuat langsung di database.
-**Jangan pakai `db/seed/dev.sql` atau `scripts/seed-perf.sh` di produksi**;
-keduanya berisi password contoh dan data uji.
-
-Password di-hash dengan **bcrypt**:
+Jadi: satu role, dipakai untuk segalanya. Ia memiliki database dan tabelnya,
+sehingga RLS tidak menghalanginya.
 
 ```bash
-# Python (menghasilkan $2b$, sama seperti hash di seed dev)
-python -c "import bcrypt,sys; print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(10)).decode())" 'PasswordKuat123'
-
-# atau, kalau apache2-utils tersedia (menghasilkan $2y$)
-htpasswd -bnBC 10 "" 'PasswordKuat123' | tr -d ':\n'
+sudo -u postgres psql <<'SQL'
+CREATE ROLE aj33 LOGIN PASSWORD 'GANTI_DENGAN_PASSWORD_ACAK';
+CREATE DATABASE aj33 OWNER aj33;
+SQL
 ```
 
-Lalu di SQL editor Supabase:
+Bangkitkan passwordnya dengan `openssl rand -base64 24`, jangan dikarang.
+Database ini hanya bisa dihubungi dari dalam VPS, tapi password lemah tetap
+tidak ada gunanya.
 
-```sql
-insert into users (name, email_or_username, password_hash, role, is_active)
-values ('Owner Toko', 'owner', '<HASH>', 'owner', true);
+`DATABASE_URL` yang dipakai nanti:
+
+```
+postgresql://aj33:PASSWORD@localhost:5432/aj33
 ```
 
-Langsung coba login setelahnya. Kalau ditolak padahal password benar,
-hash-nya bervarian yang tidak diterima — buat ulang dengan cara Python.
+### Ekstensi pencarian
+
+Migrasi `0004` memasang `pg_trgm` untuk indeks pencarian produk. Sejak
+PostgreSQL 13 ekstensi ini berstatus *trusted*, jadi pemilik database boleh
+memasangnya sendiri dan migrasi akan berjalan mulus. Kalau ternyata ditolak,
+pasang sekali sebagai superuser lalu ulangi:
+
+```bash
+sudo -u postgres psql -d aj33 -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+```
 
 ---
 
-## 2. Variabel lingkungan
+## 4. Ambil kode dan siapkan konfigurasi
 
-### Backend (di Render)
+Tata letaknya memisahkan *tempat membangun* dari *yang sedang berjalan*:
 
-| Variabel | Wajib | Keterangan |
-| --- | --- | --- |
-| `DATABASE_URL` | ✅ | Session pooler Supabase, role `postgres` (§1.1, §1.2) |
-| `JWT_SECRET` | ✅ | Penanda tangan token login. **Ganti dari nilai dev.** Menggantinya membuat semua sesi berjalan tidak berlaku |
-| `TOKEN_ENCRYPTION_KEY` | ✅ | 64 karakter hex. Mengenkripsi token marketplace di tabel `platforms` |
-| `CORS_ORIGINS` | — | Isi URL Vercel produksi |
-| `PORT` | — | **Jangan diisi.** Render menyetelnya sendiri, dan backend sudah membacanya |
+```
+/opt/aj33/
+├── repo/          kode + cache build (target/, node_modules/)
+├── rilis/
+│   ├── 20260912-2140/   hasil build, siap pakai
+│   └── 20260912-2015/   rilis sebelumnya, disimpan untuk rollback
+└── aktif -> rilis/20260912-2140
+```
+
+Service systemd menunjuk ke `aktif`, tidak pernah ke `repo`. Karena itu
+membangun versi baru tidak pernah menyentuh yang sedang melayani pelanggan,
+dan kembali ke versi lama cukup memindahkan satu symlink -- hitungan detik,
+bukan compile ulang 30 menit.
 
 ```bash
-openssl rand -hex 32   # TOKEN_ENCRYPTION_KEY (harus tepat 32 byte)
+sudo mkdir -p /opt/aj33/rilis && sudo chown -R tokoaj33:tokoaj33 /opt/aj33
+git clone https://github.com/plutouououo/aj33.git /opt/aj33/repo
+```
+
+Konfigurasi ditaruh di `/etc/aj33/`, terpisah dari kode — supaya `git pull`
+tidak pernah bisa menimpanya, dan supaya rahasianya tidak ikut ter-commit.
+
+```bash
+sudo mkdir -p /etc/aj33
+```
+
+`/etc/aj33/backend.env`:
+
+```ini
+DATABASE_URL=postgresql://aj33:PASSWORD@localhost:5432/aj33
+JWT_SECRET=...
+TOKEN_ENCRYPTION_KEY=...
+PORT=3000
+CORS_ORIGINS=https://tokoku.my.id
+```
+
+`/etc/aj33/web.env`:
+
+```ini
+HOST=127.0.0.1
+PORT=4321
+BACKEND_URL=http://127.0.0.1:3000
+```
+
+Bangkitkan rahasianya — `TOKEN_ENCRYPTION_KEY` wajib tepat 32 byte:
+
+```bash
+openssl rand -hex 32   # TOKEN_ENCRYPTION_KEY
 openssl rand -hex 32   # JWT_SECRET
+```
+
+Kunci filenya, karena berisi kredensial database:
+
+```bash
+sudo chown -R root:tokoaj33 /etc/aj33
+sudo chmod 750 /etc/aj33
+sudo chmod 640 /etc/aj33/*.env
 ```
 
 Backend **menolak start** dengan pesan jelas kalau ada yang wajib tapi kosong
@@ -187,248 +289,357 @@ atau salah bentuk (`backend/src/config.rs`) — disengaja, supaya kesalahan
 setelan ketahuan saat start, bukan di tengah permintaan pertama yang
 kebetulan menyentuhnya.
 
-`CORS_ORIGINS` hanya berpengaruh kalau browser memanggil API langsung. Dengan
-susunan sekarang itu tidak terjadi, tapi tetap isi dengan URL Vercel — supaya
-tetap benar kalau nanti ada halaman yang memanggil API dari sisi klien.
-
-### Web (di Vercel)
-
-| Variabel | Keterangan |
-| --- | --- |
-| `BACKEND_URL` | URL service Render, mis. `https://aj33-backend.onrender.com`. **Tanpa** `/api` di belakang |
-
-`BACKEND_URL` dibaca saat permintaan berjalan lewat `process.env`, bukan saat
-build — jadi satu build yang sama bisa dipakai preview dan produksi.
-
-> Dulu variabel ini dibaca lewat `import.meta.env` saja, yang diganti Vite
-> dengan nilai literalnya saat build: alamat mesin pem-build ikut terbawa ke
-> hasil build dan menyetelnya di server tidak berpengaruh. Sudah diperbaiki
-> di `web/src/lib/api.ts`.
+`CORS_ORIGINS` praktis tidak terpakai di susunan ini: browser tidak pernah
+memanggil backend langsung, semua panggilan API terjadi di dalam server Astro
+saat merender. Tetap diisi benar supaya tidak menyimpan bom waktu kalau nanti
+ada halaman yang memanggil API dari sisi klien.
 
 ---
 
-## 3. Prasyarat
+## 5. Build
 
-**Repo harus ada di GitHub.** Render dan Vercel keduanya deploy dari Git. Saat
-panduan ini ditulis, repo ini **belum punya satu commit pun** — semua file
-masih untracked.
+Build pertama dijalankan tangan; selanjutnya skrip `aj33-deploy` (§10) yang
+mengerjakannya.
 
 ```bash
-git add -A
-git commit -m "Siap deploy"
-git push -u origin main
+cd /opt/aj33/repo/backend
+SQLX_OFFLINE=true cargo build --release
+
+cd /opt/aj33/repo/web
+npm ci
+npm run build
 ```
 
-Remote `origin` sudah menunjuk `https://github.com/plutouououo/aj33.git`.
-Pastikan repo-nya **private** -- ini berisi logika bisnis toko.
-
-Pastikan ikut ter-commit:
-
-- **`backend/.sqlx/`** (54 file) — cache query sqlx. Tanpa ini build di Render
-  gagal karena `SQLX_OFFLINE=true` tidak punya rujukan. Sudah dipastikan tidak
-  masuk `.gitignore`.
-- **`db/migrations/`** — ditanam ke binary saat compile.
-
-Yang **tidak** boleh ikut: `backend/.env`. Sudah tercakup `.gitignore`.
-
----
-
-## 4. Deploy backend ke Render
-
-**New → Web Service → connect repo GitHub.**
-
-| Setelan | Nilai |
-| --- | --- |
-| Root Directory | `backend` |
-| Language / Runtime | Rust |
-| Build Command | `SQLX_OFFLINE=true cargo build --release` |
-| Start Command | `./target/release/bozz-backend` |
-| Health Check Path | `/api/health` |
-| Instance Type | Free |
-| Region | Singapore (samakan dengan Supabase dan Vercel) |
-
-Lalu isi environment variable dari §2.
-
-`SQLX_OFFLINE=true` membuat build memakai cache di `backend/.sqlx/`, jadi
-**tidak perlu koneksi database saat build**. CI sudah memverifikasi cache itu
-masih sesuai skema (`cargo sqlx prepare --check`); kalau langkah itu merah di
-GitHub Actions, jangan deploy — bentuk query di cache sudah berbeda dari
-skema.
-
-Build pertama lama (kompilasi Rust dari nol, belasan menit). Build berikutnya
-lebih cepat karena cache.
-
-> Kalau runtime **Rust** tidak tersedia di dashboard Render-mu, jalurnya harus
-> lewat Docker — dan repo ini belum punya Dockerfile. Lihat §9.
-
-Verifikasi:
+Lalu rakit rilis pertama dan arahkan `aktif` ke sana:
 
 ```bash
-curl https://<service>.onrender.com/api/health   # harus "ok"
+AKAR=/opt/aj33; BARU=$AKAR/rilis/$(date +%Y%m%d-%H%M%S)
+mkdir -p "$BARU/web"
+cp "$AKAR/repo/backend/target/release/aj33-backend" "$BARU/aj33-backend"
+cp -r "$AKAR/repo/web/dist" "$BARU/web/dist"
+cp "$AKAR/repo/web/package.json" "$AKAR/repo/web/package-lock.json" "$BARU/web/"
+cp -al "$AKAR/repo/web/node_modules" "$BARU/web/node_modules"
+ln -sfn "$BARU" "$AKAR/aktif"
 ```
 
-Endpoint ini ikut menanyai database, jadi jawaban `ok` berarti koneksi,
-migrasi, dan skema benar-benar bekerja. Setelah ini, buat akun owner (§1.6).
+`SQLX_OFFLINE=true` membuat build memakai cache di `backend/.sqlx/` alih-alih
+menanyai database saat compile. CI sudah memverifikasi cache itu masih sesuai
+skema (`cargo sqlx prepare --check`); kalau langkah itu merah, jangan deploy.
 
-### Batas tier gratis Render
-
-- **750 jam instance per bulan, per workspace** — bukan per service. Sebulan
-  31 hari = 744 jam, jadi **hanya boleh satu service yang hidup terus**.
-  Menambah service gratis kedua akan menembus jatah.
-- **Tidur setelah 15 menit menganggur**, bangun lagi sekitar **satu menit**.
-  Ini yang diatasi §7.
-- Tanpa disk permanen, tanpa akses shell, tanpa cron job. Untuk aj33 tidak
-  masalah — semua state ada di Supabase.
-- Tanpa metode pembayaran terdaftar, Render **menangguhkan** service gratis
-  kalau jatah bandwidth terlewati.
-
-*Belum terkonfirmasi dari dokumentasi resmi Render:* besaran bandwidth
-sekarang (ada kabar turun jadi 5 GB/bulan sejak April 2026) dan spesifikasi
-instance gratis (kabarnya 512 MB / 0.1 CPU). Untuk satu toko, 5 GB masih lega
-— trafiknya HTML, bukan media.
+Build Rust pertama mengompilasi sekitar 400 crate di 1 vCPU — **perkirakan
+20–40 menit**. Build berikutnya jauh lebih cepat karena hanya kode kita yang
+berubah. Kalau tetap kehabisan memori meski sudah ada swap, batasi
+paralelismenya: `CARGO_BUILD_JOBS=1 cargo build --release`.
 
 ---
 
-## 5. Ganti adapter Astro ke Vercel
+## 6. Service systemd
 
-Proyek ini memakai **Astro 5.16.2**. Versi adapter harus cocok dengan itu.
+`/etc/systemd/system/aj33-backend.service`:
+
+```ini
+[Unit]
+Description=AJ33 backend (Rust/Axum)
+# Postgres harus siap lebih dulu: backend menjalankan migrasi dan langsung
+# keluar kalau database tidak bisa dihubungi.
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=tokoaj33
+WorkingDirectory=/opt/aj33/aktif
+EnvironmentFile=/etc/aj33/backend.env
+# Menunjuk symlink, bukan direktori rilis. systemd menyelesaikan symlink saat
+# start, jadi `restart` sesudah symlink dipindah akan menjalankan versi baru.
+ExecStart=/opt/aj33/aktif/aj33-backend
+# Backend sengaja mati cepat kalau database belum siap. Restart otomatis
+# inilah yang membuat sikap itu aman: systemd terus mencoba sampai Postgres
+# bangun, alih-alih meninggalkan aplikasi dalam keadaan mati.
+Restart=always
+RestartSec=5
+
+# Pengetatan: proses ini tidak pernah perlu menulis ke disk mana pun.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`/etc/systemd/system/aj33-web.service`:
+
+```ini
+[Unit]
+Description=AJ33 web (Astro SSR)
+After=network-online.target aj33-backend.service
+Wants=network-online.target
+
+[Service]
+User=tokoaj33
+WorkingDirectory=/opt/aj33/aktif/web
+EnvironmentFile=/etc/aj33/web.env
+ExecStart=/usr/bin/node ./dist/server/entry.mjs
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-cd web
-npm uninstall @astrojs/node
-npm install @astrojs/vercel@9
+sudo systemctl daemon-reload
+sudo systemctl enable --now aj33-backend aj33-web
+sudo systemctl status aj33-backend aj33-web
 ```
 
-> **Jangan `npx astro add vercel`.** Perintah itu memasang
-> `@astrojs/vercel@11` yang menuntut `astro ^7`, dan build langsung rusak.
-> Astro 5 butuh baris `@astrojs/vercel@9`. Kalau nanti Astro dinaikkan,
-> adapternya harus ikut naik bersamaan.
-
-`web/astro.config.mjs`:
-
-```js
-import { defineConfig } from 'astro/config';
-import vercel from '@astrojs/vercel';   // bukan '@astrojs/vercel/serverless' -- subpath itu sudah dihapus
-import tailwindcss from '@tailwindcss/vite';
-
-export default defineConfig({
-  output: 'server',
-  adapter: vercel(),
-  vite: { plugins: [tailwindcss()] },
-});
-```
-
-`output: 'server'` tetap — halaman ini butuh render per permintaan untuk
-membaca cookie sesi.
-
-Setelah ganti adapter, script `npm run preview` (`node ./dist/server/entry.mjs`)
-tidak berlaku lagi; untuk mencoba lokal pakai `npm run dev`.
-
----
-
-## 6. Deploy web ke Vercel
-
-**Add New → Project → import repo.**
-
-| Setelan | Nilai |
-| --- | --- |
-| Root Directory | `web` |
-| Framework Preset | Astro (terdeteksi sendiri) |
-| Environment Variable | `BACKEND_URL` = URL Render dari §4 |
-| Region | Singapore (`sin1`) |
-
-Setelah dapat URL produksinya, kembali ke Render dan isi `CORS_ORIGINS`
-dengan URL itu.
-
-HTTPS sudah otomatis dari Vercel — dan itu wajib, bukan opsional: cookie sesi
-dipasang dengan `secure: true` pada build produksi (`web/src/lib/session.ts`).
-Di atas HTTP polos browser membuang cookie-nya diam-diam, sehingga login
-seperti berhasil lalu halaman berikutnya melempar balik ke `/login` tanpa
-pesan apa pun.
-
----
-
-## 7. Keep-alive: menjaga backend dan database tetap bangun
-
-Tanpa ini, kasir menunggu sekitar satu menit di transaksi pertama setiap kali
-toko sepi lebih dari 15 menit — dan database terjeda kalau toko tutup
-seminggu.
-
-**Ping `https://<service>.onrender.com/api/health` setiap 10 menit.**
-
-`/api/health` menjalankan `SELECT 1` ke database, jadi satu ping mengurus
-keduanya sekaligus: kontainer Render tidak pernah tidur, dan Supabase melihat
-aktivitas tiap hari sehingga tidak menjeda project.
-
-Yang meng-ping jangan dari Render sendiri — tier gratisnya tidak punya cron.
-Pakai monitor uptime gratis (UptimeRobot, cron-job.org). Ini lebih andal
-daripada GitHub Actions terjadwal, yang jadwalnya sering telat dan otomatis
-dimatikan kalau repo menganggur 60 hari.
-
-Hitungannya muat: 24 × 31 = 744 jam, di bawah jatah 750 jam/bulan — dengan
-sisa 6 jam. Karena itu **jangan menambah service gratis lain di workspace
-Render yang sama.**
-
-> **Yang perlu disadari:** menjaga service hidup 24 jam membatalkan maksud
-> tier gratis yang dirancang untuk tidur. Saya tidak menemukan konfirmasi
-> apakah Render melarangnya — banyak yang melakukannya dan selama ini
-> dibiarkan, tapi itu bukan jaminan. Kalau suatu saat celah ini ditutup,
-> konsekuensinya kembali ke cold start satu menit.
-
----
-
-## 8. Urutan deploy pertama
-
-1. Push repo ke GitHub (§3).
-2. Buat project Supabase, salin **session pooler** connection string (§1.1).
-3. Bangkitkan `JWT_SECRET` dan `TOKEN_ENCRYPTION_KEY` (§2).
-4. Deploy backend ke Render (§4). Start pertama menjalankan seluruh migrasi.
-5. `curl https://<service>.onrender.com/api/health` → harus `ok`.
-6. Buat akun owner di SQL editor Supabase (§1.6).
-7. Ganti adapter ke Vercel, commit, push (§5).
-8. Deploy web ke Vercel dengan `BACKEND_URL` (§6).
-9. Isi `CORS_ORIGINS` di Render dengan URL Vercel.
-10. Pasang monitor keep-alive (§7).
-11. Buka situsnya, login sebagai owner, buka halaman Produk.
-
-**Deploy berikutnya:** cukup push ke `main`. Render dan Vercel masing-masing
-build ulang sendiri. Backend menjalankan migrasi sebelum membuka port, jadi
+Start pertama backend menjalankan seluruh migrasi sebelum membuka port, jadi
 tidak ada jendela di mana versi baru melayani trafik di atas skema lama.
 
+```bash
+curl http://127.0.0.1:3000/api/health   # harus "ok"
+```
+
+`/api/health` ikut menanyai database, jadi jawaban `ok` berarti koneksi,
+migrasi, dan skema benar-benar bekerja.
+
 ---
 
-## 9. Kalau bermasalah
+## 7. Caddy
+
+`/etc/caddy/Caddyfile`:
+
+```
+tokoku.my.id {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:4321
+}
+
+# Satu alamat saja yang jadi alamat sungguhan; www dialihkan ke sana. Kalau
+# keduanya sama-sama melayani, sesi yang dibuat di satu alamat tidak terbawa
+# ke alamat satunya -- cookie terikat pada host, jadi pengguna terlihat
+# logout begitu berpindah antara www dan tanpa www.
+www.tokoku.my.id {
+    redir https://tokoku.my.id{uri} permanent
+}
+```
+
+```bash
+sudo systemctl reload caddy
+```
+
+Itu saja. Caddy mengurus sertifikat Let's Encrypt, perpanjangannya, dan
+pengalihan HTTP ke HTTPS sendiri — asalkan A record domain sudah menunjuk ke
+IP VPS sebelum perintah di atas dijalankan.
+
+Perhatikan Caddy hanya mengenal port **4321**. Backend tidak pernah disebut,
+karena memang tidak boleh dijangkau dari luar.
+
+---
+
+## 8. Akun owner pertama
+
+Tidak ada endpoint pendaftaran — akun pertama dibuat langsung di database.
+**Jangan menjalankan `db/seed/dev.sql` atau `scripts/seed-perf.sh` di sini**;
+keduanya berisi password contoh dan data uji.
+
+Password di-hash dengan bcrypt:
+
+```bash
+sudo apt install -y apache2-utils
+htpasswd -bnBC 10 "" 'PasswordKuat123' | tr -d ':\n'
+```
+
+```bash
+sudo -u postgres psql -d aj33 <<SQL
+INSERT INTO users (name, email_or_username, password_hash, role, is_active)
+VALUES ('Owner Toko', 'owner', '<HASH>', 'owner', true);
+SQL
+```
+
+Langsung coba login. Kalau ditolak padahal password benar, hash-nya bervarian
+yang tidak diterima — buat ulang dengan Python:
+
+```bash
+python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(10)).decode())" 'PasswordKuat123'
+```
+
+---
+
+## 9. Backup — wajib, bukan opsional
+
+Data penjualan toko kini hanya ada di satu mesin. Kalau VPS ini hilang, semua
+hilang: transaksi, stok, riwayat. Tidak ada penyedia yang akan mengembalikannya
+untukmu.
+
+`/usr/local/bin/aj33-backup`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+TUJUAN=/var/backups/aj33
+mkdir -p "$TUJUAN"
+sudo -u postgres pg_dump -Fc aj33 > "$TUJUAN/aj33-$(date +%F-%H%M).dump"
+# Simpan 14 hari terakhir. Lebih lama dari itu tidak menambah perlindungan
+# terhadap kerusakan yang baru disadari, dan disk bukan tempat arsip.
+find "$TUJUAN" -name 'aj33-*.dump' -mtime +14 -delete
+```
+
+```bash
+sudo chmod +x /usr/local/bin/aj33-backup
+sudo crontab -e
+# tiap hari 02:10
+10 2 * * * /usr/local/bin/aj33-backup
+```
+
+**Dump di VPS yang sama bukan backup.** Ia melindungi dari salah hapus, bukan
+dari VPS yang mati. Salin ke luar — paling sederhana, tarik dari laptopmu
+secara berkala:
+
+```bash
+rsync -av tokoaj33@tokoku.my.id:/var/backups/aj33/ ~/backup-aj33/
+```
+
+Dan sesekali **coba pulihkan** ke database kosong. Backup yang tidak pernah
+diuji bukan backup, hanya file:
+
+```bash
+createdb -U postgres aj33_uji
+pg_restore -U postgres -d aj33_uji /var/backups/aj33/aj33-XXXX.dump
+```
+
+---
+
+## 10. Deploy ulang dan rollback
+
+Keduanya bekerja pada tata letak rilis di §4: build dirakit di samping, lalu
+symlink `aktif` dipindah dalam satu langkah.
+
+`/usr/local/bin/aj33-deploy`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+AKAR=/opt/aj33
+BARU="$AKAR/rilis/$(date +%Y%m%d-%H%M%S)"
+
+# Build tetap dilakukan di dalam repo supaya cache cargo dan node_modules
+# terpakai. Yang sedang melayani pelanggan ada di direktori lain, jadi tidak
+# tersentuh sama sekali selama 30 menit compile.
+cd "$AKAR/repo"
+git pull --ff-only
+( cd backend && SQLX_OFFLINE=true cargo build --release )
+( cd web && npm ci && npm run build )
+
+# Rakit rilis baru. node_modules disalin sebagai hardlink: hampir tanpa biaya
+# disk dan seketika, tapi rilis ini tetap memegang salinannya sendiri kalau
+# `npm ci` berikutnya mengganti isinya -- itulah yang membuat rollback tetap
+# utuh berbulan-bulan kemudian.
+mkdir -p "$BARU/web"
+cp "$AKAR/repo/backend/target/release/aj33-backend" "$BARU/aj33-backend"
+cp -r "$AKAR/repo/web/dist" "$BARU/web/dist"
+cp "$AKAR/repo/web/package.json" "$AKAR/repo/web/package-lock.json" "$BARU/web/"
+cp -al "$AKAR/repo/web/node_modules" "$BARU/web/node_modules"
+
+# Pergantian atomik: `mv -T` menimpa symlink dalam satu operasi kernel. Tidak
+# ada saat di mana `aktif` menunjuk ke tempat yang belum lengkap, dan tidak
+# ada saat di mana ia tidak menunjuk ke mana-mana.
+ln -sfn "$BARU" "$AKAR/aktif.baru"
+mv -T "$AKAR/aktif.baru" "$AKAR/aktif"
+
+sudo systemctl restart aj33-backend aj33-web
+
+# Simpan 5 rilis terakhir. Lebih dari itu tidak menambah perlindungan, dan
+# tiap rilis memegang salinan dist-nya sendiri.
+ls -1 "$AKAR/rilis" | sort -r | tail -n +6   | while read -r lama; do rm -rf "${AKAR:?}/rilis/$lama"; done
+
+echo "Aktif: $(basename "$BARU")"
+```
+
+`/usr/local/bin/aj33-rollback`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+AKAR=/opt/aj33
+SEKARANG=$(basename "$(readlink -f "$AKAR/aktif")")
+SEBELUM=$(ls -1 "$AKAR/rilis" | sort -r | grep -v "^${SEKARANG}$" | head -1)
+
+if [[ -z "$SEBELUM" ]]; then
+  echo "Tidak ada rilis lain untuk dituju." >&2
+  exit 1
+fi
+
+ln -sfn "$AKAR/rilis/$SEBELUM" "$AKAR/aktif.baru"
+mv -T "$AKAR/aktif.baru" "$AKAR/aktif"
+sudo systemctl restart aj33-backend aj33-web
+
+echo "Kembali dari $SEKARANG ke $SEBELUM"
+```
+
+```bash
+sudo chmod +x /usr/local/bin/aj33-deploy /usr/local/bin/aj33-rollback
+```
+
+Deploy yang rusak dibatalkan dengan satu perintah, dalam hitungan detik:
+
+```bash
+aj33-rollback
+```
+
+### Yang TIDAK ikut mundur saat rollback
+
+**Migrasi database.** Backend menjalankan migrasi saat start dan tidak pernah
+membatalkannya. Rollback mengembalikan kode, bukan skema.
+
+Selama migrasinya aditif — menambah kolom atau tabel, seperti `0005` — kode
+lama tetap berjalan di atas skema baru tanpa masalah, karena ia hanya
+mengabaikan yang tidak dikenalnya. Yang berbahaya adalah migrasi yang
+menghapus atau mengganti nama kolom: setelah itu rollback kode akan menabrak
+kolom yang sudah tidak ada.
+
+Kalau suatu saat perlu migrasi seperti itu, pecah jadi dua rilis — rilis
+pertama berhenti memakai kolomnya, rilis berikutnya baru menghapusnya. Di
+antara keduanya rollback tetap aman.
+
+---
+
+## 11. Kalau bermasalah
 
 | Gejala | Sebab yang paling sering |
 | --- | --- |
-| Login selalu "Username atau password salah" | Role di `DATABASE_URL` bukan pemilik tabel → RLS mengembalikan nol baris (§1.2) |
-| `prepared statement ... already exists`, galat muncul-hilang | Memakai transaction pooler port 6543 (§1.1) |
-| Permintaan pertama lama sekali lalu normal | Render baru bangun dari tidur. Pasang keep-alive (§7) |
-| Backend crash-loop di Render | Supabase terjeda. Unpause manual, lalu restart service (§1.4) |
-| Render: "Konfigurasi tidak lengkap" lalu keluar | Ada env wajib yang kosong. Pesannya menyebut namanya |
-| Render: "Migrasi database gagal" | Role tidak boleh `CREATE EXTENSION`, atau skema diubah manual |
-| Build Render gagal di query sqlx | `backend/.sqlx/` tidak ikut ter-commit (§3) |
-| Login berhasil lalu langsung balik ke `/login` | Domain belum HTTPS (§6) |
+| Login selalu "Username atau password salah" | Role penyambung bukan pemilik tabel → RLS mengembalikan nol baris (§3) |
+| Login berhasil lalu langsung balik ke `/login` | Belum HTTPS, cookie `secure` dibuang browser (Prasyarat) |
+| Caddy gagal ambil sertifikat | A record belum menunjuk ke IP VPS, atau port 80 tertutup firewall |
+| `systemctl status aj33-backend` → "Konfigurasi tidak lengkap" | Ada env wajib yang kosong; pesannya menyebut namanya |
+| Backend restart terus-menerus | Postgres belum jalan, atau `DATABASE_URL` salah. `journalctl -u aj33-backend -n 50` |
+| Build Rust mati tanpa pesan jelas | Kehabisan memori. Pastikan swap aktif (`free -h`), atau `CARGO_BUILD_JOBS=1` |
+| Build gagal di query sqlx | `backend/.sqlx/` tidak ikut ter-commit |
 | Web menampilkan galat koneksi | `BACKEND_URL` salah, atau ada `/api` di belakangnya |
-| Build Vercel gagal soal versi Astro | Adapter `@astrojs/vercel@11` terpasang padahal Astro 5. Turunkan ke `@9` (§5) |
-| Halaman lambat padahal backend hangat | Region ketiga penyedia tidak sama |
+| Halaman 502 dari Caddy | Service web mati. `systemctl status aj33-web` |
+
+Log: `journalctl -u aj33-backend -f`, `journalctl -u aj33-web -f`,
+`journalctl -u caddy -f`.
 
 ---
 
-## 10. Yang belum ada
+## 12. Yang belum ada
 
-Jujur saja, ini belum lengkap sebagai jalur produksi:
-
-- **Tidak ada rate limit di endpoint login.** Backend sekarang publik, dan
-  `POST /api/auth/login` adalah satu-satunya permukaan bisnis tanpa
-  autentikasi. Login memang sudah tahan timing attack (verifikasi tetap
-  dijalankan terhadap hash umpan saat user tidak ditemukan), tapi tidak ada
-  yang menahan percobaan berulang.
-- **Tidak ada backup.** Supabase free tidak menyediakannya (§1.3).
-- **Backend mati kalau database sedang tidak bisa dihubungi** saat start, alih-alih
-  menunggu dan mencoba lagi (§1.4).
-- **Tidak ada Dockerfile.** Kalau Render tidak menawarkan runtime Rust,
-  jalur ini buntu sampai Dockerfile dibuat.
-- **Tidak ada workflow CD.** `.github/workflows/ci.yml` hanya menguji;
-  deploy-nya dipicu Render dan Vercel langsung dari push.
-- **Tidak ada pemantauan** selain `/api/health` dan monitor keep-alive.
+- **Tidak ada rate limit di `POST /api/auth/login`.** Itu satu-satunya
+  permukaan bisnis tanpa autentikasi yang bisa dijangkau dari internet. Login
+  sudah tahan timing attack (verifikasi tetap dijalankan terhadap hash umpan
+  saat user tidak ditemukan), tapi tidak ada yang menahan percobaan berulang.
+  Caddy bisa membatasinya di depan.
+- **Tidak ada pemantauan** selain `/api/health` — tidak ada yang memberi tahu
+  kalau service mati di luar jam kerja.
+- **Tidak ada staging.** Deploy langsung ke satu-satunya mesin yang ada.
+- **Backup belum otomatis tersalin ke luar VPS** (§9) — bagian itu masih
+  manual dan bergantung pada kedisiplinanmu.

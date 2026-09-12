@@ -16,6 +16,6 @@ exec docker run --rm -t \
   -v "${REPO_ROOT}:/app" \
   -v aj33-sqlx-bin:/sqlx \
   -w /app \
-  -e DATABASE_URL="postgresql://postgres:postgres@postgres:5432/bozz" \
+  -e DATABASE_URL="postgresql://postgres:postgres@postgres:5432/aj33" \
   rust:1.90-bookworm \
   /sqlx/bin/sqlx "$@"

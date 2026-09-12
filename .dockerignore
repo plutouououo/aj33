@@ -1,0 +1,11 @@
+# Yang tidak boleh masuk build context: besar, tidak dipakai, atau rahasia.
+**/target/
+**/node_modules/
+web/dist/
+web/.vercel/
+web/.astro/
+.git/
+.github/
+docs/
+scripts/
+**/.env

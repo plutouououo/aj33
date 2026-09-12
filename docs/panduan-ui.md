@@ -1,4 +1,4 @@
-# Panduan UI BOZZ
+# Panduan UI AJ33
 
 Acuan tampilan untuk seluruh halaman. Token dan kelasnya ada di
 `web/src/styles/theme.css`; dokumen ini menjelaskan **kapan** memakai yang mana

@@ -1,5 +1,5 @@
 {
-  "name": "bozz-web",
+  "name": "aj33-web",
   "type": "module",
   "private": true,
   "scripts": {
@@ -9,7 +9,7 @@
     "check": "astro check"
   },
   "dependencies": {
-    "@astrojs/node": "^9.4.4",
+    "@astrojs/node": "^9.5.5",
     "astro": "^5.16.2"
   },
   "devDependencies": {

@@ -47,6 +47,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "aj33-backend"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "axum",
+ "base64",
+ "bcrypt",
+ "chrono",
+ "hex",
+ "hmac",
+ "jsonwebtoken",
+ "rand 0.8.8",
+ "reqwest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -227,33 +254,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.5",
-]
-
-[[package]]
-name = "bozz-backend"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "axum",
- "base64",
- "bcrypt",
- "chrono",
- "hex",
- "hmac",
- "jsonwebtoken",
- "rand 0.8.8",
- "reqwest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

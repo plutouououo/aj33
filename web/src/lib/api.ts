@@ -23,7 +23,7 @@ const BACKEND_URL =
   'http://localhost:3000';
 
 /** Nama cookie sesi. Dipakai bersama `session.ts` dan middleware. */
-export const COOKIE_SESI = 'bozz_sesi';
+export const COOKIE_SESI = 'aj33_sesi';
 
 export interface ApiError {
   code: string;
@@ -116,12 +116,19 @@ export interface Product {
   category_name: string | null;
   name: string;
   sku: string | null;
+  /** Harga dasar: yang dipakai kasir, sekaligus rujukan saat harga kanal kosong. */
   price: number;
+  /** `null` berarti belum diatur -- bukan gratis. */
+  price_shopee: number | null;
+  /** Mencakup Tokopedia; satu kanal dengan TikTok Shop. */
+  price_tiktok: number | null;
   cost_price: number | null;
   stock_qty: number;
   low_stock_threshold: number;
   image_url: string | null;
   unit: string | null;
+  /** Label rak internal, mis. "Rak A3". */
+  storage_location: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -181,6 +188,8 @@ export interface TicketItem {
   product_name_snapshot: string;
   qty: number;
   is_packed: boolean;
+  /** Dibaca langsung dari produk, jadi selalu rak yang berlaku sekarang. */
+  storage_location: string | null;
 }
 
 export interface Ticket {

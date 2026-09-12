@@ -135,7 +135,20 @@ const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
                     >
                       {it.product_name_snapshot}
                     </p>
-                    <p class="text-xs text-stone-500">Ambil {it.qty}</p>
+                    <p class="text-xs text-stone-500">
+                      Ambil {it.qty}
+                      {/* Lokasi ditebalkan: inilah yang dicari mata pengepak
+                          lebih dulu, sebelum nama barangnya. Daftar sudah
+                          diurutkan per rak, jadi membacanya dari atas ke
+                          bawah berarti menyusuri gudang sekali jalan. */}
+                      {it.storage_location ? (
+                        <span class="ml-1.5 font-semibold text-merah-700">
+                          · {it.storage_location}
+                        </span>
+                      ) : (
+                        <span class="ml-1.5 text-[var(--color-teks-samar)]">· lokasi belum diisi</span>
+                      )}
+                    </p>
                   </div>
 
                   {/* Centang hanya bisa diubah saat tiket sedang dikemas.

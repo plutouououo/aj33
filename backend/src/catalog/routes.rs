@@ -99,13 +99,20 @@ struct ProductCreateRequest {
     name: String,
     sku: Option<String>,
     category_id: Option<Uuid>,
+    /// Harga dasar, yang dipakai kasir di toko.
     price: Decimal,
+    /// Harga di marketplace. Kosong berarti belum diatur, bukan gratis.
+    price_shopee: Option<Decimal>,
+    /// Mencakup Tokopedia -- satu kanal dengan TikTok Shop.
+    price_tiktok: Option<Decimal>,
     cost_price: Option<Decimal>,
     #[serde(default)]
     stock_qty: i32,
     low_stock_threshold: Option<i32>,
     image_url: Option<String>,
     unit: Option<String>,
+    /// Label rak internal yang dibaca pengepak.
+    storage_location: Option<String>,
 }
 
 async fn create_product(
@@ -121,6 +128,17 @@ async fn create_product(
     }
     if body.price.is_sign_negative() {
         return Err(AppError::bad_request("Harga tidak boleh negatif."));
+    }
+    // Diperiksa di sini supaya pesannya menyebut marketplace mana yang
+    // salah. CHECK constraint di database tetap ada sebagai jaring terakhir,
+    // tapi galatnya tidak bisa menyebutkan itu.
+    if body.price_shopee.is_some_and(|h| h.is_sign_negative()) {
+        return Err(AppError::bad_request("Harga Shopee tidak boleh negatif."));
+    }
+    if body.price_tiktok.is_some_and(|h| h.is_sign_negative()) {
+        return Err(AppError::bad_request(
+            "Harga Tokopedia/TikTok Shop tidak boleh negatif.",
+        ));
     }
     if body.stock_qty < 0 {
         return Err(AppError::bad_request("Stok awal tidak boleh negatif."));
@@ -154,11 +172,14 @@ async fn create_product(
             sku,
             category_id: body.category_id,
             price: body.price,
+            price_shopee: body.price_shopee,
+            price_tiktok: body.price_tiktok,
             cost_price: body.cost_price,
             stock_qty: body.stock_qty,
             low_stock_threshold: body.low_stock_threshold.unwrap_or(5),
             image_url: body.image_url,
             unit: body.unit,
+            storage_location: bersihkan(body.storage_location),
             created_by: user.id,
         },
     )
@@ -177,10 +198,13 @@ struct ProductUpdateRequest {
     sku: Option<String>,
     category_id: Option<Uuid>,
     price: Option<Decimal>,
+    price_shopee: Option<Decimal>,
+    price_tiktok: Option<Decimal>,
     cost_price: Option<Decimal>,
     low_stock_threshold: Option<i32>,
     image_url: Option<String>,
     unit: Option<String>,
+    storage_location: Option<String>,
     is_active: Option<bool>,
 }
 
@@ -214,10 +238,13 @@ async fn update_product(
         sku: body.sku,
         category_id: body.category_id,
         price: body.price,
+        price_shopee: body.price_shopee,
+        price_tiktok: body.price_tiktok,
         cost_price: body.cost_price,
         low_stock_threshold: body.low_stock_threshold,
         image_url: body.image_url,
         unit: body.unit,
+        storage_location: bersihkan(body.storage_location),
         is_active: body.is_active,
     };
 
@@ -230,6 +257,16 @@ async fn update_product(
         .ok_or_else(|| AppError::not_found("Produk tidak ditemukan."))?;
 
     Ok(Json(product))
+}
+
+/// Teks opsional dari form: spasi di tepi dibuang, dan yang tersisa kosong
+/// diperlakukan sebagai tidak diisi. Tanpa ini, field yang dikosongkan
+/// pengguna tersimpan sebagai string kosong dan tampil sebagai lokasi yang
+/// "ada" tapi tidak menunjukkan apa pun.
+fn bersihkan(nilai: Option<String>) -> Option<String> {
+    nilai
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 // ---------------------------------------------------------------------

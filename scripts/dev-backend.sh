@@ -19,7 +19,7 @@ exec docker run --rm -t \
   -v aj33-cargo-target:/app/backend/target \
   -w /app/backend \
   --env-file backend/.env \
-  -e DATABASE_URL="postgresql://postgres:postgres@postgres:5432/bozz" \
+  -e DATABASE_URL="postgresql://postgres:postgres@postgres:5432/aj33" \
   -e CARGO_TERM_COLOR=always \
   rust:1.90-bookworm \
   cargo run

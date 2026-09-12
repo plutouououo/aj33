@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.sku,\n            p.price, p.cost_price, p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.unit, p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE ($1::text IS NULL OR p.name ILIKE '%' || $1 || '%' OR p.sku ILIKE '%' || $1 || '%')\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n        ORDER BY p.name\n        LIMIT $4 OFFSET $5\n        ",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.sku,\n            p.price, p.price_shopee, p.price_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.unit, p.storage_location, p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -35,57 +35,68 @@
       },
       {
         "ordinal": 6,
-        "name": "cost_price",
+        "name": "price_shopee",
         "type_info": "Numeric"
       },
       {
         "ordinal": 7,
+        "name": "price_tiktok",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "cost_price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
         "name": "stock_qty",
         "type_info": "Int4"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "low_stock_threshold",
         "type_info": "Int4"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "image_url",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "unit",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
+        "name": "storage_location",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
         "name": "is_active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 12,
+        "ordinal": 15,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 13,
+        "ordinal": 16,
         "name": "created_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 14,
+        "ordinal": 17,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Uuid",
-        "Bool",
-        "Int8",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -96,8 +107,11 @@
       true,
       false,
       true,
+      true,
+      true,
       false,
       false,
+      true,
       true,
       true,
       false,
@@ -106,5 +120,5 @@
       false
     ]
   },
-  "hash": "e4554c459c35102744dbff5f52366b53fc34dd763c14ab4becd7276a711b1069"
+  "hash": "6d941d457ed8f1a9f3259fcb1f99cff3cf798a544ff1f29b8c548bba135c7013"
 }

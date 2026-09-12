@@ -24,6 +24,6 @@ exec docker run --rm -t \
   -v aj33-cargo-target:/app/backend/target \
   -w /app/backend \
   -e CARGO_TERM_COLOR=always \
-  -e DATABASE_URL="postgresql://postgres:postgres@postgres:5432/bozz" \
+  -e DATABASE_URL="postgresql://postgres:postgres@postgres:5432/aj33" \
   rust:1.90-bookworm \
   cargo "$@"

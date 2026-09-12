@@ -16,12 +16,20 @@ pub struct Product {
     pub category_name: Option<String>,
     pub name: String,
     pub sku: Option<String>,
+    /// Harga dasar: yang dipakai kasir di toko, sekaligus rujukan saat
+    /// harga kanal belum diisi.
     pub price: Decimal,
+    /// `None` berarti belum diatur -- bukan gratis. Lihat migrasi 0005.
+    pub price_shopee: Option<Decimal>,
+    /// Mencakup Tokopedia; keduanya satu kanal sejak akuisisi TikTok.
+    pub price_tiktok: Option<Decimal>,
     pub cost_price: Option<Decimal>,
     pub stock_qty: i32,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
     pub unit: Option<String>,
+    /// Label rak internal yang dibaca pengepak, mis. "Rak A3".
+    pub storage_location: Option<String>,
     pub is_active: bool,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
@@ -70,8 +78,9 @@ pub async fn list_products(
         r#"
         SELECT
             p.id, p.category_id, c.name AS "category_name?", p.name, p.sku,
-            p.price, p.cost_price, p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.unit, p.is_active, p.created_by,
+            p.price, p.price_shopee, p.price_tiktok, p.cost_price,
+            p.stock_qty, p.low_stock_threshold,
+            p.image_url, p.unit, p.storage_location, p.is_active, p.created_by,
             p.created_at AS "created_at!", p.updated_at AS "updated_at!"
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
@@ -114,8 +123,9 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
         r#"
         SELECT
             p.id, p.category_id, c.name AS "category_name?", p.name, p.sku,
-            p.price, p.cost_price, p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.unit, p.is_active, p.created_by,
+            p.price, p.price_shopee, p.price_tiktok, p.cost_price,
+            p.stock_qty, p.low_stock_threshold,
+            p.image_url, p.unit, p.storage_location, p.is_active, p.created_by,
             p.created_at AS "created_at!", p.updated_at AS "updated_at!"
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
@@ -134,11 +144,14 @@ pub struct NewProduct {
     pub sku: Option<String>,
     pub category_id: Option<Uuid>,
     pub price: Decimal,
+    pub price_shopee: Option<Decimal>,
+    pub price_tiktok: Option<Decimal>,
     pub cost_price: Option<Decimal>,
     pub stock_qty: i32,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
     pub unit: Option<String>,
+    pub storage_location: Option<String>,
     pub created_by: Uuid,
 }
 
@@ -146,20 +159,24 @@ pub async fn insert_product(pool: &PgPool, input: &NewProduct) -> AppResult<Uuid
     let id = sqlx::query_scalar!(
         r#"
         INSERT INTO products
-            (name, sku, category_id, price, cost_price, stock_qty,
-             low_stock_threshold, image_url, unit, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            (name, sku, category_id, price, price_shopee, price_tiktok,
+             cost_price, stock_qty, low_stock_threshold, image_url, unit,
+             storage_location, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id
         "#,
         input.name,
         input.sku,
         input.category_id,
         input.price,
+        input.price_shopee,
+        input.price_tiktok,
         input.cost_price,
         input.stock_qty,
         input.low_stock_threshold,
         input.image_url,
         input.unit,
+        input.storage_location,
         input.created_by
     )
     .fetch_one(pool)
@@ -177,10 +194,13 @@ pub struct ProductPatch {
     pub sku: Option<String>,
     pub category_id: Option<Uuid>,
     pub price: Option<Decimal>,
+    pub price_shopee: Option<Decimal>,
+    pub price_tiktok: Option<Decimal>,
     pub cost_price: Option<Decimal>,
     pub low_stock_threshold: Option<i32>,
     pub image_url: Option<String>,
     pub unit: Option<String>,
+    pub storage_location: Option<String>,
     pub is_active: Option<bool>,
 }
 
@@ -192,11 +212,14 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
             sku                 = COALESCE($3, sku),
             category_id         = COALESCE($4, category_id),
             price               = COALESCE($5, price),
-            cost_price          = COALESCE($6, cost_price),
-            low_stock_threshold = COALESCE($7, low_stock_threshold),
-            image_url           = COALESCE($8, image_url),
-            unit                = COALESCE($9, unit),
-            is_active           = COALESCE($10, is_active),
+            price_shopee        = COALESCE($6, price_shopee),
+            price_tiktok        = COALESCE($7, price_tiktok),
+            cost_price          = COALESCE($8, cost_price),
+            low_stock_threshold = COALESCE($9, low_stock_threshold),
+            image_url           = COALESCE($10, image_url),
+            unit                = COALESCE($11, unit),
+            storage_location    = COALESCE($12, storage_location),
+            is_active           = COALESCE($13, is_active),
             updated_at          = now()
         WHERE id = $1
         "#,
@@ -205,10 +228,13 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
         patch.sku.as_deref(),
         patch.category_id,
         patch.price,
+        patch.price_shopee,
+        patch.price_tiktok,
         patch.cost_price,
         patch.low_stock_threshold,
         patch.image_url.as_deref(),
         patch.unit.as_deref(),
+        patch.storage_location.as_deref(),
         patch.is_active
     )
     .execute(pool)

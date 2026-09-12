@@ -36,10 +36,24 @@ if (Astro.request.method === 'POST') {
       const harga = Number(form.get('price'));
       const stok = Number(form.get('stock_qty') ?? 0);
 
+      // Harga marketplace boleh dikosongkan: kosong berarti "belum diatur,
+      // pakai harga dasar". Dikirim sebagai undefined, bukan 0 -- 0 berarti
+      // gratis, dan produk gratis di marketplace adalah kerugian langsung.
+      const hargaKanal = (kolom: string): number | undefined => {
+        const mentah = String(form.get(kolom) ?? '').trim();
+        if (!mentah) return undefined;
+        const nilai = Number(mentah);
+        return Number.isFinite(nilai) ? nilai : undefined;
+      };
+      const hargaShopee = hargaKanal('price_shopee');
+      const hargaTiktok = hargaKanal('price_tiktok');
+
       if (!nama) {
         galat = 'Nama produk wajib diisi.';
       } else if (!Number.isFinite(harga) || harga < 0) {
-        galat = 'Harga harus berupa angka yang tidak negatif.';
+        galat = 'Harga dasar harus berupa angka yang tidak negatif.';
+      } else if ((hargaShopee ?? 0) < 0 || (hargaTiktok ?? 0) < 0) {
+        galat = 'Harga marketplace tidak boleh negatif.';
       } else {
         try {
           await api('/products', {
@@ -50,9 +64,12 @@ if (Astro.request.method === 'POST') {
               sku: String(form.get('sku') ?? '').trim() || undefined,
               category_id: String(form.get('category_id') ?? '') || undefined,
               price: harga,
+              price_shopee: hargaShopee,
+              price_tiktok: hargaTiktok,
               stock_qty: Number.isFinite(stok) ? stok : 0,
               low_stock_threshold: Number(form.get('low_stock_threshold')) || 5,
               unit: String(form.get('unit') ?? '').trim() || undefined,
+              storage_location: String(form.get('storage_location') ?? '').trim() || undefined,
             },
           });
           sukses = `Produk "${nama}" ditambahkan.`;
@@ -131,14 +148,70 @@ function tautanHalaman(ke: number): string {
             </select>
           </div>
 
-          <div>
-            <label class="label" for="price">Harga (Rp)</label>
-            <input class="kolom" id="price" name="price" type="number" min="0" step="1" required />
+          <div class="sm:col-span-2">
+            <p class="label mb-2">Harga</p>
+            <div class="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label class="label" for="price">Dasar / kasir (Rp)</label>
+                <input
+                  class="kolom"
+                  id="price"
+                  name="price"
+                  type="number"
+                  min="0"
+                  step="1"
+                  required
+                />
+              </div>
+
+              <div>
+                <label class="label" for="price_shopee">Shopee (Rp)</label>
+                <input
+                  class="kolom"
+                  id="price_shopee"
+                  name="price_shopee"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="ikut harga dasar"
+                />
+              </div>
+
+              <div>
+                <label class="label" for="price_tiktok">Tokopedia / TikTok (Rp)</label>
+                <input
+                  class="kolom"
+                  id="price_tiktok"
+                  name="price_tiktok"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="ikut harga dasar"
+                />
+              </div>
+            </div>
+            <p class="mt-1.5 text-xs text-[var(--color-teks-lembut)]">
+              Harga marketplace boleh dikosongkan — artinya belum diatur dan mengikuti harga
+              dasar. Mengisi 0 berarti digratiskan.
+            </p>
           </div>
 
           <div>
             <label class="label" for="unit">Satuan</label>
             <input class="kolom" id="unit" name="unit" placeholder="pcs" />
+          </div>
+
+          <div>
+            <label class="label" for="storage_location">Lokasi penyimpanan</label>
+            <input
+              class="kolom"
+              id="storage_location"
+              name="storage_location"
+              placeholder="mis. Rak A3"
+            />
+            <p class="mt-1.5 text-xs text-[var(--color-teks-lembut)]">
+              Ditampilkan ke pengepak di tiket packing.
+            </p>
           </div>
 
           <div>
