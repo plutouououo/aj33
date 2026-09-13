@@ -22,6 +22,25 @@ export default defineConfig({
   // berhenti dengan galat peer dependency.
   adapter: node({ mode: 'standalone' }),
 
+  // Domain yang boleh dipercaya sebagai identitas situs ini.
+  //
+  // WAJIB diisi di balik reverse proxy. Sejak Astro 5.14, header `Host` dan
+  // `X-Forwarded-Host` TIDAK dipercaya kalau daftar ini kosong -- pengetatan
+  // terhadap host header injection. Akibatnya hostname jatuh ke nilai cadangan
+  // `localhost`, sehingga `Astro.url` jadi `https://localhost/...`, tidak cocok
+  // dengan header `Origin` dari browser, dan SEMUA form POST ditolak dengan
+  // "Cross-site POST form submissions are forbidden" -- termasuk halaman login.
+  //
+  // localhost ikut didaftarkan supaya `npm run preview` di mesin sendiri tetap
+  // bisa mengirim form.
+  security: {
+    allowedDomains: [
+      { hostname: 'tokoayamaj33.my.id', protocol: 'https' },
+      { hostname: 'www.tokoayamaj33.my.id', protocol: 'https' },
+      { hostname: 'localhost', protocol: 'http' },
+    ],
+  },
+
   server: { port: 4321 },
   vite: {
     plugins: [tailwindcss()],

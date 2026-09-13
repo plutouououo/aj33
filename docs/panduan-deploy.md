@@ -247,42 +247,62 @@ git clone https://github.com/plutouououo/aj33.git /opt/aj33/repo
 Konfigurasi ditaruh di `/etc/aj33/`, terpisah dari kode — supaya `git pull`
 tidak pernah bisa menimpanya, dan supaya rahasianya tidak ikut ter-commit.
 
+**1. Bangkitkan rahasianya lebih dulu**, karena nilainya dipakai di langkah
+berikutnya. `TOKEN_ENCRYPTION_KEY` wajib tepat 32 byte, jadi jangan dikarang:
+
 ```bash
 sudo mkdir -p /etc/aj33
+openssl rand -hex 32   # untuk TOKEN_ENCRYPTION_KEY
+openssl rand -hex 32   # untuk JWT_SECRET
 ```
 
-`/etc/aj33/backend.env`:
+Salin kedua keluarannya; keduanya berbeda dan jangan tertukar.
 
-```ini
+**2. Buat `/etc/aj33/backend.env`.** Ganti `PASSWORD` dengan password role
+Postgres dari §3, dan kedua rahasia dengan hasil `openssl` di atas:
+
+```bash
+sudo tee /etc/aj33/backend.env >/dev/null <<'EOF'
 DATABASE_URL=postgresql://aj33:PASSWORD@localhost:5432/aj33
-JWT_SECRET=...
-TOKEN_ENCRYPTION_KEY=...
+JWT_SECRET=GANTI_DENGAN_HASIL_OPENSSL_KEDUA
+TOKEN_ENCRYPTION_KEY=GANTI_DENGAN_HASIL_OPENSSL_PERTAMA
 PORT=3000
 CORS_ORIGINS=https://tokoku.my.id
+EOF
 ```
 
-`/etc/aj33/web.env`:
+(`<<'EOF'` dengan tanda kutip membuat isinya ditulis apa adanya — tanpa itu,
+shell akan mencoba menafsirkan `$` di dalam password sebagai variabel.)
 
-```ini
+**3. Buat `/etc/aj33/web.env`.** Yang ini tidak berisi rahasia apa pun, jadi
+bisa disalin utuh:
+
+```bash
+sudo tee /etc/aj33/web.env >/dev/null <<'EOF'
 HOST=127.0.0.1
 PORT=4321
 BACKEND_URL=http://127.0.0.1:3000
+EOF
 ```
 
-Bangkitkan rahasianya — `TOKEN_ENCRYPTION_KEY` wajib tepat 32 byte:
-
-```bash
-openssl rand -hex 32   # TOKEN_ENCRYPTION_KEY
-openssl rand -hex 32   # JWT_SECRET
-```
-
-Kunci filenya, karena berisi kredensial database:
+**4. Kunci izinnya**, karena `backend.env` berisi kredensial database:
 
 ```bash
 sudo chown -R root:tokoaj33 /etc/aj33
 sudo chmod 750 /etc/aj33
 sudo chmod 640 /etc/aj33/*.env
 ```
+
+Periksa hasilnya — kalau `chmod` mengeluh `No such file or directory`,
+berarti kedua file di atas belum benar-benar terbuat:
+
+```bash
+ls -l /etc/aj33
+```
+
+Yang diharapkan: dua file `-rw-r-----` milik `root:tokoaj33`. Root menulis,
+`tokoaj33` (yang menjalankan service) hanya membaca, pengguna lain tidak
+kebagian apa-apa.
 
 Backend **menolak start** dengan pesan jelas kalau ada yang wajib tapi kosong
 atau salah bentuk (`backend/src/config.rs`) — disengaja, supaya kesalahan
