@@ -116,9 +116,37 @@ sudo systemctl restart ssh
 
 Catatan kalau penyedia hanya memberimu root: buat dulu pengguna biasanya
 dengan `adduser`, masukkan ke grup `sudo`, salin kunci SSH ke
-`/home/<nama>/.ssh`, lalu lanjutkan sebagai dia. `adduser` ada di
-`/usr/sbin`, yang tidak masuk PATH pengguna biasa — panggil lewat `sudo
-adduser` atau sebut jalur lengkapnya.
+`/home/<nama>/.ssh`, lalu lanjutkan sebagai dia.
+
+### "command not found" padahal perintahnya jelas ada
+
+Di Debian, `/usr/sbin` tidak masuk PATH pengguna biasa — hanya root. Jadi
+`adduser`, `swapon`, `swapoff`, dan `ufw` akan menjawab `command not found`
+walaupun terpasang. Panggil lewat `sudo` (yang memakai PATH-nya sendiri) atau
+sebut jalur lengkapnya, mis. `/usr/sbin/swapon --show`.
+
+Ini juga membuat pemeriksaan mudah salah baca: `swapon --show` yang gagal
+karena PATH terlihat sama saja dengan swap yang belum aktif.
+
+### Alias SSH, supaya tidak mengetik IP
+
+Di **mesinmu sendiri**, bukan di VPS, tambahkan ke `~/.ssh/config`:
+
+```
+Host tokoaj33 aj33
+    HostName 139.190.97.15
+    User tokoaj33
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    AddKeysToAgent yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+```
+
+Sesudahnya cukup `ssh tokoaj33`. Berlaku juga untuk `scp` dan `rsync`.
+`AddKeysToAgent yes` membuat passphrase kunci ditanyakan sekali lalu
+dititipkan ke agent; `ServerAlive*` menjaga sesi tidak putus sendiri saat
+menunggu build yang lama.
 
 ### Swap
 
@@ -461,6 +489,47 @@ IP VPS sebelum perintah di atas dijalankan.
 Perhatikan Caddy hanya mengenal port **4321**. Backend tidak pernah disebut,
 karena memang tidak boleh dijangkau dari luar.
 
+### Astro harus tahu domainnya, atau semua form ditolak
+
+> Dilewatkan di percobaan pertama, dan gejalanya sangat menyesatkan.
+
+Sejak Astro 5.14, header `Host` **tidak dipercaya** kalau
+`security.allowedDomains` kosong — pengetatan terhadap host header injection.
+Lihat `node_modules/astro/dist/core/app/validate-headers.js`:
+
+```js
+if (!allowedDomains || allowedDomains.length === 0) return void 0;
+```
+
+Hostname lalu jatuh ke nilai cadangan `"localhost"`, sehingga `Astro.url`
+menjadi `https://localhost/...`. Pemeriksaan CSRF membandingkan itu dengan
+header `Origin` dari browser, tidak cocok, dan **setiap form POST ditolak** —
+termasuk halaman login. Pesannya:
+
+```
+Cross-site POST form submissions are forbidden
+```
+
+Yang membuatnya sulit didiagnosis: memasang `X-Forwarded-Proto` dan
+`X-Forwarded-Host` dengan benar di Caddy **tidak menolong**, karena
+header-header itu ikut dibuang oleh validasi yang sama.
+
+Perbaikannya di `web/astro.config.mjs` — daftarkan domainnya:
+
+```js
+security: {
+  allowedDomains: [
+    { hostname: 'tokoku.my.id', protocol: 'https' },
+    { hostname: 'www.tokoku.my.id', protocol: 'https' },
+    { hostname: 'localhost', protocol: 'http' },
+  ],
+},
+```
+
+`localhost` ikut supaya `npm run preview` di mesin sendiri tetap bisa
+mengirim form. **Ganti domainnya kalau domainmu berbeda**, lalu build ulang —
+nilai ini ditanam saat build.
+
 ---
 
 ## 8. Akun owner pertama
@@ -503,35 +572,89 @@ untukmu.
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
+
 TUJUAN=/var/backups/aj33
 mkdir -p "$TUJUAN"
-sudo -u postgres pg_dump -Fc aj33 > "$TUJUAN/aj33-$(date +%F-%H%M).dump"
-# Simpan 14 hari terakhir. Lebih lama dari itu tidak menambah perlindungan
-# terhadap kerusakan yang baru disadari, dan disk bukan tempat arsip.
+
+BERKAS="$TUJUAN/aj33-$(date +%F-%H%M).dump"
+sudo -u postgres pg_dump -Fc aj33 > "$BERKAS"
+
+# Dump kosong atau terpotong lebih berbahaya daripada tidak ada dump sama
+# sekali -- ia memberi rasa aman palsu sampai hari kamu benar-benar
+# membutuhkannya. Jadi diperiksa, bukan diasumsikan.
+if ! sudo -u postgres pg_restore --list "$BERKAS" >/dev/null 2>&1; then
+  echo "GAGAL: $BERKAS tidak bisa dibaca pg_restore" >&2
+  rm -f "$BERKAS"
+  exit 1
+fi
+
 find "$TUJUAN" -name 'aj33-*.dump' -mtime +14 -delete
+echo "$BERKAS ($(du -h "$BERKAS" | cut -f1))"
+```
+
+Format `-Fc` (custom) bukan SQL polos: terkompresi, dan `pg_restore` bisa
+memulihkan sebagian tabel saja kalau suatu saat perlu.
+
+### Jadwal: systemd timer, bukan cron
+
+Image Debian ini tidak membawa paket `cron` sama sekali. Tapi timer memang
+pilihan yang lebih tepat di sini: kalau VPS mati saat jadwalnya tiba,
+`Persistent=true` menjalankan cadangan begitu ia hidup lagi — cron
+melewatkannya diam-diam. Log-nya pun masuk `journalctl` bersama yang lain.
+
+`/etc/systemd/system/aj33-backup.service`:
+
+```ini
+[Unit]
+Description=Cadangan database AJ33
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aj33-backup
+```
+
+`/etc/systemd/system/aj33-backup.timer`:
+
+```ini
+[Unit]
+Description=Cadangan database AJ33 tiap hari
+
+[Timer]
+OnCalendar=*-*-* 02:10:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
 ```
 
 ```bash
 sudo chmod +x /usr/local/bin/aj33-backup
-sudo crontab -e
-# tiap hari 02:10
-10 2 * * * /usr/local/bin/aj33-backup
+sudo systemctl daemon-reload
+sudo systemctl enable --now aj33-backup.timer
+systemctl list-timers aj33-backup.timer   # pastikan jadwal berikutnya muncul
 ```
+
+### Salin ke luar VPS
 
 **Dump di VPS yang sama bukan backup.** Ia melindungi dari salah hapus, bukan
-dari VPS yang mati. Salin ke luar — paling sederhana, tarik dari laptopmu
-secara berkala:
+dari VPS yang mati. Tarik berkala dari mesinmu sendiri:
 
 ```bash
-rsync -av tokoaj33@tokoku.my.id:/var/backups/aj33/ ~/backup-aj33/
+rsync -av tokoaj33:/var/backups/aj33/ ~/backup-aj33/
 ```
 
-Dan sesekali **coba pulihkan** ke database kosong. Backup yang tidak pernah
-diuji bukan backup, hanya file:
+### Uji pulih, jangan cuma percaya
+
+Backup yang tidak pernah dipulihkan bukan backup, hanya berkas. Sesekali
+buktikan ke database kosong lalu bandingkan isinya:
 
 ```bash
-createdb -U postgres aj33_uji
-pg_restore -U postgres -d aj33_uji /var/backups/aj33/aj33-XXXX.dump
+sudo -u postgres createdb aj33_ujipulih
+sudo -u postgres pg_restore -d aj33_ujipulih /var/backups/aj33/aj33-XXXX.dump
+sudo -u postgres psql -d aj33_ujipulih -tAc "SELECT count(*) FROM transactions"
+sudo -u postgres dropdb aj33_ujipulih
 ```
 
 ---
@@ -636,6 +759,8 @@ antara keduanya rollback tetap aman.
 
 | Gejala | Sebab yang paling sering |
 | --- | --- |
+| `Cross-site POST form submissions are forbidden` saat login | `security.allowedDomains` belum diisi di `astro.config.mjs` (§7) |
+| `command not found` untuk `swapon`/`ufw`/`adduser` | Perintahnya di `/usr/sbin`, di luar PATH pengguna biasa (§1) |
 | Login selalu "Username atau password salah" | Role penyambung bukan pemilik tabel → RLS mengembalikan nol baris (§3) |
 | Login berhasil lalu langsung balik ke `/login` | Belum HTTPS, cookie `secure` dibuang browser (Prasyarat) |
 | Caddy gagal ambil sertifikat | A record belum menunjuk ke IP VPS, atau port 80 tertutup firewall |
@@ -658,6 +783,10 @@ Log: `journalctl -u aj33-backend -f`, `journalctl -u aj33-web -f`,
   sudah tahan timing attack (verifikasi tetap dijalankan terhadap hash umpan
   saat user tidak ditemukan), tapi tidak ada yang menahan percobaan berulang.
   Caddy bisa membatasinya di depan.
+- **Tidak ada `fail2ban`.** Log sshd menunjukkan pemindaian otomatis terus
+  menerus dari berbagai IP (`Invalid user ubuntu`, `root`, `solv`). Semuanya
+  gagal karena login password sudah mati, tapi tidak ada yang memblokir
+  pengetuk yang berulang.
 - **Tidak ada pemantauan** selain `/api/health` — tidak ada yang memberi tahu
   kalau service mati di luar jam kerja.
 - **Tidak ada staging.** Deploy langsung ke satu-satunya mesin yang ada.
