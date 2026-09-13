@@ -22,6 +22,7 @@ pub enum ErrorCode {
     Forbidden,
     NotFound,
     Conflict,
+    TooManyRequests,
     InternalError,
 }
 
@@ -33,6 +34,7 @@ impl ErrorCode {
             Self::Forbidden => "FORBIDDEN",
             Self::NotFound => "NOT_FOUND",
             Self::Conflict => "CONFLICT",
+            Self::TooManyRequests => "TOO_MANY_REQUESTS",
             Self::InternalError => "INTERNAL_ERROR",
         }
     }
@@ -45,6 +47,7 @@ impl ErrorCode {
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Conflict => StatusCode::CONFLICT,
+            Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
             Self::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -91,6 +94,12 @@ impl AppError {
     }
 
     /// 409 -- bentrok dengan kondisi sekarang, misalnya stok tidak cukup.
+    /// Permintaan ditolak karena terlalu sering, bukan karena salah. Dipakai
+    /// pembatas percobaan login.
+    pub fn too_many_requests(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::TooManyRequests, message)
+    }
+
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Conflict, message)
     }

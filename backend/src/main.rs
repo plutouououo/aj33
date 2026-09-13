@@ -22,6 +22,10 @@ use tower_http::trace::TraceLayer;
 pub struct AppState {
     pub pool: PgPool,
     pub config: std::sync::Arc<config::Config>,
+    /// Pembatas percobaan login, dibagikan seluruh permintaan. Isinya di
+    /// memori proses ini, jadi hitungannya ikut hilang saat restart -- dan
+    /// itu tidak apa-apa: penyerang tidak bisa memaksa backend restart.
+    pub throttle: std::sync::Arc<auth::Throttle>,
 }
 
 #[tokio::main]
@@ -66,6 +70,7 @@ async fn main() {
     let state = AppState {
         pool,
         config: std::sync::Arc::new(config),
+        throttle: std::sync::Arc::new(auth::Throttle::baru()),
     };
 
     let app = Router::new()

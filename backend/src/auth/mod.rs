@@ -8,8 +8,10 @@
 mod repo;
 mod routes;
 mod service;
+mod throttle;
 
 pub use routes::router;
+pub use throttle::Throttle;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

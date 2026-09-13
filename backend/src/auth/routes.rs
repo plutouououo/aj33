@@ -83,6 +83,7 @@ async fn login(
     let (token, user) = service::login(
         &state.pool,
         &state.config.jwt_secret,
+        &state.throttle,
         body.email_or_username.trim(),
         &body.password,
     )

@@ -1,6 +1,7 @@
 //! Aturan main autentikasi: siapa boleh masuk, token dibuat dan dibaca
 //! bagaimana. Tidak ada SQL di sini -- itu urusan `repo.rs`.
 
+use super::throttle::Throttle;
 use super::repo::{self, UserRow};
 use super::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
@@ -58,9 +59,24 @@ impl TryFrom<UserRow> for PublicUser {
 pub async fn login(
     pool: &PgPool,
     jwt_secret: &str,
+    throttle: &Throttle,
     email_or_username: &str,
     password: &str,
 ) -> AppResult<(String, PublicUser)> {
+    // Diperiksa sebelum menyentuh database sama sekali: percobaan yang sudah
+    // melewati jatah tidak pantas membebani Postgres, apalagi bcrypt yang
+    // memang sengaja lambat.
+    if let Some(sisa) = throttle.sisa_tunggu(email_or_username) {
+        let menit = (sisa.as_secs() / 60) + 1;
+        tracing::warn!(
+            username = %email_or_username,
+            "percobaan login ditahan, jatah habis"
+        );
+        return Err(AppError::too_many_requests(format!(
+            "Terlalu banyak percobaan masuk. Coba lagi dalam {menit} menit."
+        )));
+    }
+
     let user = repo::find_by_username(pool, email_or_username).await?;
 
     // Akun tidak ada, akun nonaktif, dan password salah sengaja memberi
@@ -70,6 +86,10 @@ pub async fn login(
         // Tetap jalankan verifikasi terhadap hash palsu supaya waktu respons
         // untuk username yang tidak ada mirip dengan yang ada.
         let _ = bcrypt::verify(password, HASH_UMPAN);
+        // Username yang tidak ada pun dihitung. Kalau hanya yang terdaftar
+        // yang dibatasi, perbedaan perilakunya sendiri jadi cara menebak
+        // username mana yang nyata.
+        throttle.catat_gagal(email_or_username);
         return Err(AppError::unauthorized("Username atau password salah."));
     };
 
@@ -79,11 +99,16 @@ pub async fn login(
     })?;
 
     if !cocok {
+        throttle.catat_gagal(email_or_username);
         return Err(AppError::unauthorized("Username atau password salah."));
     }
 
     let public: PublicUser = user.try_into()?;
     let token = buat_token(jwt_secret, public.id, public.role)?;
+    // Terbukti tahu passwordnya, jadi percobaan gagal sebelumnya tidak lagi
+    // relevan -- salah ketik beberapa kali lalu berhasil tidak boleh
+    // meninggalkan jejak yang menahan login berikutnya.
+    throttle.bersihkan(email_or_username);
     Ok((token, public))
 }
 
