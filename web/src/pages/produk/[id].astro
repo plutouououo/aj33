@@ -3,6 +3,7 @@ import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type ProductDetail } from '../../lib/api';
 import { rupiah, tanggal, waktu, sisaHari } from '../../lib/format';
 import { berandaUntuk } from '../../lib/session';
+import { MEREK } from '../../lib/produk';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -52,7 +53,7 @@ if (Astro.request.method === 'POST') {
           seo_name: teks(form, 'seo_name'),
           brand_name: teks(form, 'brand_name'),
           product_type: teks(form, 'product_type'),
-          variant_color: teks(form, 'variant_color'),
+          variant_grade: teks(form, 'variant_grade'),
           variant_size: teks(form, 'variant_size'),
           category_id: teks(form, 'category_id'),
           price: angka(form, 'price') ?? 0,
@@ -60,7 +61,6 @@ if (Astro.request.method === 'POST') {
           price_tiktok: angka(form, 'price_tiktok'),
           cost_price: angka(form, 'cost_price'),
           low_stock_threshold: angka(form, 'low_stock_threshold') ?? 5,
-          unit: teks(form, 'unit'),
           storage_location: teks(form, 'storage_location'),
           is_active: form.get('is_active') === '1',
         },
@@ -79,7 +79,7 @@ if (Astro.request.method === 'POST') {
           seo_name: teks(form, 'seo_name'),
           brand_name: teks(form, 'brand_name'),
           product_type: teks(form, 'product_type'),
-          variant_color: teks(form, 'variant_color'),
+          variant_grade: teks(form, 'variant_grade'),
           variant_size: teks(form, 'variant_size'),
           category_id: teks(form, 'category_id'),
           price: angka(form, 'price') ?? 0,
@@ -88,7 +88,6 @@ if (Astro.request.method === 'POST') {
           stock_qty: angka(form, 'stock_qty') ?? 0,
           batch_number: teks(form, 'batch_number'),
           expiry_date: teks(form, 'expiry_date'),
-          unit: teks(form, 'unit'),
           storage_location: teks(form, 'storage_location'),
         },
       });
@@ -192,7 +191,7 @@ const DEKAT_KEDALUWARSA = 30;
               <h2 id="j-data" class="font-semibold">Data Produk</h2>
               <p class="text-xs text-[var(--color-teks-lembut)]">
                 SKU <span class="font-mono text-[var(--color-teks)]">{produk.sku ?? '—'}</span> —
-                dirakit otomatis dari Merek - Jenis Produk - Warna - Ukuran
+                dirakit otomatis dari inisial Jenis+Grade, Merek, dan Ukuran
               </p>
             </div>
 
@@ -225,11 +224,6 @@ const DEKAT_KEDALUWARSA = 30;
               </div>
 
               <div class="isian">
-                <label class="label" for="brand_name">Merek</label>
-                <input class="kolom" id="brand_name" name="brand_name" value={produk.brand_name ?? ''} />
-              </div>
-
-              <div class="isian">
                 <label class="label" for="product_type">Jenis produk</label>
                 <input
                   class="kolom"
@@ -239,29 +233,43 @@ const DEKAT_KEDALUWARSA = 30;
                 />
               </div>
 
-              <div class="isian isian-pendek">
-                <label class="label" for="variant_color">Warna</label>
+              <div class="isian">
+                <label class="label" for="variant_grade">Grade</label>
                 <input
                   class="kolom"
-                  id="variant_color"
-                  name="variant_color"
-                  value={produk.variant_color ?? ''}
+                  id="variant_grade"
+                  name="variant_grade"
+                  value={produk.variant_grade ?? ''}
                 />
               </div>
 
+              <div class="isian">
+                <label class="label" for="brand_name">Merek</label>
+                <select class="kolom" id="brand_name" name="brand_name">
+                  <option value="" selected={!produk.brand_name}>— pilih merek —</option>
+                  {MEREK.map((m) => (
+                    <option value={m} selected={produk!.brand_name === m}>{m}</option>
+                  ))}
+                  {/* Merek di luar daftar bisa datang dari impor marketplace.
+                      Tetap ditampilkan supaya menyimpan perubahan lain tidak
+                      diam-diam menghapusnya. */}
+                  {produk.brand_name && !MEREK.includes(produk.brand_name as (typeof MEREK)[number]) && (
+                    <option value={produk.brand_name} selected>
+                      {produk.brand_name} (di luar daftar)
+                    </option>
+                  )}
+                </select>
+              </div>
+
               <div class="isian isian-pendek">
-                <label class="label" for="variant_size">Ukuran</label>
+                <label class="label" for="variant_size">Ukuran (isi pack)</label>
                 <input
                   class="kolom"
                   id="variant_size"
                   name="variant_size"
                   value={produk.variant_size ?? ''}
+                  placeholder="mis. 2 kg"
                 />
-              </div>
-
-              <div class="isian isian-pendek">
-                <label class="label" for="unit">Satuan</label>
-                <input class="kolom" id="unit" name="unit" value={produk.unit ?? ''} />
               </div>
 
               <div class="isian isian-pendek">
@@ -368,7 +376,7 @@ const DEKAT_KEDALUWARSA = 30;
                     <tr>
                       <th>SKU</th>
                       <th>Nama</th>
-                      <th>Warna</th>
+                      <th>Grade</th>
                       <th>Ukuran</th>
                       <th class="text-right">Harga</th>
                       <th class="text-right">Stok</th>
@@ -382,7 +390,7 @@ const DEKAT_KEDALUWARSA = 30;
                           {v.sku ?? '—'}
                         </td>
                         <td class="font-medium">{v.name}</td>
-                        <td>{v.variant_color ?? '—'}</td>
+                        <td>{v.variant_grade ?? '—'}</td>
                         <td>{v.variant_size ?? '—'}</td>
                         <td class="sel-angka">{rupiah(v.price)}</td>
                         <td class="sel-angka">{v.stock_qty}</td>
@@ -413,7 +421,6 @@ const DEKAT_KEDALUWARSA = 30;
                   <input type="hidden" name="brand_name" value={produk.brand_name ?? ''} />
                   <input type="hidden" name="product_type" value={produk.product_type ?? ''} />
                   <input type="hidden" name="category_id" value={produk.category_id ?? ''} />
-                  <input type="hidden" name="unit" value={produk.unit ?? ''} />
                   <input type="hidden" name="storage_location" value={produk.storage_location ?? ''} />
                   <input type="hidden" name="seo_name" value={produk.seo_name ?? ''} />
 
@@ -423,12 +430,12 @@ const DEKAT_KEDALUWARSA = 30;
                   </div>
 
                   <div class="isian isian-pendek">
-                    <label class="label" for="v_color">Warna</label>
-                    <input class="kolom" id="v_color" name="variant_color" />
+                    <label class="label" for="v_grade">Grade</label>
+                    <input class="kolom" id="v_grade" name="variant_grade" />
                   </div>
 
                   <div class="isian isian-pendek">
-                    <label class="label" for="v_size">Ukuran</label>
+                    <label class="label" for="v_size">Ukuran (isi pack)</label>
                     <input class="kolom" id="v_size" name="variant_size" />
                   </div>
 
@@ -564,7 +571,7 @@ const DEKAT_KEDALUWARSA = 30;
 
                 <p class="mb-4 text-xs text-[var(--color-teks-lembut)]">
                   Stok berjalan sekarang <strong class="tabular-nums">{produk.stock_qty}</strong>
-                  {produk.unit ? ` ${produk.unit}` : ''}. Jumlah di tabel adalah jumlah yang masuk
+                  pack. Jumlah di tabel adalah jumlah yang masuk
                   saat itu, bukan sisa yang belum terjual. Membatalkan batch menarik kembali
                   stoknya, dan ditolak kalau stok yang ada sudah tidak cukup.
                 </p>

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_shopee, p.price_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.unit, p.storage_location,\n            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE ($1::text IS NULL\n               OR p.name ILIKE '%' || $1 || '%'\n               OR p.seo_name ILIKE '%' || $1 || '%'\n               OR p.sku ILIKE '%' || $1 || '%')\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n          AND ($4::uuid IS NULL OR p.parent_id = $4)\n          AND ($5::text IS NULL\n               OR ($5 = 'induk' AND p.parent_id IS NULL)\n               OR ($5 = 'terjual'\n                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))\n        ORDER BY p.name\n        LIMIT $6 OFFSET $7\n        ",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_shopee, p.price_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.storage_location,\n            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE ($1::text IS NULL\n               OR p.name ILIKE '%' || $1 || '%'\n               OR p.seo_name ILIKE '%' || $1 || '%'\n               OR p.sku ILIKE '%' || $1 || '%')\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n          AND ($4::uuid IS NULL OR p.parent_id = $4)\n          AND ($5::text IS NULL\n               OR ($5 = 'induk' AND p.parent_id IS NULL)\n               OR ($5 = 'terjual'\n                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))\n        ORDER BY p.name\n        LIMIT $6 OFFSET $7\n        ",
   "describe": {
     "columns": [
       {
@@ -45,7 +45,7 @@
       },
       {
         "ordinal": 8,
-        "name": "variant_color",
+        "name": "variant_grade",
         "type_info": "Varchar"
       },
       {
@@ -100,36 +100,31 @@
       },
       {
         "ordinal": 19,
-        "name": "unit",
-        "type_info": "Varchar"
-      },
-      {
-        "ordinal": 20,
         "name": "storage_location",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 21,
+        "ordinal": 20,
         "name": "nearest_expiry?",
         "type_info": "Date"
       },
       {
-        "ordinal": 22,
+        "ordinal": 21,
         "name": "is_active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 23,
+        "ordinal": 22,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 24,
+        "ordinal": 23,
         "name": "created_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 25,
+        "ordinal": 24,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
@@ -166,7 +161,6 @@
       false,
       true,
       true,
-      true,
       null,
       false,
       true,
@@ -174,5 +168,5 @@
       false
     ]
   },
-  "hash": "9a0a85a952e3ccba2bf55c0c4e51f42c491f9c5225c6db5bb08c4a6347b1ff07"
+  "hash": "b7dd017ad6609b6ff1ff72148bc6fb667caa7399b6bf0a2718f2550bc25c0bb1"
 }

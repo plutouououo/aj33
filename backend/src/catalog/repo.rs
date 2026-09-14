@@ -32,7 +32,9 @@ pub struct Product {
     pub sku: Option<String>,
     pub brand_name: Option<String>,
     pub product_type: Option<String>,
-    pub variant_color: Option<String>,
+    /// Mutu / kelas ukuran barang, mis. "SP 08", "Super Besar", "B".
+    pub variant_grade: Option<String>,
+    /// Isi satu pack, mis. "2 kg". Satu SKU berarti satu pack.
     pub variant_size: Option<String>,
     /// Terisi berarti baris ini varian dari produk lain.
     pub parent_id: Option<Uuid>,
@@ -50,7 +52,6 @@ pub struct Product {
     pub stock_qty: i32,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
-    pub unit: Option<String>,
     /// Label rak internal yang dibaca pengepak, mis. "Rak A3".
     pub storage_location: Option<String>,
     /// Kedaluwarsa terdekat dari seluruh batch produk ini. Diambil di query
@@ -146,11 +147,11 @@ pub async fn list_products(
         r#"
         SELECT
             p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
-            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,
+            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.unit, p.storage_location,
+            p.image_url, p.storage_location,
             (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
                 AS "nearest_expiry?",
             p.is_active, p.created_by,
@@ -216,11 +217,11 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
         r#"
         SELECT
             p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
-            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,
+            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.unit, p.storage_location,
+            p.image_url, p.storage_location,
             (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
                 AS "nearest_expiry?",
             p.is_active, p.created_by,
@@ -245,11 +246,11 @@ pub async fn list_variants(pool: &PgPool, parent_id: Uuid) -> AppResult<Vec<Prod
         r#"
         SELECT
             p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
-            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,
+            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.unit, p.storage_location,
+            p.image_url, p.storage_location,
             (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
                 AS "nearest_expiry?",
             p.is_active, p.created_by,
@@ -257,7 +258,7 @@ pub async fn list_variants(pool: &PgPool, parent_id: Uuid) -> AppResult<Vec<Prod
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
         WHERE p.parent_id = $1
-        ORDER BY p.variant_color NULLS FIRST, p.variant_size NULLS FIRST, p.name
+        ORDER BY p.variant_grade NULLS FIRST, p.variant_size NULLS FIRST, p.name
         "#,
         parent_id
     )
@@ -273,7 +274,7 @@ pub struct NewProduct {
     pub sku: Option<String>,
     pub brand_name: Option<String>,
     pub product_type: Option<String>,
-    pub variant_color: Option<String>,
+    pub variant_grade: Option<String>,
     pub variant_size: Option<String>,
     pub parent_id: Option<Uuid>,
     pub category_id: Option<Uuid>,
@@ -283,7 +284,6 @@ pub struct NewProduct {
     pub cost_price: Option<Decimal>,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
-    pub unit: Option<String>,
     pub storage_location: Option<String>,
     pub created_by: Uuid,
 }
@@ -298,12 +298,12 @@ pub async fn insert_product(
     let id = sqlx::query_scalar!(
         r#"
         INSERT INTO products
-            (name, seo_name, sku, brand_name, product_type, variant_color, variant_size,
+            (name, seo_name, sku, brand_name, product_type, variant_grade, variant_size,
              parent_id, category_id, price, price_shopee, price_tiktok,
-             cost_price, stock_qty, low_stock_threshold, image_url, unit,
+             cost_price, stock_qty, low_stock_threshold, image_url,
              storage_location, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0,
-                $14, $15, $16, $17, $18)
+                $14, $15, $16, $17)
         RETURNING id
         "#,
         input.name,
@@ -311,7 +311,7 @@ pub async fn insert_product(
         input.sku,
         input.brand_name,
         input.product_type,
-        input.variant_color,
+        input.variant_grade,
         input.variant_size,
         input.parent_id,
         input.category_id,
@@ -321,7 +321,6 @@ pub async fn insert_product(
         input.cost_price,
         input.low_stock_threshold,
         input.image_url,
-        input.unit,
         input.storage_location,
         input.created_by
     )
@@ -381,7 +380,7 @@ pub struct ProductPatch {
     pub sku: Ubah<String>,
     pub brand_name: Ubah<String>,
     pub product_type: Ubah<String>,
-    pub variant_color: Ubah<String>,
+    pub variant_grade: Ubah<String>,
     pub variant_size: Ubah<String>,
     pub category_id: Ubah<Uuid>,
     pub price: Option<Decimal>,
@@ -390,7 +389,6 @@ pub struct ProductPatch {
     pub cost_price: Ubah<Decimal>,
     pub low_stock_threshold: Option<i32>,
     pub image_url: Ubah<String>,
-    pub unit: Ubah<String>,
     pub storage_location: Ubah<String>,
     pub is_active: Option<bool>,
 }
@@ -400,14 +398,13 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
     let (ubah_sku, sku) = teks(&patch.sku);
     let (ubah_merek, brand_name) = teks(&patch.brand_name);
     let (ubah_jenis, product_type) = teks(&patch.product_type);
-    let (ubah_warna, variant_color) = teks(&patch.variant_color);
+    let (ubah_warna, variant_grade) = teks(&patch.variant_grade);
     let (ubah_ukuran, variant_size) = teks(&patch.variant_size);
     let (ubah_kategori, category_id) = salinan(&patch.category_id);
     let (ubah_shopee, price_shopee) = salinan(&patch.price_shopee);
     let (ubah_tiktok, price_tiktok) = salinan(&patch.price_tiktok);
     let (ubah_modal, cost_price) = salinan(&patch.cost_price);
     let (ubah_gambar, image_url) = teks(&patch.image_url);
-    let (ubah_satuan, unit) = teks(&patch.unit);
     let (ubah_lokasi, storage_location) = teks(&patch.storage_location);
 
     // Kolom yang tidak boleh NULL memakai COALESCE; sisanya memakai CASE
@@ -424,15 +421,14 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
             sku                 = CASE WHEN $8::bool  THEN $9::varchar  ELSE sku END,
             brand_name          = CASE WHEN $10::bool THEN $11::varchar ELSE brand_name END,
             product_type        = CASE WHEN $12::bool THEN $13::varchar ELSE product_type END,
-            variant_color       = CASE WHEN $14::bool THEN $15::varchar ELSE variant_color END,
+            variant_grade       = CASE WHEN $14::bool THEN $15::varchar ELSE variant_grade END,
             variant_size        = CASE WHEN $16::bool THEN $17::varchar ELSE variant_size END,
             category_id         = CASE WHEN $18::bool THEN $19::uuid    ELSE category_id END,
             price_shopee        = CASE WHEN $20::bool THEN $21::numeric ELSE price_shopee END,
             price_tiktok        = CASE WHEN $22::bool THEN $23::numeric ELSE price_tiktok END,
             cost_price          = CASE WHEN $24::bool THEN $25::numeric ELSE cost_price END,
             image_url           = CASE WHEN $26::bool THEN $27::varchar ELSE image_url END,
-            unit                = CASE WHEN $28::bool THEN $29::varchar ELSE unit END,
-            storage_location    = CASE WHEN $30::bool THEN $31::varchar ELSE storage_location END,
+            storage_location    = CASE WHEN $28::bool THEN $29::varchar ELSE storage_location END,
             updated_at          = now()
         WHERE id = $1
         "#,
@@ -450,7 +446,7 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
         ubah_jenis,
         product_type,
         ubah_warna,
-        variant_color,
+        variant_grade,
         ubah_ukuran,
         variant_size,
         ubah_kategori,
@@ -463,8 +459,6 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
         cost_price,
         ubah_gambar,
         image_url,
-        ubah_satuan,
-        unit,
         ubah_lokasi,
         storage_location
     )

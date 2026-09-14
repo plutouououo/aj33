@@ -105,6 +105,33 @@ sebagai batch berikut tanggal kedaluwarsanya dan menambah stok lewat ledger
 lengkap: `GET/POST/PATCH/DELETE /products` plus halaman `/produk/[id]` untuk
 menyunting, mengelola varian dan batch, dan mengoreksi stok.
 
+**Katalog disesuaikan dengan barang yang benar-benar dijual** (migrasi `0008`)
+— kolom `variant_color` jadi `variant_grade`: sumbu varian toko ayam adalah
+mutu dan kelas ukuran ("SP 08", "Super Besar", "B"), bukan warna. Ukuran kini
+berarti **isi satu pack**, dan `products.unit` berhenti dipakai — satu SKU
+berarti satu pack, satu pack belum tentu satu kilogram, dan stok dihitung per
+pack. Kolom `unit` tidak di-drop supaya data lama tidak hilang. Merek dipilih
+dari daftar tetap (AFCO, BEST CHICKEN, OK CHICK) di formulir; backend tetap
+menerima teks bebas karena impor marketplace bisa membawa merek lain.
+Sembilan kategori dipasang: Ayam Utuh, Parting, Dada, Paha, Ceker, Kulit,
+Jeroan, Tulang, MDM.
+
+**Format SKU mengikuti kode yang sudah dipakai toko** — `[inisial Jenis +
+Grade]-[3 huruf Merek]-[Ukuran]`. Ini bukan aturan baru: toko sudah
+memakainya bertahun-tahun, diketik tangan di nama produk. `CBSB` adalah
+Ceker Bersih Super Besar, `HJA` adalah Hati Jantung Ampela — dan perakit
+otomatisnya menghasilkan kode yang **sama persis**, jadi hafalan pegawai dan
+pencarian dengan kode lama tetap bekerja. Ada ujinya. Bagian yang mengandung
+angka dibawa utuh ("SP 08" jadi `SP08`, bukan `S0`) supaya kelas ukurannya
+tetap terbaca. Merek dipendekkan menurut jumlah katanya: afco → AFC, best
+chicken → BEC, OK CHICK → OKC.
+
+**Tanggal kedaluwarsa keluar dari nama produk.** Angka di ekor nama lama
+("Ayam Utuh_SP 08 afco 25.7") ternyata tanggal kedaluwarsa, bukan harga —
+cara bertahan hidup sebelum ada batch. Akibatnya satu barang muncul berkali
+sebagai produk berbeda hanya karena beda kedaluwarsa. Sekarang itu satu
+produk dengan beberapa batch.
+
 **Alur tambah produk bergaya Shopee** (`/produk/baru`) — form tambah pindah
 ke halaman tersendiri: remah navigasi, bilah tab bagian yang menempel
 (Informasi Produk · Atribut & SKU · Informasi Penjualan · Stok & Penyimpanan),

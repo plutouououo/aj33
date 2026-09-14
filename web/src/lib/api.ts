@@ -118,11 +118,13 @@ export interface Product {
   name: string;
   /** Judul untuk marketplace. `null` berarti belum diisi. */
   seo_name: string | null;
-  /** Selalu hasil rakitan [Merek] - [Jenis] - [Warna] - [Ukuran]. */
+  /** Selalu hasil rakitan: inisial Jenis+Grade - Merek - Ukuran. */
   sku: string | null;
   brand_name: string | null;
   product_type: string | null;
-  variant_color: string | null;
+  /** Mutu / kelas ukuran, mis. "SP 08", "Super Besar". */
+  variant_grade: string | null;
+  /** Isi satu pack, mis. "2 kg". Satu SKU berarti satu pack. */
   variant_size: string | null;
   /** Terisi berarti produk ini varian dari produk lain. */
   parent_id: string | null;
@@ -138,7 +140,6 @@ export interface Product {
   stock_qty: number;
   low_stock_threshold: number;
   image_url: string | null;
-  unit: string | null;
   /** Label rak internal, mis. "Rak A3". */
   storage_location: string | null;
   /** Kedaluwarsa terdekat dari seluruh batch produk ini. */

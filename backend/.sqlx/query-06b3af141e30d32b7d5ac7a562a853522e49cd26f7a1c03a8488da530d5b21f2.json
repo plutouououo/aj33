@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_shopee, p.price_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.unit, p.storage_location,\n            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.id = $1\n        ",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_shopee, p.price_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.storage_location,\n            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.parent_id = $1\n        ORDER BY p.variant_grade NULLS FIRST, p.variant_size NULLS FIRST, p.name\n        ",
   "describe": {
     "columns": [
       {
@@ -45,7 +45,7 @@
       },
       {
         "ordinal": 8,
-        "name": "variant_color",
+        "name": "variant_grade",
         "type_info": "Varchar"
       },
       {
@@ -100,36 +100,31 @@
       },
       {
         "ordinal": 19,
-        "name": "unit",
-        "type_info": "Varchar"
-      },
-      {
-        "ordinal": 20,
         "name": "storage_location",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 21,
+        "ordinal": 20,
         "name": "nearest_expiry?",
         "type_info": "Date"
       },
       {
-        "ordinal": 22,
+        "ordinal": 21,
         "name": "is_active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 23,
+        "ordinal": 22,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 24,
+        "ordinal": 23,
         "name": "created_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 25,
+        "ordinal": 24,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
@@ -160,7 +155,6 @@
       false,
       true,
       true,
-      true,
       null,
       false,
       true,
@@ -168,5 +162,5 @@
       false
     ]
   },
-  "hash": "2ba6ce6f4a7079d57ccc9f2c7add29d5bacc639322b8cfc38a4c4f34e777bef8"
+  "hash": "06b3af141e30d32b7d5ac7a562a853522e49cd26f7a1c03a8488da530d5b21f2"
 }

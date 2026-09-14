@@ -223,9 +223,7 @@ const DEKAT_KEDALUWARSA = 30;
                       {/* Stok menipis diwarnai merah bahaya, bukan merah merek:
                           ini peringatan, bukan penanda merek. */}
                       <span class={menipis ? 'font-semibold text-red-600' : ''}>{p.stock_qty}</span>
-                      {p.unit && (
-                        <span class="ml-1 text-xs text-[var(--color-teks-samar)]">{p.unit}</span>
-                      )}
+                      <span class="ml-1 text-xs text-[var(--color-teks-samar)]">pack</span>
                     </Fragment>
                   )}
                 </td>

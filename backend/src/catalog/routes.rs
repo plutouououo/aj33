@@ -149,7 +149,7 @@ struct ProductCreateRequest {
     /// di sini, supaya bentuknya sama untuk semua produk.
     brand_name: Option<String>,
     product_type: Option<String>,
-    variant_color: Option<String>,
+    variant_grade: Option<String>,
     variant_size: Option<String>,
     /// Terisi berarti produk ini varian dari produk lain.
     parent_id: Option<Uuid>,
@@ -168,7 +168,6 @@ struct ProductCreateRequest {
     expiry_date: Option<NaiveDate>,
     low_stock_threshold: Option<i32>,
     image_url: Option<String>,
-    unit: Option<String>,
     /// Label rak internal yang dibaca pengepak.
     storage_location: Option<String>,
 }
@@ -209,14 +208,14 @@ async fn create_product(
 
     let brand_name = bersihkan(body.brand_name);
     let product_type = bersihkan(body.product_type);
-    let variant_color = bersihkan(body.variant_color);
+    let variant_grade = bersihkan(body.variant_grade);
     let variant_size = bersihkan(body.variant_size);
 
     let sku = rakit_sku(
         &state,
         &brand_name,
         &product_type,
-        &variant_color,
+        &variant_grade,
         &variant_size,
         name,
         None,
@@ -238,7 +237,7 @@ async fn create_product(
             sku: Some(sku),
             brand_name,
             product_type,
-            variant_color,
+            variant_grade,
             variant_size,
             parent_id: body.parent_id,
             category_id: body.category_id,
@@ -248,7 +247,6 @@ async fn create_product(
             cost_price: body.cost_price,
             low_stock_threshold: body.low_stock_threshold.unwrap_or(5),
             image_url: bersihkan(body.image_url),
-            unit: bersihkan(body.unit),
             storage_location: bersihkan(body.storage_location),
             created_by: user.id,
         },
@@ -291,7 +289,7 @@ struct ProductUpdateRequest {
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     product_type: Ubah<String>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
-    variant_color: Ubah<String>,
+    variant_grade: Ubah<String>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     variant_size: Ubah<String>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
@@ -306,8 +304,6 @@ struct ProductUpdateRequest {
     low_stock_threshold: Option<i32>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     image_url: Ubah<String>,
-    #[serde(default, deserialize_with = "repo::ubah_terkirim")]
-    unit: Ubah<String>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     storage_location: Ubah<String>,
     is_active: Option<bool>,
@@ -342,7 +338,7 @@ async fn update_product(
 
     let brand_name = ubah_teks(body.brand_name);
     let product_type = ubah_teks(body.product_type);
-    let variant_color = ubah_teks(body.variant_color);
+    let variant_grade = ubah_teks(body.variant_grade);
     let variant_size = ubah_teks(body.variant_size);
 
     // SKU selalu ikut atribut pembentuknya. Kalau tidak dirakit ulang di
@@ -351,7 +347,7 @@ async fn update_product(
     // SKU yang tidak ada.
     let sku = if brand_name.is_some()
         || product_type.is_some()
-        || variant_color.is_some()
+        || variant_grade.is_some()
         || variant_size.is_some()
         || name.is_some()
     {
@@ -366,7 +362,7 @@ async fn update_product(
             &state,
             &terpakai(&brand_name, &sekarang.brand_name),
             &terpakai(&product_type, &sekarang.product_type),
-            &terpakai(&variant_color, &sekarang.variant_color),
+            &terpakai(&variant_grade, &sekarang.variant_grade),
             &terpakai(&variant_size, &sekarang.variant_size),
             name.as_deref().unwrap_or(&sekarang.name),
             Some(id),
@@ -383,7 +379,7 @@ async fn update_product(
         sku,
         brand_name,
         product_type,
-        variant_color,
+        variant_grade,
         variant_size,
         category_id: body.category_id,
         price: body.price,
@@ -392,7 +388,6 @@ async fn update_product(
         cost_price: body.cost_price,
         low_stock_threshold: body.low_stock_threshold,
         image_url: ubah_teks(body.image_url),
-        unit: ubah_teks(body.unit),
         storage_location: ubah_teks(body.storage_location),
         is_active: body.is_active,
     };
@@ -691,18 +686,20 @@ async fn rakit_sku(
     state: &AppState,
     brand_name: &Option<String>,
     product_type: &Option<String>,
-    variant_color: &Option<String>,
+    variant_grade: &Option<String>,
     variant_size: &Option<String>,
     name: &str,
     kecuali: Option<Uuid>,
 ) -> AppResult<String> {
-    let basis = sku::rakit(&[
-        brand_name.as_deref(),
+    let basis = sku::rakit(
         product_type.as_deref(),
-        variant_color.as_deref(),
+        variant_grade.as_deref(),
+        brand_name.as_deref(),
         variant_size.as_deref(),
-    ])
-    .or_else(|| sku::rakit(&[Some(name)]))
+    )
+    // Produk yang belum punya satu pun atribut jatuh ke inisial namanya --
+    // tanpa itu produk lama yang disunting akan kehilangan SKU-nya.
+    .or_else(|| sku::rakit(Some(name), None, None, None))
     .ok_or_else(|| AppError::bad_request("Nama produk wajib diisi."))?;
 
     repo::sku_unik(&state.pool, &basis, kecuali).await

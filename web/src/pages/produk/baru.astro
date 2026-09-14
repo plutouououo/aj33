@@ -2,6 +2,7 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type Product } from '../../lib/api';
 import { berandaUntuk } from '../../lib/session';
+import { MEREK } from '../../lib/produk';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -54,7 +55,7 @@ if (Astro.request.method === 'POST') {
           seo_name: teks('seo_name'),
           brand_name: teks('brand_name'),
           product_type: teks('product_type'),
-          variant_color: teks('variant_color'),
+          variant_grade: teks('variant_grade'),
           variant_size: teks('variant_size'),
           category_id: teks('category_id'),
           price: harga,
@@ -65,7 +66,6 @@ if (Astro.request.method === 'POST') {
           batch_number: teks('batch_number'),
           expiry_date: teks('expiry_date'),
           low_stock_threshold: Number(form.get('low_stock_threshold')) || 5,
-          unit: teks('unit'),
           storage_location: teks('storage_location'),
         },
       });
@@ -159,29 +159,48 @@ const BAGIAN = [
 
       <div class="borang-tegak">
         <div class="isian">
-          <label class="label" for="brand_name">Merek</label>
-          <input class="kolom" id="brand_name" name="brand_name" value={isi('brand_name')} />
+          <label class="label" for="product_type">Jenis produk</label>
+          <input class="kolom" id="product_type" name="product_type" value={isi('product_type')} />
+          <p class="isian-bantu">Mis. "Ceker Bersih", "Hati Jantung Ampela", "Ayam Utuh".</p>
         </div>
 
         <div class="isian">
-          <label class="label" for="product_type">Jenis produk</label>
-          <input class="kolom" id="product_type" name="product_type" value={isi('product_type')} />
+          <label class="label" for="variant_grade">Grade</label>
+          <input class="kolom" id="variant_grade" name="variant_grade" value={isi('variant_grade')} />
+          <p class="isian-bantu">Mutu atau kelas ukuran barangnya. Mis. "Super Besar", "SP 08", "B".</p>
+        </div>
+
+        <div class="isian">
+          <label class="label" for="brand_name">Merek</label>
+          <select class="kolom" id="brand_name" name="brand_name">
+            <option value="" selected={!isi('brand_name')}>— pilih merek —</option>
+            {MEREK.map((m) => (
+              <option value={m} selected={isi('brand_name') === m}>{m}</option>
+            ))}
+          </select>
         </div>
 
         <div class="isian isian-pendek">
-          <label class="label" for="variant_color">Warna</label>
-          <input class="kolom" id="variant_color" name="variant_color" value={isi('variant_color')} />
-        </div>
-
-        <div class="isian isian-pendek">
-          <label class="label" for="variant_size">Ukuran</label>
-          <input class="kolom" id="variant_size" name="variant_size" value={isi('variant_size')} />
+          <label class="label" for="variant_size">Ukuran (isi pack)</label>
+          <input
+            class="kolom"
+            id="variant_size"
+            name="variant_size"
+            value={isi('variant_size')}
+            placeholder="mis. 2 kg"
+          />
+          <p class="isian-bantu">
+            Satu SKU berarti satu pack, dan satu pack belum tentu satu kilogram — isi pack
+            ditulis di sini.
+          </p>
         </div>
 
         <p class="isian isian-bantu">
-          SKU dibuat otomatis dengan format
-          <strong>Merek - Jenis Produk - Warna - Ukuran</strong>, jadi tidak perlu diketik.
-          Bagian yang dikosongkan dilewati.
+          SKU dibuat otomatis: huruf awal tiap kata <strong>Jenis produk + Grade</strong>, lalu
+          tiga huruf <strong>Merek</strong>, lalu <strong>Ukuran</strong>. "Ceker Bersih" +
+          "Super Besar" + AFCO menghasilkan <strong>CBSB-AFC</strong> — kode yang sama dengan
+          yang sudah dipakai selama ini. Bagian yang mengandung angka dibawa utuh, jadi
+          "Ayam Utuh" + "SP 08" + AFCO + "2 kg" jadi <strong>AUSP08-AFC-2KG</strong>.
         </p>
       </div>
     </section>
@@ -190,11 +209,6 @@ const BAGIAN = [
       <h2 id="j-penjualan" class="mb-4 font-semibold">Informasi Penjualan</h2>
 
       <div class="borang-tegak">
-        <div class="isian isian-pendek">
-          <label class="label" for="unit">Satuan</label>
-          <input class="kolom" id="unit" name="unit" value={isi('unit')} placeholder="pcs" />
-        </div>
-
         <div class="isian isian-pendek">
           <label class="label" for="price">Harga dasar / kasir (Rp)</label>
           <input
