@@ -1,8 +1,8 @@
 //! Aturan main autentikasi: siapa boleh masuk, token dibuat dan dibaca
 //! bagaimana. Tidak ada SQL di sini -- itu urusan `repo.rs`.
 
-use super::throttle::Throttle;
 use super::repo::{self, UserRow};
+use super::throttle::Throttle;
 use super::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
 use chrono::{Duration, Utc};

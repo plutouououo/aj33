@@ -133,7 +133,10 @@ mod tests {
         }
 
         t.catat_gagal("owner");
-        assert!(t.sisa_tunggu("owner").is_some(), "jatah habis, harus tertahan");
+        assert!(
+            t.sisa_tunggu("owner").is_some(),
+            "jatah habis, harus tertahan"
+        );
     }
 
     #[test]
