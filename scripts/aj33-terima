@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Menerima hasil build dari GitHub Actions dan memasangnya.
+#
+# Dipasang di VPS sebagai /usr/local/bin/aj33-terima, dan dijalankan LEWAT
+# authorized_keys dengan forced command:
+#
+#   command="/usr/local/bin/aj33-terima",no-port-forwarding,
+#   no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA...
+#
+# Kunci CI karena itu tidak bisa dipakai apa pun selain memicu deploy. Kalau
+# secret di GitHub bocor, pemegangnya tidak mendapat shell -- hanya bisa
+# mengirim rilis. Itu sebabnya paketnya dikirim lewat stdin, bukan scp:
+# forced command mematikan scp, tapi stdin tetap mengalir.
+#
+# Dipanggil dari CI dengan:  tar czf - -C paket . | ssh vps
+set -euo pipefail
+
+AKAR=/opt/aj33
+BARU="$AKAR/rilis/$(date +%Y%m%d-%H%M%S)"
+SEBELUMNYA=$(readlink -f "$AKAR/aktif" 2>/dev/null || true)
+
+log() { echo "[terima] $*"; }
+
+log "membongkar paket ke $BARU"
+mkdir -p "$BARU"
+tar xzf - -C "$BARU"
+
+# Hanya berkas yang memang diharapkan. Paket yang bentuknya lain berarti ada
+# yang salah di CI, dan lebih baik berhenti di sini daripada menukar symlink
+# ke rilis yang tidak lengkap.
+for wajib in aj33-backend web/dist/server/entry.mjs web/package.json web/package-lock.json; do
+  [[ -e "$BARU/$wajib" ]] || { log "GAGAL: $wajib tidak ada di paket"; rm -rf "$BARU"; exit 1; }
+done
+chmod +x "$BARU/aj33-backend"
+
+# Dependensi runtime diambil di sini, bukan dikirim dari CI: `npm ci` di VPS
+# hanya mengunduh (beberapa puluh detik, hampir tanpa CPU), sementara
+# mengirim node_modules berarti memindahkan ratusan MB tiap deploy.
+log "memasang dependensi runtime"
+( cd "$BARU/web" && npm ci --omit=dev --silent )
+
+log "menukar symlink"
+ln -sfn "$BARU" "$AKAR/aktif.baru"
+mv -T "$AKAR/aktif.baru" "$AKAR/aktif"
+
+sudo systemctl restart aj33-backend aj33-web
+
+# --- Pemeriksaan sesudah restart --------------------------------------
+# Rilis yang gagal hidup tidak boleh dibiarkan melayani. Backend menjalankan
+# migrasi saat start, jadi kegagalan di sini juga menangkap migrasi yang
+# bermasalah -- bukan cuma binary yang rusak.
+log "memeriksa kesehatan"
+SEHAT=tidak
+for _ in $(seq 1 20); do
+  sleep 2
+  if [[ "$(curl -sf -m 5 http://127.0.0.1:3000/api/health 2>/dev/null)" == "ok" ]] \
+     && curl -sf -m 5 -o /dev/null http://127.0.0.1:4321/login 2>/dev/null; then
+    SEHAT=ya
+    break
+  fi
+done
+
+if [[ "$SEHAT" != ya ]]; then
+  log "GAGAL: rilis baru tidak sehat"
+  if [[ -n "$SEBELUMNYA" && -d "$SEBELUMNYA" ]]; then
+    log "mengembalikan ke $(basename "$SEBELUMNYA")"
+    ln -sfn "$SEBELUMNYA" "$AKAR/aktif.baru"
+    mv -T "$AKAR/aktif.baru" "$AKAR/aktif"
+    sudo systemctl restart aj33-backend aj33-web
+  fi
+  # Rilis yang gagal tetap disimpan supaya bisa diperiksa, tapi tidak aktif.
+  exit 1
+fi
+
+# Simpan 5 rilis terakhir.
+ls -1 "$AKAR/rilis" | sort -r | tail -n +6 | while read -r lama; do
+  rm -rf "${AKAR:?}/rilis/$lama"
+done
+
+log "aktif: $(basename "$BARU")"

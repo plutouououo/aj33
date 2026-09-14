@@ -1,0 +1,106 @@
+name: Deploy
+
+# Dijalankan setelah CI selesai HIJAU, bukan langsung saat push. Tanpa ini,
+# commit yang gagal test tetap terpasang ke mesin kasir -- dan yang menemukan
+# masalahnya adalah pembeli yang sedang antre, bukan CI.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Dua deploy bersamaan akan berebut symlink `aktif`. Antre, jangan dibatalkan:
+# membatalkan di tengah bisa meninggalkan rilis setengah terpasang.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build lalu kirim ke VPS
+    # Hanya jalan kalau CI-nya sukses. `workflow_dispatch` tidak punya
+    # `workflow_run`, jadi kondisinya dilonggarkan untuk deploy manual.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    # Dipatok, bukan `ubuntu-latest`. Binary Rust ditautkan ke glibc mesin
+    # pembangun; glibc lama berjalan di sistem yang lebih baru, tidak
+    # sebaliknya. Runner yang diam-diam naik versi bisa menghasilkan binary
+    # yang menolak jalan di Debian 13.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run memakai berkas workflow dari branch default, tapi
+          # yang harus dibangun adalah commit yang memicu CI tadi.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build backend
+        working-directory: backend
+        # Memakai cache query di backend/.sqlx, jadi tidak perlu database.
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo build --release
+
+      - name: Build web
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Rakit paket
+        run: |
+          mkdir -p paket/web
+          cp backend/target/release/aj33-backend paket/
+          cp -r web/dist paket/web/dist
+          cp web/package.json web/package-lock.json paket/web/
+          du -sh paket
+
+      - name: Siapkan kunci SSH
+        env:
+          KUNCI: ${{ secrets.VPS_SSH_KEY }}
+          HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KUNCI" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Host key dipasang dari secret, bukan lewat ssh-keyscan saat jalan.
+          # keyscan akan mempercayai apa pun yang menjawab saat itu, yang
+          # membatalkan gunanya memverifikasi host sama sekali.
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Kirim ke VPS
+        env:
+          TUJUAN: ${{ secrets.VPS_HOST }}
+        run: |
+          tar czf - -C paket . \
+            | ssh -i ~/.ssh/id_deploy \
+                  -o BatchMode=yes \
+                  -o ConnectTimeout=20 \
+                  "$TUJUAN"
+
+      - name: Pastikan situs melayani
+        # Penerima di VPS sudah memeriksa dari dalam dan mengembalikan rilis
+        # lama kalau gagal. Ini memeriksa dari luar: memastikan Caddy dan TLS
+        # ikut baik, bukan hanya prosesnya hidup.
+        run: |
+          KODE=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
+                 https://tokoayamaj33.my.id/login)
+          echo "https://tokoayamaj33.my.id/login -> $KODE"
+          [ "$KODE" = "200" ]
