@@ -22,7 +22,9 @@ pub fn router() -> Router<AppState> {
         .route("/products", get(list_products).post(create_product))
         .route(
             "/products/{id}",
-            get(get_product).patch(update_product).delete(delete_product),
+            get(get_product)
+                .patch(update_product)
+                .delete(delete_product),
         )
         .route(
             "/products/{id}/batches",

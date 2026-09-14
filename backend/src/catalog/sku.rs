@@ -54,7 +54,12 @@ fn potong(nilai: &str, maks: usize) -> String {
     if nilai.chars().count() <= maks {
         return nilai.to_string();
     }
-    nilai.chars().take(maks).collect::<String>().trim_end().to_string()
+    nilai
+        .chars()
+        .take(maks)
+        .collect::<String>()
+        .trim_end()
+        .to_string()
 }
 
 /// Varian ke-n dari sebuah SKU, dipakai saat SKU hasil rakitan sudah dipakai
@@ -75,7 +80,10 @@ mod tests {
             Some("Putih"),
             Some("1 kg"),
         ]);
-        assert_eq!(hasil.as_deref(), Some("FIESTA - AYAM FILLET - PUTIH - 1 KG"));
+        assert_eq!(
+            hasil.as_deref(),
+            Some("FIESTA - AYAM FILLET - PUTIH - 1 KG")
+        );
     }
 
     #[test]
