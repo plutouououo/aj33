@@ -26,6 +26,8 @@ struct CheckoutRequest {
     customer_id: Option<Uuid>,
     payment_method: PaymentMethod,
     amount_paid: Option<Decimal>,
+    /// Ongkos kirim. Kosong berarti nol, bukan "tidak diketahui".
+    shipping_cost: Option<Decimal>,
     items: Vec<CheckoutItem>,
 }
 
@@ -65,6 +67,7 @@ async fn checkout(
             customer_id: body.customer_id,
             payment_method: body.payment_method,
             amount_paid: body.amount_paid,
+            shipping_cost: body.shipping_cost,
             items: body.items,
             cashier_user_id: user.id,
         },

@@ -30,8 +30,9 @@ Browser **tidak pernah** memanggil backend langsung; semua panggilan API
 terjadi di dalam server Astro saat merender. Sesi disimpan di cookie httpOnly
 `aj33_sesi`.
 
-Seluruh form memakai POST HTML biasa — tidak ada JavaScript di jalur kritis.
-JS hanya dipakai untuk tombol ciutkan sidebar.
+Seluruh form memakai POST HTML biasa. JavaScript dipakai untuk tombol ciutkan
+sidebar dan — sebagai satu-satunya pengecualian yang disetujui — untuk
+mempercepat halaman kasir, yang **tetap berfungsi penuh tanpa JS**.
 
 ## Produksi
 
@@ -53,13 +54,18 @@ JS hanya dipakai untuk tombol ciutkan sidebar.
 /var/lib/aj33/         status pemantauan
 ```
 
-**Perintah operasional**
+**Deploy: cukup `git push` ke `main`.** GitHub Actions membangun lalu
+mengirimnya ke VPS. Lihat `panduan-deploy.md` §10.
+
+**Perintah operasional** (di VPS)
 
 ```bash
-aj33-deploy     # pull, build, rakit rilis baru, tukar symlink, restart
 aj33-rollback   # kembali ke rilis sebelumnya, hitungan detik
 aj33-backup     # cadangkan sekarang (di luar jadwal harian 02:10)
 aj33-cek        # periksa kesehatan sekarang
+aj33-deploy     # build DI VPS -- jalur cadangan kalau Actions bermasalah;
+                # memakan CPU penuh 12 menit, jangan saat jam ramai
+aj33-terima     # dipanggil CI lewat SSH, bukan oleh manusia
 ```
 
 **Service & timer:** `aj33-backend`, `aj33-web`, `caddy`, `postgresql`,
@@ -86,6 +92,56 @@ paginasi). Ditulis di `panduan-ui.md`.
 jalan. Lokasi dibaca hidup lewat JOIN, bukan disalin ke `ticket_items` — kalau
 barang dipindah rak, salinan lama justru menyesatkan.
 
+**Nama SEO, SKU otomatis, varian, dan batch** (migrasi `0006`) — `products`
+dapat `seo_name` (judul untuk marketplace; `name` tinggal jadi nama
+identifikasi internal), `product_type`, `variant_color`, `variant_size`, dan
+`parent_id`. SKU tidak lagi diketik: dirakit dari **Merek - Jenis Produk -
+Warna - Ukuran** dan dirakit ulang setiap atribut itu berubah, dengan akhiran
+urut kalau bentrok. Varian adalah baris `products` yang menunjuk induknya,
+jadi ikut memakai stok, ledger, kasir, dan tiket yang sudah ada — tiap varian
+punya harga sendiri, termasuk harga per marketplace. Barang masuk dicatat
+sebagai batch berikut tanggal kedaluwarsanya dan menambah stok lewat ledger
+(alasan `restock`), jadi tidak ada butir stok tanpa asal-usul. CRUD produk
+lengkap: `GET/POST/PATCH/DELETE /products` plus halaman `/produk/[id]` untuk
+menyunting, mengelola varian dan batch, dan mengoreksi stok.
+
+**Alur tambah produk bergaya Shopee** (`/produk/baru`) — form tambah pindah
+ke halaman tersendiri: remah navigasi, bilah tab bagian yang menempel
+(Informasi Produk · Atribut & SKU · Informasi Penjualan · Stok & Penyimpanan),
+kartu per bagian, dan bilah simpan lengket di dasar layar. **Seluruh isian
+disusun ke bawah**, satu per baris — grid menyamping hanya tersisa di bilah
+saringan. Tabnya tautan lompat murni HTML; alasan kenapa sengaja tanpa penanda
+"tab aktif" ada di `panduan-ui.md`. Simpan yang berhasil memakai
+POST/redirect/GET ke halaman produk yang baru dibuat, dan galat validasi tidak
+lagi menghapus isian yang sudah diketik. `/produk/[id]` mengikuti pola yang
+sama.
+
+**Kasir tiga langkah** (`/kasir`) — pilih produk → pembayaran → konfirmasi,
+dengan penunjuk langkah, pencarian, filter kategori berbentuk pil, dan bilah
+ringkasan lengket. Mengikuti alur kasir di repo `flock-stock-track`.
+**Progressive enhancement**, satu-satunya pengecualian yang disetujui atas
+prinsip "HTML dulu": tanpa JavaScript halaman tetap berfungsi penuh (isi
+jumlah lalu kirim), dengan JavaScript jadi tap-to-add, tombol −/+, dan total
+seketika. Skripnya hanya menulis ke isian yang sudah ada, jadi server menerima
+data yang sama persis di kedua keadaan. Keranjang dibawa antar-langkah lewat
+hidden field; kunci idempotensi dibuat sekali saat halaman dibuka dan dibaca
+ulang tiap langkah.
+
+**Pelanggan dan ongkos kirim** (migrasi `0007`) — endpoint `/customers` baru
+(daftar + buat; nomor telepon yang sudah ada tidak digandakan), dan kolom
+`transactions.shipping_cost`. Ongkir punya kolom sendiri, **bukan dilebur ke
+`subtotal`**: subtotal adalah harga barang dan itulah dasar perhitungan
+margin. Sejak migrasi ini `SUM(total_amount)` bukan lagi omzet barang.
+
+**Bug idempotensi yang sudah lama ada, diperbaiki** — `sidik_jari` mem-hash
+nominal lewat `to_string()`, sedangkan `70000` dari request dan `70000.00`
+yang dibaca balik dari `NUMERIC(14,2)` menghasilkan teks berbeda. Akibatnya
+pengiriman ulang yang sah untuk pembayaran tunai bulat dijawab 409 — justru
+kegagalan yang `Idempotency-Key` ada untuk mencegahnya. Uji lama tidak
+menangkapnya karena `Decimal` menganggap keduanya sama. Sekarang nominal
+selalu diseragamkan ke dua desimal sebelum di-hash, dengan uji regresinya.
+Ongkir ikut masuk sidik jari dengan alasan yang sama.
+
 **Indeks pencarian produk** (migrasi `0004`) — `pg_trgm` GIN untuk `ILIKE` dan
 B-tree untuk `ORDER BY name`. Diukur pada 100 ribu produk: `count(*)`
 pencarian 63 ms → 7,8 ms, paginasi dalam 146 ms → 25,6 ms.
@@ -99,6 +155,15 @@ TLS otomatis.
 
 **Skrip operasional** — backup harian dengan verifikasi, deploy atomik,
 rollback.
+
+**CD lewat GitHub Actions** (`.github/workflows/deploy.yml` +
+`scripts/aj33-terima`) — dipicu setelah CI hijau, membangun di runner, lalu
+mengirim tarball lewat SSH. Kunci CI dikunci `command=` di `authorized_keys`
+sehingga tidak bisa membuka shell; paket dikirim lewat stdin karena forced
+command mematikan scp. Penerima memeriksa kesehatan sampai 40 detik dan
+**mengembalikan rilis lama sendiri kalau gagal**. Terbukti pada deploy pertama:
+rilis mendarat 7,5 menit setelah push, dan binary dari Ubuntu 24.04 berjalan di
+Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 
 ---
 
@@ -173,9 +238,21 @@ prepared statement, dan sqlx memakainya untuk tiap query.
   marketplace).
 - Halaman `/pesanan` dan `/pengaturan/platform` ada di menu tapi belum dibuat —
   tautan mati.
-- Halaman edit produk belum ada. Kolom Aksi di tabel produk baru berisi
-  Aktifkan/Nonaktifkan. Import, Mapping, dan Stok belum punya endpoint.
-- Harga marketplace belum ditampilkan di tabel produk (baru ada di form tambah).
+- Import dan Mapping produk belum punya endpoint.
+- **Kasir belum layak di ponsel.** Sidebar selalu memakan 15rem dan `AppShell`
+  tidak punya tombol hamburger maupun breakpoint, jadi di layar 360px hanya
+  tersisa ~120px untuk isi. Perbaikan terkecilnya satu media query yang
+  memaksa sidebar jadi rel ikon di bawah 768px — tapi itu mengubah tata letak
+  semua halaman dan membuat tombol "Ciutkan" tidak berfungsi di layar kecil.
+- **Daftar produk di kasir dibatasi 200 baris** (`LIMIT_MAKS`). Begitu katalog
+  jual melewati 200, sisanya hanya muncul lewat pencarian; halamannya memberi
+  keterangan, bukan paginasi.
+- Harga marketplace belum ditampilkan di tabel produk (baru ada di form tambah
+  dan halaman produk).
+- Batch belum dipakai saat stok berkurang: `quantity` adalah jumlah yang masuk,
+  bukan sisa per batch, jadi penjualan belum memotong batch terdekat
+  kedaluwarsanya (FEFO). Yang sudah ada: kedaluwarsa terdekat per produk
+  tampil di daftar dan ditandai merah bila ≤ 30 hari.
 - Sortir kolom di tabel produk belum ada; backend selalu `ORDER BY name`.
 
 **Mungkin tidak perlu**

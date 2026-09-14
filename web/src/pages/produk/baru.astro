@@ -1,0 +1,338 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import { api, ApiRequestError, type Category, type Product } from '../../lib/api';
+import { berandaUntuk } from '../../lib/session';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+// Menambah produk adalah wewenang Owner, sama seperti di backend.
+if (user.role !== 'owner') {
+  return Astro.redirect(berandaUntuk(user.role), 302);
+}
+
+let galat: string | null = null;
+// Isian yang barusan dikirim, dipakai mengisi ulang form saat validasi gagal.
+let terkirim: FormData | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  terkirim = form;
+
+  const teks = (kolom: string): string | undefined =>
+    String(form.get(kolom) ?? '').trim() || undefined;
+
+  const nama = String(form.get('name') ?? '').trim();
+  const harga = Number(form.get('price'));
+  const stok = Number(form.get('stock_qty') ?? 0);
+
+  // Harga marketplace boleh dikosongkan: kosong berarti "belum diatur, pakai
+  // harga dasar". Dikirim sebagai undefined, bukan 0 -- 0 berarti gratis, dan
+  // produk gratis di marketplace adalah kerugian langsung.
+  const angkaOpsional = (kolom: string): number | undefined => {
+    const mentah = teks(kolom);
+    if (!mentah) return undefined;
+    const nilai = Number(mentah);
+    return Number.isFinite(nilai) ? nilai : undefined;
+  };
+  const hargaShopee = angkaOpsional('price_shopee');
+  const hargaTiktok = angkaOpsional('price_tiktok');
+
+  if (!nama) {
+    galat = 'Nama produk wajib diisi.';
+  } else if (!Number.isFinite(harga) || harga < 0) {
+    galat = 'Harga dasar harus berupa angka yang tidak negatif.';
+  } else if ((hargaShopee ?? 0) < 0 || (hargaTiktok ?? 0) < 0) {
+    galat = 'Harga marketplace tidak boleh negatif.';
+  } else {
+    try {
+      const dibuat = await api<Product>('/products', {
+        method: 'POST',
+        token,
+        body: {
+          name: nama,
+          seo_name: teks('seo_name'),
+          brand_name: teks('brand_name'),
+          product_type: teks('product_type'),
+          variant_color: teks('variant_color'),
+          variant_size: teks('variant_size'),
+          category_id: teks('category_id'),
+          price: harga,
+          price_shopee: hargaShopee,
+          price_tiktok: hargaTiktok,
+          cost_price: angkaOpsional('cost_price'),
+          stock_qty: Number.isFinite(stok) ? stok : 0,
+          batch_number: teks('batch_number'),
+          expiry_date: teks('expiry_date'),
+          low_stock_threshold: Number(form.get('low_stock_threshold')) || 5,
+          unit: teks('unit'),
+          storage_location: teks('storage_location'),
+        },
+      });
+
+      // POST/redirect/GET. Dua sebabnya: me-refresh halaman hasil tidak bisa
+      // membuat produk kedua, dan pengguna mendarat tepat di tempat ia bisa
+      // langsung menambah varian dan batch berikutnya.
+      return Astro.redirect(`/produk/${dibuat.id}?dibuat=1`, 303);
+    } catch (err) {
+      galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan produk.';
+    }
+  }
+}
+
+/**
+ * Nilai satu isian. Setelah POST gagal diambil dari yang barusan dikirim,
+ * supaya satu galat validasi tidak menghapus belasan isian yang sudah
+ * diketik.
+ */
+const isi = (kolom: string, baku = ''): string =>
+  terkirim ? String(terkirim.get(kolom) ?? '') : baku;
+
+const kategori = await api<Category[]>('/categories', { token });
+
+// Satu larik menyetir bilah tab DAN judul tiap bagian, jadi keduanya tidak
+// bisa lepas sinkron.
+const BAGIAN = [
+  { id: 'informasi', judul: 'Informasi Produk' },
+  { id: 'atribut', judul: 'Atribut & SKU' },
+  { id: 'penjualan', judul: 'Informasi Penjualan' },
+  { id: 'stok', judul: 'Stok & Penyimpanan' },
+];
+---
+
+<AppShell judul="Tambah Produk Baru" user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/produk">Produk</a>
+    <span aria-hidden="true">›</span>
+    <span aria-current="page">Tambah Produk Baru</span>
+  </nav>
+
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+
+  {/* Tautan lompat, bukan panel yang saling menyembunyikan: seluruh bagian
+      tetap terlihat saat digulir. Sengaja tanpa penanda "tab aktif" -- CSS
+      tidak pernah tahu posisi gulir, dan penanda yang mengikuti klik terakhir
+      akan menunjuk bagian yang salah begitu pengguna menggulir sendiri. */}
+  <nav class="bilah-tab" aria-label="Bagian formulir">
+    {BAGIAN.map((b) => (
+      <a class="tab-bagian" href={`#${b.id}`}>{b.judul}</a>
+    ))}
+  </nav>
+
+  <form method="POST" class="flex flex-col gap-5">
+    <section id="informasi" class="kartu sasaran-bagian" aria-labelledby="j-informasi">
+      <h2 id="j-informasi" class="mb-4 font-semibold">Informasi Produk</h2>
+
+      <div class="borang-tegak">
+        <div class="isian">
+          <label class="label" for="name">Nama produk</label>
+          <input class="kolom" id="name" name="name" value={isi('name')} required />
+          <p class="isian-bantu">
+            Nama identifikasi internal — yang dicari di kasir dan dibaca pengepak. Pendek saja.
+          </p>
+        </div>
+
+        <div class="isian">
+          <label class="label" for="seo_name">Nama SEO produk</label>
+          <input class="kolom" id="seo_name" name="seo_name" value={isi('seo_name')} />
+          <p class="isian-bantu">
+            Nama yang ditampilkan di marketplace. Boleh panjang dan berisi kata kunci.
+          </p>
+        </div>
+
+        <div class="isian">
+          <label class="label" for="category_id">Kategori</label>
+          <select class="kolom" id="category_id" name="category_id">
+            <option value="" selected={!isi('category_id')}>— tanpa kategori —</option>
+            {kategori.map((k) => (
+              <option value={k.id} selected={isi('category_id') === k.id}>
+                {k.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section id="atribut" class="kartu sasaran-bagian" aria-labelledby="j-atribut">
+      <h2 id="j-atribut" class="mb-4 font-semibold">Atribut & SKU</h2>
+
+      <div class="borang-tegak">
+        <div class="isian">
+          <label class="label" for="brand_name">Merek</label>
+          <input class="kolom" id="brand_name" name="brand_name" value={isi('brand_name')} />
+        </div>
+
+        <div class="isian">
+          <label class="label" for="product_type">Jenis produk</label>
+          <input class="kolom" id="product_type" name="product_type" value={isi('product_type')} />
+        </div>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="variant_color">Warna</label>
+          <input class="kolom" id="variant_color" name="variant_color" value={isi('variant_color')} />
+        </div>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="variant_size">Ukuran</label>
+          <input class="kolom" id="variant_size" name="variant_size" value={isi('variant_size')} />
+        </div>
+
+        <p class="isian isian-bantu">
+          SKU dibuat otomatis dengan format
+          <strong>Merek - Jenis Produk - Warna - Ukuran</strong>, jadi tidak perlu diketik.
+          Bagian yang dikosongkan dilewati.
+        </p>
+      </div>
+    </section>
+
+    <section id="penjualan" class="kartu sasaran-bagian" aria-labelledby="j-penjualan">
+      <h2 id="j-penjualan" class="mb-4 font-semibold">Informasi Penjualan</h2>
+
+      <div class="borang-tegak">
+        <div class="isian isian-pendek">
+          <label class="label" for="unit">Satuan</label>
+          <input class="kolom" id="unit" name="unit" value={isi('unit')} placeholder="pcs" />
+        </div>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="price">Harga dasar / kasir (Rp)</label>
+          <input
+            class="kolom"
+            id="price"
+            name="price"
+            type="number"
+            min="0"
+            step="1"
+            value={isi('price')}
+            required
+          />
+        </div>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="price_shopee">Harga Shopee (Rp)</label>
+          <input
+            class="kolom"
+            id="price_shopee"
+            name="price_shopee"
+            type="number"
+            min="0"
+            step="1"
+            value={isi('price_shopee')}
+            placeholder="ikut harga dasar"
+          />
+        </div>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="price_tiktok">Harga Tokopedia / TikTok (Rp)</label>
+          <input
+            class="kolom"
+            id="price_tiktok"
+            name="price_tiktok"
+            type="number"
+            min="0"
+            step="1"
+            value={isi('price_tiktok')}
+            placeholder="ikut harga dasar"
+          />
+        </div>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="cost_price">Harga modal (Rp)</label>
+          <input
+            class="kolom"
+            id="cost_price"
+            name="cost_price"
+            type="number"
+            min="0"
+            step="1"
+            value={isi('cost_price')}
+          />
+        </div>
+
+        <p class="isian isian-bantu">
+          Harga marketplace boleh dikosongkan — artinya belum diatur dan mengikuti harga dasar.
+          Mengisi 0 berarti digratiskan. Kalau produk ini nanti punya varian, harga yang berlaku
+          adalah harga tiap variannya.
+        </p>
+      </div>
+    </section>
+
+    <section id="stok" class="kartu sasaran-bagian" aria-labelledby="j-stok">
+      <h2 id="j-stok" class="mb-4 font-semibold">Stok & Penyimpanan</h2>
+
+      <div class="borang-tegak">
+        <p class="label">Batch pertama</p>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="stock_qty">Stok awal</label>
+          <input
+            class="kolom"
+            id="stock_qty"
+            name="stock_qty"
+            type="number"
+            min="0"
+            value={isi('stock_qty', '0')}
+          />
+        </div>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="batch_number">No. batch</label>
+          <input
+            class="kolom"
+            id="batch_number"
+            name="batch_number"
+            value={isi('batch_number')}
+            placeholder="opsional"
+          />
+        </div>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="expiry_date">Kedaluwarsa</label>
+          <input
+            class="kolom"
+            id="expiry_date"
+            name="expiry_date"
+            type="date"
+            value={isi('expiry_date')}
+          />
+        </div>
+
+        <p class="isian isian-bantu">
+          Stok awal dicatat sebagai batch pertama produk ini. Batch berikutnya ditambahkan dari
+          halaman produk. Isi 0 kalau barangnya belum datang.
+        </p>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="low_stock_threshold">Batas stok menipis</label>
+          <input
+            class="kolom"
+            id="low_stock_threshold"
+            name="low_stock_threshold"
+            type="number"
+            min="0"
+            value={isi('low_stock_threshold', '5')}
+          />
+        </div>
+
+        <div class="isian">
+          <label class="label" for="storage_location">Lokasi penyimpanan</label>
+          <input
+            class="kolom"
+            id="storage_location"
+            name="storage_location"
+            value={isi('storage_location')}
+            placeholder="mis. Rak A3"
+          />
+          <p class="isian-bantu">Ditampilkan ke pengepak di tiket packing.</p>
+        </div>
+      </div>
+    </section>
+
+    {/* Di dalam <form>, jadi tombolnya tidak perlu atribut form=. */}
+    <div class="bilah-aksi">
+      <a class="tombol-halus flex-1 text-center sm:flex-none" href="/produk">Kembali</a>
+      <button class="tombol-utama flex-1 sm:flex-none" type="submit">Simpan produk</button>
+    </div>
+  </form>
+</AppShell>

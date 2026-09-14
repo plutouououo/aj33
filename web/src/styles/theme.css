@@ -48,6 +48,16 @@
 
   /* Lebar sidebar dipakai layout dan tombol ciutkan, jadi satu angka saja. */
   --lebar-sidebar: 15rem;
+
+  /* Tinggi bilah tab dipakai dua kali: oleh bilahnya sendiri dan oleh
+     scroll-margin tiap bagian. Satu angka supaya lompatan #anchor tidak
+     pernah berhenti di balik bilah yang menempel. */
+  --tinggi-bilah-tab: 3.25rem;
+
+  /* Lebar maksimum satu kolom isian. Isian yang menurun ke bawah tanpa batas
+     lebar justru lebih sulit dibaca di monitor lebar: mata harus menyeberangi
+     layar untuk tiap baris. 34rem kira-kira sepanjang satu kalimat nyaman. */
+  --lebar-borang: 34rem;
 }
 
 @layer base {
@@ -81,6 +91,16 @@
   @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5
          text-sm font-semibold transition-colors
          disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+/*
+  Pil saringan yang bisa ditekan. Sengaja bukan varian `lencana`: lencana
+  hanya menampilkan status dan tidak bisa diklik, sedangkan pil adalah target
+  sentuh -- paddingnya lebih besar dan punya keadaan hover.
+*/
+@utility pil {
+  @apply inline-flex shrink-0 items-center whitespace-nowrap rounded-full border
+         px-4 py-2 text-sm font-medium transition-colors;
 }
 
 @utility lencana {
@@ -231,6 +251,195 @@
     @apply flex items-center gap-3 rounded-lg bg-merah-50 px-3 py-2.5 text-sm
            font-semibold text-merah-700;
   }
+
+  /* --- Remah roti ----------------------------------------------------- */
+
+  /* Halaman dalam tidak punya nama induknya di topbar -- topbar hanya
+     menampilkan judul halaman itu sendiri -- jadi jalan kembalinya harus
+     ditulis di badan halaman. */
+  .remah {
+    @apply mb-4 flex flex-wrap items-center gap-1.5 text-sm
+           text-[var(--color-teks-lembut)];
+  }
+  .remah a {
+    @apply rounded hover:text-merah-700 hover:underline;
+  }
+  .remah [aria-current='page'] {
+    @apply font-medium text-[var(--color-teks)];
+  }
+
+  /* --- Bilah tab bagian ----------------------------------------------- */
+
+  /* Tautan lompat ke bagian-bagian formulir panjang. BUKAN panel yang saling
+     menyembunyikan: seluruh bagian tetap terlihat saat digulir, jadi form
+     tetap bisa diisi berurutan tanpa JavaScript.
+     `-mx-6 px-6` membatalkan padding <main> milik AppShell supaya latarnya
+     penuh selebar kolom isi. z-10, tetap di bawah sidebar yang z-20. */
+  .bilah-tab {
+    @apply sticky top-0 z-10 -mx-4 mb-5 flex h-[var(--tinggi-bilah-tab)]
+           items-stretch gap-1 overflow-x-auto border-b
+           border-[var(--color-garis)] bg-[var(--color-permukaan)] px-4
+           md:-mx-6 md:px-6;
+  }
+  .tab-bagian {
+    @apply inline-flex shrink-0 items-center whitespace-nowrap border-b-2
+           border-transparent px-3 text-sm font-medium
+           text-[var(--color-teks-lembut)] transition-colors
+           hover:border-merah-200 hover:text-merah-700;
+  }
+
+  /* Sasaran lompatan. Tanpa scroll-margin, #anchor berhenti tepat di bawah
+     bilah tab yang menempel dan judul bagiannya tertutup.
+     `:target` menyorot bagian TUJUAN, bukan tabnya -- lihat panduan-ui.md
+     soal kenapa bilah tab sengaja tidak punya keadaan aktif. */
+  .sasaran-bagian {
+    scroll-margin-top: calc(var(--tinggi-bilah-tab) + 1rem);
+  }
+  .sasaran-bagian:target {
+    @apply ring-2 ring-merah-100;
+  }
+
+  /* --- Bilah aksi menempel -------------------------------------------- */
+
+  /* Tombol simpan formulir panjang harus terjangkau dari bagian mana pun,
+     jadi tidak ikut tergulir. `-mx-6 -mb-6` membatalkan padding <main> milik
+     AppShell supaya bilahnya rapat ke tepi bawah kolom isi -- kalau padding
+     itu berubah, bilah ini ikut rusak. */
+  .bilah-aksi {
+    @apply sticky bottom-0 z-10 -mx-4 -mb-4 mt-6 flex flex-wrap items-center
+           justify-end gap-3 border-t border-[var(--color-garis)]
+           bg-[var(--color-permukaan)] px-4 py-3.5
+           md:-mx-6 md:-mb-6 md:px-6;
+  }
+
+  /* --- Susunan isian menurun ------------------------------------------ */
+
+  /* Satu isian per baris. Isian bersebelahan membuat mata memindai zig-zag,
+     dan urutan Tab-nya berhenti sama dengan urutan bacanya. */
+  .borang-tegak {
+    @apply flex flex-col gap-5;
+  }
+  .isian {
+    @apply max-w-[var(--lebar-borang)];
+  }
+  /* Angka, tanggal, dan satuan tidak butuh lebar sekalimat. */
+  .isian-pendek {
+    @apply max-w-[14rem];
+  }
+  .isian-bantu {
+    @apply mt-1.5 text-xs text-[var(--color-teks-lembut)];
+  }
+
+  /* --- Penunjuk langkah ------------------------------------------------ */
+
+  /* Kasir berjalan tiga langkah. Tanpa penunjuk, kasir yang terpotong di
+     tengah transaksi tidak tahu posisinya dan mengulang dari awal. Angkanya
+     tetap ditulis, bukan cuma warna -- status tidak pernah disampaikan lewat
+     warna saja. */
+  .langkah {
+    @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border-2
+           border-[var(--color-garis)] bg-white text-sm font-bold
+           text-[var(--color-teks-samar)];
+  }
+  .langkah-aktif {
+    @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border-2
+           border-merah-600 bg-merah-600 text-sm font-bold text-white;
+  }
+  /* Hijau yang sama dengan `.lencana-selesai`, supaya "sudah beres" berarti
+     hal yang sama di seluruh aplikasi. */
+  .langkah-selesai {
+    @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border-2
+           border-emerald-600 bg-emerald-600 text-sm font-bold text-white;
+  }
+  .langkah-penghubung {
+    @apply h-0.5 w-8 shrink-0 bg-[var(--color-garis)];
+  }
+  .langkah-penghubung-lewat {
+    @apply h-0.5 w-8 shrink-0 bg-emerald-600;
+  }
+
+  /* --- Pil saringan ---------------------------------------------------- */
+
+  /* Kategori di kasir dipilih dengan satu ketukan, bukan lewat <select>:
+     memilih dari daftar gulung sambil memegang barang terlalu lambat.
+     Barisnya menggulung mendatar, jadi kategori boleh bertambah tanpa
+     mengubah tinggi layar. */
+  .pil-diam {
+    @apply pil border-[var(--color-garis)] bg-white text-stone-600
+           hover:border-merah-200 hover:bg-merah-50 hover:text-merah-700;
+  }
+  .pil-aktif {
+    @apply pil border-merah-600 bg-merah-600 text-white;
+  }
+
+  /* --- Baris produk kasir ---------------------------------------------- */
+
+  /* Satu baris = satu barang yang bisa dijual. Seluruh blok informasinya
+     adalah target ketuk "tambah satu", jadi paddingnya longgar. */
+  .baris-produk {
+    @apply flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border
+           border-[var(--color-garis)] bg-[var(--color-permukaan)] p-3
+           transition-colors;
+  }
+  .baris-produk-terpilih {
+    @apply flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border-2
+           border-merah-600 bg-merah-50 p-3 transition-colors;
+  }
+  /* Tombol bulat -/+ . 36px adalah target sentuh terkecil yang masih bisa
+     dikenai jempol tanpa perlu melihat. */
+  .tombol-bulat {
+    @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border
+           border-[var(--color-garis)] bg-white text-lg leading-none
+           text-stone-700 transition-colors hover:border-merah-300
+           hover:bg-merah-50 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  /* --- Bilah bawah kasir ------------------------------------------------ */
+
+  /* Sama menempelnya dengan `.bilah-aksi`, tapi isinya ringkasan keranjang
+     yang harus terbaca sekilas, jadi tidak rata kanan dan diberi bayangan
+     supaya terpisah dari daftar produk yang bergulir di belakangnya. */
+  .bilah-bawah {
+    @apply sticky bottom-0 z-10 -mx-4 -mb-4 mt-6 flex flex-wrap items-center
+           gap-3 border-t border-[var(--color-garis)]
+           bg-[var(--color-permukaan)] px-4 py-3
+           shadow-[0_-2px_8px_rgba(0,0,0,0.06)]
+           md:-mx-6 md:-mb-6 md:px-6;
+  }
+
+  /* --- Kotak kembalian -------------------------------------------------- */
+
+  /* Angka yang dibacakan ke pembeli. Ditulis sebesar mungkin karena inilah
+     satu-satunya angka di layar yang salah bacanya berarti uang hilang. */
+  .kotak-kembalian {
+    @apply rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3
+           text-emerald-900;
+  }
+  .kotak-kembalian-angka {
+    @apply text-2xl font-bold tabular-nums;
+  }
+}
+
+/*
+  Saklar progressive enhancement untuk halaman kasir.
+
+  `data-js` dipasang skrip di halaman itu sebagai baris pertamanya. Tombol
+  -/+ hanya berguna kalau ada JavaScript; kolom angka hanya perlu terlihat
+  kalau tidak ada. KEDUANYA selalu ada di HTML dan selalu ikut terkirim --
+  yang berubah cuma yang terlihat. Karena itu server menerima bentuk data
+  yang sama persis apakah JavaScript hidup atau mati.
+
+  Ditaruh di luar @layer components dengan alasan yang sama seperti blok
+  sidebar di bawah: `:root` bukan milik komponen mana pun.
+*/
+.hanya-js {
+  display: none;
+}
+:root[data-js] .hanya-js {
+  display: inline-flex;
+}
+:root[data-js] .tanpa-js {
+  display: none;
 }
 
 /*
@@ -248,4 +457,25 @@
 }
 :root[data-sidebar='ciut'] .nav-judul {
   padding-top: 1rem;
+}
+
+/*
+  Di bawah breakpoint md, sidebar berubah jadi laci geser yang menutupi isi,
+  bukan kolom di sampingnya. Dua hal harus dipaksa kembali normal di sana:
+
+  Lebarnya. Kalau pengguna pernah menciutkan sidebar di desktop, pilihan itu
+  tersimpan di localStorage dan ikut terbawa ke ponsel -- lacinya akan terbuka
+  selebar 4,25rem berisi ikon tanpa teks, yang tidak ada gunanya sebagai menu
+  layar penuh.
+
+  Tombol "Ciutkan" sendiri sudah disembunyikan lewat `md:flex` di AppShell,
+  jadi di layar kecil keadaan ini tidak bisa diubah dari mana pun.
+*/
+@media (max-width: 47.9375rem) {
+  :root[data-sidebar='ciut'] {
+    --lebar-sidebar: 15rem;
+  }
+  :root[data-sidebar='ciut'] .teks-sidebar {
+    display: revert;
+  }
 }

@@ -1,0 +1,172 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_shopee, p.price_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.unit, p.storage_location,\n            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.parent_id = $1\n        ORDER BY p.variant_color NULLS FIRST, p.variant_size NULLS FIRST, p.name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "category_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "category_name?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "seo_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "sku",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "brand_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "product_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "variant_color",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "variant_size",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "parent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "variant_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 13,
+        "name": "price_shopee",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 14,
+        "name": "price_tiktok",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 15,
+        "name": "cost_price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 16,
+        "name": "stock_qty",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "low_stock_threshold",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 18,
+        "name": "image_url",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 19,
+        "name": "unit",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 20,
+        "name": "storage_location",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 21,
+        "name": "nearest_expiry?",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 22,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 23,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 24,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 25,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "703315167381a1999b0ad0d6381a2eadabc9f12f05a5c0b6570fc152c7e31722"
+}

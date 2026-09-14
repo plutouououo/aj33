@@ -1,184 +1,838 @@
 ---
 import AppShell from '../layouts/AppShell.astro';
-import { api, ApiRequestError, type PaginatedProducts, type Transaction } from '../lib/api';
+import {
+  api,
+  ApiRequestError,
+  type Category,
+  type Customer,
+  type PaginatedProducts,
+  type Transaction,
+} from '../lib/api';
 import { rupiah } from '../lib/format';
+import { berandaUntuk } from '../lib/session';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
 
 if (user.role === 'pengepak') {
-  return Astro.redirect('/tiket', 302);
+  return Astro.redirect(berandaUntuk(user.role), 302);
 }
 
+/**
+ * Satu baris keranjang.
+ *
+ * `nama` dan `harga` ikut dibawa HANYA untuk ditampilkan di langkah 2 tanpa
+ * query kedua. Server tidak pernah mempercayainya: harga ditetapkan ulang
+ * dari baris produk yang dikunci saat checkout, jadi mengubah nilai ini lewat
+ * DevTools paling jauh membuat ringkasan di layar berbeda dari struknya.
+ */
+interface BarisKeranjang {
+  product_id: string;
+  qty: number;
+  nama: string;
+  harga: number;
+}
+
+let langkah: 1 | 2 | 3 = 1;
 let galat: string | null = null;
+let sukses: string | null = null;
 let struk: Transaction | null = null;
+let keranjang: BarisKeranjang[] = [];
+
+// Nilai isian langkah 2, diisi ulang saat pembayaran gagal supaya kasir tidak
+// perlu mengetik semuanya dari awal.
+let pelangganDipilih = '';
+let metode = 'cash';
+let ongkirIsi = '';
+let dibayarIsi = '';
+let cariIsi = '';
+let kategoriIsi = '';
+
+/**
+ * Keranjang dibaca dari pasangan field berulang. Bentuk ini sengaja sama
+ * dengan yang sudah dipakai halaman ini sebelumnya, jadi satu pembacaan
+ * melayani perpindahan antar-langkah maupun checkout.
+ */
+function bacaKeranjang(form: FormData): BarisKeranjang[] {
+  const ids = form.getAll('product_id');
+  const qty = form.getAll('qty');
+  const nama = form.getAll('nama');
+  const harga = form.getAll('harga');
+
+  return ids
+    .map((id, i) => ({
+      product_id: String(id),
+      qty: Number(qty[i] ?? 0),
+      nama: String(nama[i] ?? ''),
+      harga: Number(harga[i] ?? 0),
+    }))
+    .filter((b) => Number.isFinite(b.qty) && b.qty > 0);
+}
+
+/**
+ * Kunci idempotensi. Dibuat sekali saat halaman dibuka, lalu dibawa hidden
+ * melewati seluruh langkah dan DIBACA ULANG dari form -- tidak pernah dibuat
+ * ulang. Kalau dibuat ulang tiap render, penjagaan kirim-dua-kali hilang;
+ * kalau dipakai lagi setelah berhasil, transaksi lama yang dikembalikan.
+ * "Penjualan baru" di langkah 3 adalah tautan GET, jadi kuncinya segar.
+ */
+let kunci = '';
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
+  const aksi = String(form.get('aksi') ?? '');
 
-  // Keranjang dikirim sebagai pasangan produk+jumlah dari form. Baris dengan
-  // jumlah 0 dibuang di sini; produk yang sama muncul dua kali tetap aman --
-  // backend yang menggabungkannya sebelum stok diperiksa.
-  const items = form
-    .getAll('product_id')
-    .map((id, i) => ({
-      product_id: String(id),
-      qty: Number(form.getAll('qty')[i] ?? 0),
-    }))
-    .filter((it) => Number.isFinite(it.qty) && it.qty > 0);
+  kunci = String(form.get('idempotency_key') ?? '');
+  keranjang = bacaKeranjang(form);
+  cariIsi = String(form.get('cari') ?? '').trim();
+  kategoriIsi = String(form.get('kategori') ?? '');
 
-  const metode = String(form.get('payment_method') ?? 'cash');
-  const dibayar = Number(form.get('amount_paid'));
+  const angka = (kolom: string): number | undefined => {
+    const mentah = String(form.get(kolom) ?? '').trim();
+    if (!mentah) return undefined;
+    const nilai = Number(mentah);
+    return Number.isFinite(nilai) ? nilai : undefined;
+  };
 
-  // Kunci idempotensi dibuat server saat form dirender dan ikut terkirim,
-  // jadi menekan "Bayar" dua kali atau me-refresh halaman hasil POST tidak
-  // membuat transaksi kedua.
-  const idempotencyKey = String(form.get('idempotency_key') ?? '');
+  if (aksi === 'lanjut') {
+    if (keranjang.length === 0) {
+      galat = 'Keranjang masih kosong.';
+    } else {
+      langkah = 2;
+    }
+  } else if (aksi === 'saring' || aksi === 'kembali') {
+    // Keduanya kembali ke langkah 1 dengan keranjang utuh. `saring` hanya
+    // dipakai saat JavaScript mati -- dengan JS, penyaringan terjadi di
+    // tempat tanpa memuat ulang.
+    langkah = 1;
+  } else if (aksi === 'pelanggan-baru' || aksi === 'bayar') {
+    langkah = 2;
+    pelangganDipilih = String(form.get('customer_id') ?? '');
+    metode = String(form.get('payment_method') ?? 'cash');
+    ongkirIsi = String(form.get('shipping_cost') ?? '').trim();
+    dibayarIsi = String(form.get('amount_paid') ?? '').trim();
 
-  if (items.length === 0) {
-    galat = 'Keranjang masih kosong.';
-  } else if (!idempotencyKey) {
-    galat = 'Sesi kasir tidak valid. Muat ulang halaman.';
-  } else {
-    try {
-      struk = await api<Transaction>('/transactions', {
-        method: 'POST',
-        token,
-        headers: { 'Idempotency-Key': idempotencyKey },
-        body: {
-          payment_method: metode,
-          amount_paid: metode === 'cash' && Number.isFinite(dibayar) ? dibayar : undefined,
-          items,
-        },
-      });
-    } catch (err) {
-      galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan transaksi.';
+    if (aksi === 'pelanggan-baru') {
+      const nama = String(form.get('pelanggan_nama') ?? '').trim();
+      if (!nama) {
+        galat = 'Nama pelanggan wajib diisi.';
+      } else {
+        try {
+          const baru = await api<Customer>('/customers', {
+            method: 'POST',
+            token,
+            body: { name: nama, phone: String(form.get('pelanggan_telepon') ?? '').trim() || undefined },
+          });
+          pelangganDipilih = baru.id;
+          sukses = `Pelanggan "${baru.name ?? nama}" siap dipakai.`;
+        } catch (err) {
+          galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan pelanggan.';
+        }
+      }
+    } else if (keranjang.length === 0) {
+      galat = 'Keranjang masih kosong.';
+      langkah = 1;
+    } else if (!kunci) {
+      galat = 'Sesi kasir tidak valid. Muat ulang halaman.';
+    } else {
+      try {
+        struk = await api<Transaction>('/transactions', {
+          method: 'POST',
+          token,
+          headers: { 'Idempotency-Key': kunci },
+          body: {
+            customer_id: pelangganDipilih || undefined,
+            payment_method: metode,
+            amount_paid: metode === 'cash' ? angka('amount_paid') : undefined,
+            shipping_cost: angka('shipping_cost'),
+            items: keranjang.map((b) => ({ product_id: b.product_id, qty: b.qty })),
+          },
+        });
+        langkah = 3;
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan transaksi.';
+      }
     }
   }
 }
 
-const daftar = await api<PaginatedProducts>('/products?limit=100', { token });
-const kunciBaru = crypto.randomUUID();
+if (!kunci) kunci = crypto.randomUUID();
+
+// Hanya yang dibutuhkan langkah yang sedang dirender yang diambil.
+let produk: PaginatedProducts | null = null;
+let kategori: Category[] = [];
+let pelanggan: Customer[] = [];
+
+if (langkah === 1) {
+  const kueri = new URLSearchParams({ scope: 'terjual', limit: '200' });
+  if (cariIsi) kueri.set('search', cariIsi);
+  if (kategoriIsi) kueri.set('category_id', kategoriIsi);
+
+  [produk, kategori] = await Promise.all([
+    api<PaginatedProducts>(`/products?${kueri}`, { token }),
+    api<Category[]>('/categories', { token }),
+  ]);
+} else if (langkah === 2) {
+  pelanggan = await api<Customer[]>('/customers?limit=200', { token });
+}
+
+// Barang habis tidak ditampilkan sama sekali: barisnya hanya memenuhi layar
+// dengan sesuatu yang tidak bisa dijual.
+const barang = (produk?.data ?? []).filter((p) => p.stock_qty > 0);
+const adaYangTerpotong = produk !== null && produk.total > produk.data.length;
+
+const jumlahDipilih = new Map(keranjang.map((b) => [b.product_id, b.qty]));
+const totalItem = keranjang.reduce((n, b) => n + b.qty, 0);
+const totalBelanja = keranjang.reduce((n, b) => n + b.harga * b.qty, 0);
+
+const LANGKAH = [
+  { n: 1, label: 'Pilih produk' },
+  { n: 2, label: 'Pembayaran' },
+  { n: 3, label: 'Selesai' },
+];
+
+const METODE = [
+  { nilai: 'cash', label: 'Tunai' },
+  { nilai: 'transfer', label: 'Transfer' },
+  { nilai: 'ewallet', label: 'E-wallet' },
+];
+
+/** Nama yang bisa dibaca untuk pelanggan yang namanya kosong di database. */
+const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama)';
 ---
 
 <AppShell judul="Kasir" user={user}>
-  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  {/* Penunjuk langkah. Angkanya tetap ditulis, bukan hanya warna. */}
+  <ol class="mb-5 flex items-center justify-center gap-2" aria-label="Langkah transaksi">
+    {
+      LANGKAH.map((l, i) => (
+        <li class="flex items-center gap-2">
+          <div class="flex flex-col items-center gap-1">
+            <span
+              class={
+                langkah === l.n
+                  ? 'langkah-aktif'
+                  : langkah > l.n
+                    ? 'langkah-selesai'
+                    : 'langkah'
+              }
+              aria-current={langkah === l.n ? 'step' : undefined}
+            >
+              {langkah > l.n ? '✓' : l.n}
+            </span>
+            <span class="text-xs text-[var(--color-teks-lembut)]">{l.label}</span>
+          </div>
+          {i < LANGKAH.length - 1 && (
+            <span
+              class={langkah > l.n ? 'langkah-penghubung-lewat' : 'langkah-penghubung'}
+              aria-hidden="true"
+            />
+          )}
+        </li>
+      ))
+    }
+  </ol>
 
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+
+  {/* ================================================================= */}
+  {/* Langkah 1 — pilih produk                                          */}
+  {/* ================================================================= */}
   {
-    struk && (
-      <div class="kartu mb-6 border-emerald-200 bg-emerald-50">
-        <div class="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 class="font-bold text-emerald-900">Transaksi berhasil</h2>
-          <span class="text-xs text-emerald-700">#{struk.id.slice(0, 8)}</span>
+    langkah === 1 && (
+      <form method="POST" id="borang-kasir">
+        <input type="hidden" name="idempotency_key" value={kunci} />
+
+        {/* Saringan ikut di dalam form yang sama, bukan form GET terpisah:
+            keranjang hidup di hidden field, dan navigasi GET akan
+            membuangnya. Konsekuensinya keadaan saringan tidak ada di URL --
+            pengecualian sadar dari prinsip 4, karena keranjang setengah jadi
+            memang bukan sesuatu yang bisa di-bookmark. */}
+        <div class="kartu mb-4">
+          <label class="label" for="cari">Cari produk</label>
+          <div class="flex flex-wrap gap-2">
+            <input
+              class="kolom max-w-md flex-1"
+              id="cari"
+              type="search"
+              name="cari"
+              value={cariIsi}
+              placeholder="Nama atau SKU..."
+              data-cari
+            />
+            <button class="tombol-halus tanpa-js" type="submit" name="aksi" value="saring">
+              Terapkan
+            </button>
+          </div>
+
+          {kategori.length > 0 && (
+            <div class="mt-3 flex gap-2 overflow-x-auto pb-1" data-pil-kategori>
+              <label class={kategoriIsi ? 'pil-diam' : 'pil-aktif'}>
+                <input
+                  class="sr-only"
+                  type="radio"
+                  name="kategori"
+                  value=""
+                  checked={!kategoriIsi}
+                />
+                Semua
+              </label>
+              {kategori.map((k) => (
+                <label class={kategoriIsi === k.id ? 'pil-aktif' : 'pil-diam'}>
+                  <input
+                    class="sr-only"
+                    type="radio"
+                    name="kategori"
+                    value={k.id}
+                    checked={kategoriIsi === k.id}
+                  />
+                  {k.name}
+                </label>
+              ))}
+            </div>
+          )}
+
+          <p class="isian-bantu tanpa-js">
+            Isi jumlah di tiap barang lalu tekan "Lanjut ke pembayaran".
+          </p>
         </div>
 
-        <table class="mt-4 w-full text-sm">
-          <tbody>
-            {struk.items.map((it) => (
-              <tr>
-                <td class="py-1">
-                  {it.product_name_snapshot}
-                  <span class="text-stone-500"> × {it.qty}</span>
-                </td>
-                <td class="py-1 text-right tabular-nums">{rupiah(it.subtotal)}</td>
-              </tr>
-            ))}
-            <tr class="border-t border-emerald-200 font-semibold">
-              <td class="py-2">Total</td>
-              <td class="py-2 text-right tabular-nums">{rupiah(struk.total_amount)}</td>
-            </tr>
-            {struk.amount_paid !== null && (
-              <>
-                <tr>
-                  <td class="py-1 text-stone-600">Dibayar</td>
-                  <td class="py-1 text-right tabular-nums">{rupiah(struk.amount_paid)}</td>
-                </tr>
-                <tr>
-                  <td class="py-1 text-stone-600">Kembali</td>
-                  <td class="py-1 text-right tabular-nums">{rupiah(struk.change_amount ?? 0)}</td>
-                </tr>
-              </>
-            )}
-          </tbody>
-        </table>
+        {adaYangTerpotong && (
+          <p class="mb-3 text-xs text-[var(--color-teks-lembut)]">
+            Menampilkan 200 produk pertama. Pakai pencarian kalau yang dicari belum muncul.
+          </p>
+        )}
 
-        <a href="/kasir" class="tombol-utama mt-5 w-full">Transaksi baru</a>
-      </div>
-    )
-  }
-
-  <form method="POST" class="grid gap-6 lg:grid-cols-[1fr_20rem]">
-    <input type="hidden" name="idempotency_key" value={kunciBaru} />
-
-    <div class="kartu">
-      <h2 class="mb-4 font-semibold">Pilih barang</h2>
-
-      <div class="grid gap-3 sm:grid-cols-2">
-        {
-          daftar.data.map((p) => {
-            const habis = p.stock_qty < 1;
+        <div class="flex flex-col gap-2" data-daftar>
+          {barang.map((p) => {
+            const jumlah = jumlahDipilih.get(p.id) ?? 0;
             return (
-              <label
-                class:list={[
-                  'flex items-center gap-3 rounded-lg border p-3',
-                  habis
-                    ? 'border-stone-200 bg-stone-50 opacity-60'
-                    : 'border-[var(--color-garis)] bg-white',
-                ]}
+              <div
+                class={jumlah > 0 ? 'baris-produk-terpilih' : 'baris-produk'}
+                data-produk
+                data-harga={p.price}
+                data-stok={p.stock_qty}
+                data-nama={p.name.toLowerCase()}
+                data-sku={(p.sku ?? '').toLowerCase()}
+                data-kategori={p.category_id ?? ''}
               >
                 <input type="hidden" name="product_id" value={p.id} />
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium">{p.name}</p>
-                  <p class="text-xs text-stone-500">
-                    {rupiah(p.price)} · stok {p.stock_qty}
-                  </p>
+                <input type="hidden" name="nama" value={p.name} />
+                <input type="hidden" name="harga" value={p.price} />
+
+                {/* Dua versi blok informasi. Yang bisa diketuk adalah tombol
+                    sungguhan (bisa dicapai keyboard, tidak men-submit); yang
+                    tanpa JS adalah teks biasa. Hanya satu yang terlihat. */}
+                <button type="button" class="hanya-js min-w-0 flex-1 text-left" data-tambah>
+                  <span class="block truncate text-sm font-medium">{p.name}</span>
+                  <span class="block text-xs text-[var(--color-teks-lembut)]">
+                    {p.sku ?? '—'} · Stok: {p.stock_qty}
+                  </span>
+                  <span class="block text-sm font-semibold">{rupiah(p.price)}</span>
+                </button>
+
+                <div class="tanpa-js min-w-0 flex-1">
+                  <span class="block truncate text-sm font-medium">{p.name}</span>
+                  <span class="block text-xs text-[var(--color-teks-lembut)]">
+                    {p.sku ?? '—'} · Stok: {p.stock_qty}
+                  </span>
+                  <span class="block text-sm font-semibold">{rupiah(p.price)}</span>
                 </div>
+
+                <button
+                  type="button"
+                  class="tombol-bulat hanya-js"
+                  data-kurang
+                  aria-label={`Kurangi ${p.name}`}
+                >
+                  −
+                </button>
+
                 <input
-                  class="kolom w-16 text-center"
+                  class="kolom w-16 shrink-0 text-center"
                   type="number"
                   name="qty"
                   min="0"
                   max={p.stock_qty}
-                  value="0"
-                  disabled={habis}
+                  value={jumlah}
+                  data-qty
                   aria-label={`Jumlah ${p.name}`}
                 />
-              </label>
+
+                <button
+                  type="button"
+                  class="tombol-bulat hanya-js"
+                  data-tambah
+                  aria-label={`Tambah ${p.name}`}
+                >
+                  +
+                </button>
+              </div>
             );
-          })
-        }
-      </div>
-    </div>
+          })}
 
-    <div class="kartu h-fit lg:sticky lg:top-6">
-      <h2 class="mb-4 font-semibold">Pembayaran</h2>
+          {barang.length === 0 && (
+            <p class="kartu text-center text-[var(--color-teks-lembut)]">
+              Tidak ada produk yang bisa dijual.
+            </p>
+          )}
+        </div>
 
-      <div class="mb-4">
-        <label class="label" for="payment_method">Metode</label>
-        <select class="kolom" id="payment_method" name="payment_method">
-          <option value="cash">Tunai</option>
-          <option value="transfer">Transfer</option>
-          <option value="ewallet">E-wallet</option>
-        </select>
-      </div>
-
-      <div class="mb-5">
-        <label class="label" for="amount_paid">Nominal dibayar (tunai)</label>
-        <input
-          class="kolom"
-          id="amount_paid"
-          name="amount_paid"
-          type="number"
-          min="0"
-          step="1"
-          placeholder="0"
-        />
-        <p class="mt-1.5 text-xs text-stone-500">
-          Diisi hanya untuk pembayaran tunai. Kembalian dihitung server.
+        <p
+          class="mt-4 hidden text-center text-sm text-[var(--color-teks-lembut)]"
+          data-kosong-saringan
+        >
+          Tidak ada produk yang cocok dengan pencarian ini.
         </p>
-      </div>
 
-      <button class="tombol-utama w-full" type="submit">Bayar</button>
-    </div>
-  </form>
+        <div class="bilah-bawah">
+          <span class="text-sm text-[var(--color-teks-lembut)]">
+            <span data-ringkas-item>{totalItem}</span> item ·
+            <span data-ringkas-produk> {keranjang.length}</span> produk
+          </span>
+          <span class="ml-auto text-base font-bold tabular-nums sm:ml-0" data-ringkas-total>
+            {rupiah(totalBelanja)}
+          </span>
+          <button
+            class="tombol-utama w-full sm:ml-auto sm:w-auto"
+            type="submit"
+            name="aksi"
+            value="lanjut"
+          >
+            Lanjut ke pembayaran →
+          </button>
+        </div>
+      </form>
+    )
+  }
+
+  {/* ================================================================= */}
+  {/* Langkah 2 — pembayaran                                            */}
+  {/* ================================================================= */}
+  {
+    langkah === 2 && (
+      <Fragment>
+        <div class="kartu mb-4">
+          <h2 class="mb-3 font-semibold">Ringkasan</h2>
+          <table class="w-full text-sm">
+            <tbody>
+              {keranjang.map((b) => (
+                <tr>
+                  <td class="py-1">
+                    {b.nama}
+                    <span class="text-[var(--color-teks-lembut)]"> × {b.qty}</span>
+                  </td>
+                  <td class="py-1 text-right tabular-nums">{rupiah(b.harga * b.qty)}</td>
+                </tr>
+              ))}
+              <tr class="border-t border-[var(--color-garis)] font-semibold">
+                <td class="py-2">Subtotal</td>
+                <td class="py-2 text-right tabular-nums" data-subtotal={totalBelanja}>
+                  {rupiah(totalBelanja)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pelanggan baru dibuat lewat POST tersendiri supaya tetap bekerja
+            tanpa JavaScript; keranjang ikut terbawa di hidden field dan
+            halaman kembali ke langkah 2 dengan pelanggan itu terpilih. */}
+        <details class="kartu mb-4">
+          <summary class="cursor-pointer list-none text-sm font-medium">
+            ＋ Tambah pelanggan baru
+          </summary>
+
+          <form method="POST" class="borang-tegak mt-4">
+            <input type="hidden" name="aksi" value="pelanggan-baru" />
+            <input type="hidden" name="idempotency_key" value={kunci} />
+            <input type="hidden" name="customer_id" value={pelangganDipilih} />
+            <input type="hidden" name="payment_method" value={metode} />
+            <input type="hidden" name="shipping_cost" value={ongkirIsi} />
+            <input type="hidden" name="amount_paid" value={dibayarIsi} />
+            {keranjang.map((b) => (
+              <Fragment>
+                <input type="hidden" name="product_id" value={b.product_id} />
+                <input type="hidden" name="qty" value={b.qty} />
+                <input type="hidden" name="nama" value={b.nama} />
+                <input type="hidden" name="harga" value={b.harga} />
+              </Fragment>
+            ))}
+
+            <div class="isian">
+              <label class="label" for="pelanggan_nama">Nama pelanggan</label>
+              <input class="kolom" id="pelanggan_nama" name="pelanggan_nama" required />
+            </div>
+
+            <div class="isian isian-pendek">
+              <label class="label" for="pelanggan_telepon">No. telepon</label>
+              <input
+                class="kolom"
+                id="pelanggan_telepon"
+                name="pelanggan_telepon"
+                type="tel"
+                placeholder="opsional"
+              />
+              <p class="isian-bantu">
+                Kalau nomornya sudah pernah dicatat, pelanggan lama yang dipakai — bukan dibuat
+                ganda.
+              </p>
+            </div>
+
+            <div class="isian">
+              <button class="tombol-halus" type="submit">Simpan pelanggan</button>
+            </div>
+          </form>
+        </details>
+
+        <form method="POST">
+          <input type="hidden" name="idempotency_key" value={kunci} />
+          {keranjang.map((b) => (
+            <Fragment>
+              <input type="hidden" name="product_id" value={b.product_id} />
+              <input type="hidden" name="qty" value={b.qty} />
+              <input type="hidden" name="nama" value={b.nama} />
+              <input type="hidden" name="harga" value={b.harga} />
+            </Fragment>
+          ))}
+
+          <div class="kartu borang-tegak">
+            <div class="isian">
+              <label class="label" for="customer_id">Pelanggan</label>
+              <select class="kolom" id="customer_id" name="customer_id">
+                <option value="" selected={!pelangganDipilih}>Tidak ada (Walk-in)</option>
+                {pelanggan.map((c) => (
+                  <option value={c.id} selected={pelangganDipilih === c.id}>
+                    {namaPelanggan(c)}
+                    {c.phone ? ` · ${c.phone}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div class="isian">
+              <p class="label">Metode pembayaran</p>
+              <div class="flex flex-wrap gap-2">
+                {METODE.map((m) => (
+                  <label
+                    class="pil-diam cursor-pointer has-[:checked]:border-merah-600 has-[:checked]:bg-merah-600 has-[:checked]:text-white"
+                  >
+                    <input
+                      class="sr-only"
+                      type="radio"
+                      name="payment_method"
+                      value={m.nilai}
+                      checked={metode === m.nilai}
+                      data-metode
+                    />
+                    {m.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div class="isian isian-pendek">
+              <label class="label" for="shipping_cost">Ongkos kirim (Rp)</label>
+              <input
+                class="kolom"
+                id="shipping_cost"
+                name="shipping_cost"
+                type="number"
+                min="0"
+                step="1"
+                value={ongkirIsi}
+                placeholder="0"
+                data-ongkir
+              />
+              <p class="isian-bantu">Ditambahkan ke total, tidak masuk harga barang.</p>
+            </div>
+
+            <div class="isian isian-pendek">
+              <label class="label" for="amount_paid">Jumlah diterima (tunai)</label>
+              <input
+                class="kolom"
+                id="amount_paid"
+                name="amount_paid"
+                type="number"
+                min="0"
+                step="1"
+                value={dibayarIsi}
+                placeholder="0"
+                data-dibayar
+              />
+              <p class="isian-bantu">
+                Diisi hanya untuk pembayaran tunai. Kembalian tetap dihitung ulang server.
+              </p>
+            </div>
+
+            <p class="isian text-sm">
+              Total dibayar:
+              <strong class="tabular-nums" data-total>{rupiah(totalBelanja)}</strong>
+            </p>
+
+            <p class="isian hidden text-sm font-semibold text-red-600" data-kurang>
+              Uang yang diterima masih kurang.
+            </p>
+
+            <div class="isian kotak-kembalian hidden" data-kotak-kembalian>
+              <p class="text-sm">Kembalian</p>
+              <p class="kotak-kembalian-angka" data-kembalian>—</p>
+            </div>
+          </div>
+
+          <div class="bilah-bawah">
+            <button class="tombol-halus flex-1 sm:flex-none" type="submit" name="aksi" value="kembali">
+              ← Kembali
+            </button>
+            <button
+              class="tombol-utama flex-1 sm:ml-auto sm:flex-none"
+              type="submit"
+              name="aksi"
+              value="bayar"
+            >
+              Selesaikan
+            </button>
+          </div>
+        </form>
+      </Fragment>
+    )
+  }
+
+  {/* ================================================================= */}
+  {/* Langkah 3 — konfirmasi                                            */}
+  {/* ================================================================= */}
+  {
+    langkah === 3 && struk && (
+      <div class="mx-auto max-w-md text-center">
+        <div class="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-emerald-100">
+          <span class="text-3xl text-emerald-600" aria-hidden="true">✓</span>
+        </div>
+        <h2 class="text-xl font-bold">Penjualan berhasil!</h2>
+        <p class="mt-1 text-sm text-[var(--color-teks-lembut)]">
+          #{struk.id.slice(0, 8)}
+        </p>
+
+        <div class="kartu mt-5 text-left">
+          <table class="w-full text-sm">
+            <tbody>
+              {struk.items.map((it) => (
+                <tr>
+                  <td class="py-1">
+                    {it.product_name_snapshot}
+                    <span class="text-[var(--color-teks-lembut)]"> × {it.qty}</span>
+                  </td>
+                  <td class="py-1 text-right tabular-nums">{rupiah(it.subtotal)}</td>
+                </tr>
+              ))}
+              <tr class="border-t border-[var(--color-garis)]">
+                <td class="py-2">Subtotal</td>
+                <td class="py-2 text-right tabular-nums">{rupiah(struk.subtotal)}</td>
+              </tr>
+              {struk.shipping_cost > 0 && (
+                <tr>
+                  <td class="py-1">Ongkos kirim</td>
+                  <td class="py-1 text-right tabular-nums">{rupiah(struk.shipping_cost)}</td>
+                </tr>
+              )}
+              <tr class="border-t border-[var(--color-garis)] font-bold">
+                <td class="py-2">Total</td>
+                <td class="py-2 text-right tabular-nums">{rupiah(struk.total_amount)}</td>
+              </tr>
+              {struk.amount_paid !== null && (
+                <Fragment>
+                  <tr>
+                    <td class="py-1 text-[var(--color-teks-lembut)]">Dibayar</td>
+                    <td class="py-1 text-right tabular-nums">{rupiah(struk.amount_paid)}</td>
+                  </tr>
+                  <tr class="font-semibold text-emerald-700">
+                    <td class="py-1">Kembalian</td>
+                    <td class="py-1 text-right tabular-nums">
+                      {rupiah(struk.change_amount ?? 0)}
+                    </td>
+                  </tr>
+                </Fragment>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Tautan GET, bukan tombol: itulah yang memberi kunci idempotensi
+            baru untuk transaksi berikutnya. */}
+        <a href="/kasir" class="tombol-utama mt-5 w-full">Penjualan baru</a>
+      </div>
+    )
+  }
 </AppShell>
+
+{/*
+  Progressive enhancement langkah 1.
+
+  Skrip ini HANYA menulis ke `input[name=qty]` yang sudah ada di HTML. Ia
+  tidak pernah merakit body request, mencegat submit, atau merender baris.
+  Karena itu server menerima bentuk data yang sama persis apakah JavaScript
+  hidup atau mati -- tidak ada jalur kedua yang bisa menyimpang.
+
+  `is:inline` mengikuti satu-satunya pola JS yang sudah ada di proyek ini
+  (AppShell). Konsekuensinya tidak bisa meng-import, jadi pemformatan rupiah
+  ditulis ulang di sini; opsinya harus tetap sama dengan `rupiah()` di
+  web/src/lib/format.ts.
+*/}
+<script is:inline>
+  (function () {
+    var borang = document.getElementById('borang-kasir');
+    if (!borang) return;
+
+    // Baris pertama: menyalakan saklar CSS supaya stepper muncul dan kolom
+    // angka menghilang. Lihat .hanya-js / .tanpa-js di theme.css.
+    document.documentElement.dataset.js = 'ya';
+
+    var rupiah = new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      maximumFractionDigits: 0,
+    });
+
+    var baris = Array.prototype.slice.call(borang.querySelectorAll('[data-produk]'));
+    var kotakCari = borang.querySelector('[data-cari]');
+    var pil = borang.querySelector('[data-pil-kategori]');
+    var pesanKosong = borang.querySelector('[data-kosong-saringan]');
+
+    function kolomQty(row) {
+      return row.querySelector('[data-qty]');
+    }
+
+    function hitung() {
+      var item = 0;
+      var produk = 0;
+      var total = 0;
+
+      baris.forEach(function (row) {
+        var qty = parseInt(kolomQty(row).value, 10) || 0;
+        if (qty > 0) {
+          item += qty;
+          produk += 1;
+          total += qty * parseFloat(row.dataset.harga || '0');
+        }
+        row.className = qty > 0 ? 'baris-produk-terpilih' : 'baris-produk';
+      });
+
+      borang.querySelector('[data-ringkas-item]').textContent = String(item);
+      borang.querySelector('[data-ringkas-produk]').textContent = ' ' + produk;
+      borang.querySelector('[data-ringkas-total]').textContent = rupiah.format(total);
+    }
+
+    function ubah(row, selisih) {
+      var kolom = kolomQty(row);
+      var stok = parseInt(row.dataset.stok || '0', 10);
+      var nilai = (parseInt(kolom.value, 10) || 0) + selisih;
+      if (nilai < 0) nilai = 0;
+      if (nilai > stok) nilai = stok;
+      kolom.value = String(nilai);
+      hitung();
+    }
+
+    borang.addEventListener('click', function (e) {
+      var tambah = e.target.closest('[data-tambah]');
+      if (tambah) {
+        ubah(tambah.closest('[data-produk]'), 1);
+        return;
+      }
+      var kurang = e.target.closest('[data-kurang]');
+      if (kurang) ubah(kurang.closest('[data-produk]'), -1);
+    });
+
+    borang.addEventListener('input', function (e) {
+      if (e.target.matches('[data-qty]')) hitung();
+      if (e.target === kotakCari) saring();
+    });
+
+    // Pil kategori menyaring di tempat, tidak mengirim form: mengirimnya
+    // berarti memuat ulang halaman, dan keranjang yang sedang dibangun ikut
+    // melewati server tanpa alasan.
+    if (pil) {
+      pil.addEventListener('change', function () {
+        saring();
+        Array.prototype.forEach.call(pil.querySelectorAll('label'), function (l) {
+          l.className = l.querySelector('input').checked ? 'pil-aktif' : 'pil-diam';
+        });
+      });
+    }
+
+    function saring() {
+      var kata = (kotakCari ? kotakCari.value : '').trim().toLowerCase();
+      var terpilih = pil ? pil.querySelector('input:checked') : null;
+      var kategori = terpilih ? terpilih.value : '';
+      var terlihat = 0;
+
+      baris.forEach(function (row) {
+        var cocokKata =
+          !kata ||
+          row.dataset.nama.indexOf(kata) !== -1 ||
+          row.dataset.sku.indexOf(kata) !== -1;
+        var cocokKategori = !kategori || row.dataset.kategori === kategori;
+        // Barang yang sudah masuk keranjang tidak pernah disembunyikan --
+        // kalau hilang dari layar, kasir tidak punya cara membatalkannya.
+        var diKeranjang = (parseInt(kolomQty(row).value, 10) || 0) > 0;
+        var tampil = diKeranjang || (cocokKata && cocokKategori);
+        row.hidden = !tampil;
+        if (tampil) terlihat += 1;
+      });
+
+      if (pesanKosong) pesanKosong.classList.toggle('hidden', terlihat > 0);
+    }
+
+    hitung();
+  })();
+</script>
+
+{/*
+  Progressive enhancement langkah 2: dua angka yang harus terbaca SEBELUM
+  uang diterima -- kekurangan dan kembalian. Tanpa JavaScript, kekurangan
+  dijawab backend lewat .galat dan kembalian muncul di langkah 3.
+*/}
+<script is:inline>
+  (function () {
+    var kotak = document.querySelector('[data-kotak-kembalian]');
+    if (!kotak) return;
+
+    document.documentElement.dataset.js = 'ya';
+
+    var rupiah = new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      maximumFractionDigits: 0,
+    });
+
+    var selSubtotal = document.querySelector('[data-subtotal]');
+    var subtotal = parseFloat(selSubtotal ? selSubtotal.dataset.subtotal : '0') || 0;
+    var ongkir = document.querySelector('[data-ongkir]');
+    var dibayar = document.querySelector('[data-dibayar]');
+    var selTotal = document.querySelector('[data-total]');
+    var selKurang = document.querySelector('[data-kurang]');
+    var selKembalian = document.querySelector('[data-kembalian]');
+
+    function tunai() {
+      var m = document.querySelector('[data-metode]:checked');
+      return !m || m.value === 'cash';
+    }
+
+    function hitung() {
+      var total = subtotal + (parseFloat(ongkir.value) || 0);
+      selTotal.textContent = rupiah.format(total);
+
+      var bayar = parseFloat(dibayar.value);
+      var adaBayar = tunai() && !isNaN(bayar);
+
+      selKurang.classList.toggle('hidden', !(adaBayar && bayar < total));
+      kotak.classList.toggle('hidden', !(adaBayar && bayar >= total));
+      if (adaBayar && bayar >= total) {
+        selKembalian.textContent = rupiah.format(bayar - total);
+      }
+    }
+
+    document.addEventListener('input', hitung);
+    document.addEventListener('change', hitung);
+    hitung();
+  })();
+</script>

@@ -27,6 +27,9 @@ pub struct Transaction {
     pub cashier_user_id: Uuid,
     pub payment_method: String,
     pub subtotal: Decimal,
+    /// Ongkos kirim. Tidak termasuk di `subtotal` -- hanya menambah
+    /// `total_amount`. Lihat migrasi 0007.
+    pub shipping_cost: Decimal,
     pub total_amount: Decimal,
     pub amount_paid: Option<Decimal>,
     pub change_amount: Option<Decimal>,
@@ -45,6 +48,7 @@ struct TransactionHead {
     cashier_user_id: Uuid,
     payment_method: String,
     subtotal: Decimal,
+    shipping_cost: Decimal,
     total_amount: Decimal,
     amount_paid: Option<Decimal>,
     change_amount: Option<Decimal>,
@@ -74,6 +78,7 @@ async fn lengkapi(pool: &PgPool, head: TransactionHead) -> AppResult<Transaction
         cashier_user_id: head.cashier_user_id,
         payment_method: head.payment_method,
         subtotal: head.subtotal,
+        shipping_cost: head.shipping_cost,
         total_amount: head.total_amount,
         amount_paid: head.amount_paid,
         change_amount: head.change_amount,
@@ -88,7 +93,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Transaction
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, subtotal, total_amount,
+               cashier_user_id, payment_method, subtotal, shipping_cost, total_amount,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         WHERE id = $1
@@ -109,7 +114,7 @@ pub async fn find_by_idempotency_key(pool: &PgPool, key: &str) -> AppResult<Opti
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, subtotal, total_amount,
+               cashier_user_id, payment_method, subtotal, shipping_cost, total_amount,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         WHERE idempotency_key = $1
@@ -155,6 +160,9 @@ pub struct NewTransaction {
     pub cashier_user_id: Uuid,
     pub payment_method: String,
     pub subtotal: Decimal,
+    /// Ongkos kirim. Tidak termasuk di `subtotal` -- hanya menambah
+    /// `total_amount`. Lihat migrasi 0007.
+    pub shipping_cost: Decimal,
     pub total_amount: Decimal,
     pub amount_paid: Option<Decimal>,
     pub change_amount: Option<Decimal>,
@@ -169,8 +177,8 @@ pub async fn insert_transaction(
         r#"
         INSERT INTO transactions
             (idempotency_key, type, customer_id, cashier_user_id, payment_method,
-             subtotal, total_amount, amount_paid, change_amount)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             subtotal, shipping_cost, total_amount, amount_paid, change_amount)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id
         "#,
         input.idempotency_key,
@@ -179,6 +187,7 @@ pub async fn insert_transaction(
         input.cashier_user_id,
         input.payment_method,
         input.subtotal,
+        input.shipping_cost,
         input.total_amount,
         input.amount_paid,
         input.change_amount
@@ -212,7 +221,7 @@ pub async fn list_transactions(pool: &PgPool, limit: i64) -> AppResult<Vec<Trans
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, subtotal, total_amount,
+               cashier_user_id, payment_method, subtotal, shipping_cost, total_amount,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         ORDER BY created_at DESC

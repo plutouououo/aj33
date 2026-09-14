@@ -55,6 +55,7 @@ dependencies = [
  "base64",
  "bcrypt",
  "chrono",
+ "dotenvy",
  "hex",
  "hmac",
  "jsonwebtoken",

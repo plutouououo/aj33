@@ -40,6 +40,11 @@ pub enum StockReason {
     ExternalOrder,
     /// Koreksi manual oleh Owner.
     ManualAdjustment,
+    /// Barang masuk yang dicatat sebagai batch, lengkap dengan tanggal
+    /// kedaluwarsanya. Dibedakan dari koreksi manual supaya ledger bisa
+    /// menjawab "stok ini datang dari kiriman mana", bukan cuma "seseorang
+    /// mengubahnya".
+    Restock,
 }
 
 impl StockReason {
@@ -48,6 +53,7 @@ impl StockReason {
             Self::Sale => "sale",
             Self::ExternalOrder => "external_order",
             Self::ManualAdjustment => "manual_adjustment",
+            Self::Restock => "restock",
         }
     }
 
@@ -55,7 +61,10 @@ impl StockReason {
         match self {
             Self::Sale => "transaction",
             Self::ExternalOrder => "external_order",
-            Self::ManualAdjustment => "manual",
+            // Batch masuk tidak berasal dari transaksi maupun pesanan
+            // marketplace; "manual" adalah satu-satunya nilai yang
+            // diizinkan CHECK constraint untuk asal seperti itu.
+            Self::ManualAdjustment | Self::Restock => "manual",
         }
     }
 }
@@ -336,5 +345,7 @@ mod tests {
             "external_order"
         );
         assert_eq!(StockReason::ManualAdjustment.reference_type(), "manual");
+        assert_eq!(StockReason::Restock.as_str(), "restock");
+        assert_eq!(StockReason::Restock.reference_type(), "manual");
     }
 }

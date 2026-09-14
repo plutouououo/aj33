@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO transactions\n            (idempotency_key, type, customer_id, cashier_user_id, payment_method,\n             subtotal, total_amount, amount_paid, change_amount)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        RETURNING id\n        ",
+  "query": "\n        INSERT INTO transactions\n            (idempotency_key, type, customer_id, cashier_user_id, payment_method,\n             subtotal, shipping_cost, total_amount, amount_paid, change_amount)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        RETURNING id\n        ",
   "describe": {
     "columns": [
       {
@@ -19,6 +19,7 @@
         "Numeric",
         "Numeric",
         "Numeric",
+        "Numeric",
         "Numeric"
       ]
     },
@@ -26,5 +27,5 @@
       false
     ]
   },
-  "hash": "81bdbe421e07824aafc01b956d5db52fdf3e06f919078c743e3385553ed88ca0"
+  "hash": "04922cbb2563b07b659f9ba5409473cacaca03f8eeca1b1f0aab2a5de9c2dd80"
 }

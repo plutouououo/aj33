@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n        FROM products p\n        WHERE ($1::text IS NULL\n               OR p.name ILIKE '%' || $1 || '%'\n               OR p.seo_name ILIKE '%' || $1 || '%'\n               OR p.sku ILIKE '%' || $1 || '%')\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n          AND ($4::uuid IS NULL OR p.parent_id = $4)\n          AND ($5::text IS NULL\n               OR ($5 = 'induk' AND p.parent_id IS NULL)\n               OR ($5 = 'terjual'\n                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Bool",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b8e7fb17933673c684aef9ddb03542ae391ddedef1d0eda50bdba4792d34362d"
+}

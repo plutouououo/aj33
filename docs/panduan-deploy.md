@@ -659,84 +659,102 @@ sudo -u postgres dropdb aj33_ujipulih
 
 ---
 
-## 10. Deploy ulang dan rollback
+## 10. Deploy
 
-Keduanya bekerja pada tata letak rilis di §4: build dirakit di samping, lalu
-symlink `aktif` dipindah dalam satu langkah.
+Sejak 14 September 2026, deploy berjalan sendiri lewat GitHub Actions. Cukup
+`git push` ke `main`.
 
-`/usr/local/bin/aj33-deploy`:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-AKAR=/opt/aj33
-BARU="$AKAR/rilis/$(date +%Y%m%d-%H%M%S)"
-
-# Build tetap dilakukan di dalam repo supaya cache cargo dan node_modules
-# terpakai. Yang sedang melayani pelanggan ada di direktori lain, jadi tidak
-# tersentuh sama sekali selama 30 menit compile.
-cd "$AKAR/repo"
-git pull --ff-only
-( cd backend && SQLX_OFFLINE=true cargo build --release )
-( cd web && npm ci && npm run build )
-
-# Rakit rilis baru. node_modules disalin sebagai hardlink: hampir tanpa biaya
-# disk dan seketika, tapi rilis ini tetap memegang salinannya sendiri kalau
-# `npm ci` berikutnya mengganti isinya -- itulah yang membuat rollback tetap
-# utuh berbulan-bulan kemudian.
-mkdir -p "$BARU/web"
-cp "$AKAR/repo/backend/target/release/aj33-backend" "$BARU/aj33-backend"
-cp -r "$AKAR/repo/web/dist" "$BARU/web/dist"
-cp "$AKAR/repo/web/package.json" "$AKAR/repo/web/package-lock.json" "$BARU/web/"
-cp -al "$AKAR/repo/web/node_modules" "$BARU/web/node_modules"
-
-# Pergantian atomik: `mv -T` menimpa symlink dalam satu operasi kernel. Tidak
-# ada saat di mana `aktif` menunjuk ke tempat yang belum lengkap, dan tidak
-# ada saat di mana ia tidak menunjuk ke mana-mana.
-ln -sfn "$BARU" "$AKAR/aktif.baru"
-mv -T "$AKAR/aktif.baru" "$AKAR/aktif"
-
-sudo systemctl restart aj33-backend aj33-web
-
-# Simpan 5 rilis terakhir. Lebih dari itu tidak menambah perlindungan, dan
-# tiap rilis memegang salinan dist-nya sendiri.
-ls -1 "$AKAR/rilis" | sort -r | tail -n +6   | while read -r lama; do rm -rf "${AKAR:?}/rilis/$lama"; done
-
-echo "Aktif: $(basename "$BARU")"
+```
+push ke main
+   └─▶ CI (fmt, clippy, test, cache sqlx, typecheck+build web)
+         ├─ merah ─▶ berhenti. VPS tidak tersentuh sama sekali.
+         └─ hijau ─▶ Deploy
+                       ├─ build backend + web di runner GitHub
+                       ├─ kirim tarball lewat SSH ke aj33-terima
+                       └─ aj33-terima: pasang, restart, periksa kesehatan
+                             ├─ sehat       ─▶ selesai
+                             └─ tidak sehat ─▶ kembalikan rilis lama, CI merah
 ```
 
-`/usr/local/bin/aj33-rollback`:
+### Kenapa build di CI, bukan di VPS
+
+VPS ini 1 vCPU. Mengompilasi backend di sana memakan **12 menit dengan CPU
+terpakai penuh** — dan selama itu situs yang sedang melayani kasir ikut
+melambat. Membangun di runner GitHub memindahkan beban itu keluar; VPS hanya
+menerima berkas jadi, mengunduh dependensi runtime (`npm ci --omit=dev`, puluhan
+detik dan hampir tanpa CPU), lalu restart.
+
+### Yang dibutuhkan sekali saja
+
+**Di VPS** — pasang penerimanya dan daftarkan kunci CI, dikunci ke satu
+perintah:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+sudo install -m 755 -o root -g root scripts/aj33-terima /usr/local/bin/
 
-AKAR=/opt/aj33
-SEKARANG=$(basename "$(readlink -f "$AKAR/aktif")")
-SEBELUM=$(ls -1 "$AKAR/rilis" | sort -r | grep -v "^${SEKARANG}$" | head -1)
-
-if [[ -z "$SEBELUM" ]]; then
-  echo "Tidak ada rilis lain untuk dituju." >&2
-  exit 1
-fi
-
-ln -sfn "$AKAR/rilis/$SEBELUM" "$AKAR/aktif.baru"
-mv -T "$AKAR/aktif.baru" "$AKAR/aktif"
-sudo systemctl restart aj33-backend aj33-web
-
-echo "Kembali dari $SEKARANG ke $SEBELUM"
+ssh-keygen -t ed25519 -f ~/deploy-ci -N '' -C 'github-actions-aj33'
+printf '%s %s
+'   'command="/usr/local/bin/aj33-terima",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty'   "$(cat ~/deploy-ci.pub)" >> ~/.ssh/authorized_keys
 ```
+
+`command=` itu inti pengamanannya: kunci yang disimpan di GitHub **tidak bisa
+membuka shell**. Apa pun yang dikirim pemegangnya, yang berjalan hanya
+`aj33-terima`. Itu juga alasan paketnya dikirim lewat stdin (`tar czf - | ssh`)
+dan bukan `scp` — forced command mematikan scp, tapi stdin tetap mengalir.
+
+**Di GitHub** — Settings → Secrets and variables → Actions:
+
+| Secret | Isi |
+| --- | --- |
+| `VPS_SSH_KEY` | isi `~/deploy-ci`, utuh termasuk baris BEGIN dan END |
+| `VPS_HOST` | `tokoaj33@139.190.97.15` |
+| `VPS_HOST_KEY` | keluaran `ssh-keyscan -t ed25519 139.190.97.15` |
+
+Setelah tersalin, hapus kunci privatnya dari VPS: `rm ~/deploy-ci`.
+
+`VPS_HOST_KEY` dipasang dari secret, bukan `ssh-keyscan` saat workflow jalan —
+keyscan akan mempercayai apa pun yang menjawab saat itu, yang membatalkan
+gunanya memverifikasi host.
+
+### Catatan glibc
+
+Binary dibangun di `ubuntu-24.04` dan dijalankan di Debian 13. Arah ini aman:
+binary yang ditautkan ke glibc lama berjalan di sistem yang lebih baru, tidak
+sebaliknya. Terukur pada rilis pertama — binary menuntut maksimal `GLIBC_2.34`
+sementara Debian 13 menyediakan `2.41`, jarak yang sangat lega.
+
+Runner **dipatok** `ubuntu-24.04`, bukan `ubuntu-latest`, supaya kenaikan versi
+runner tidak pernah terjadi diam-diam.
+
+Memeriksanya kapan saja:
 
 ```bash
-sudo chmod +x /usr/local/bin/aj33-deploy /usr/local/bin/aj33-rollback
+objdump -T /opt/aj33/aktif/aj33-backend | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1
+ldd --version | head -1
 ```
 
-Deploy yang rusak dibatalkan dengan satu perintah, dalam hitungan detik:
+### `aj33-deploy` — jalur cadangan
+
+Masih terpasang dan masih bekerja: build di VPS, dari `main` yang sudah
+di-push. Berguna kalau GitHub Actions sedang bermasalah. Konsekuensinya CPU
+terpakai penuh 12 menit, jadi jangan dipakai saat jam ramai.
 
 ```bash
-aj33-rollback
+ssh tokoaj33 aj33-deploy
 ```
+
+### Rollback
+
+```bash
+ssh tokoaj33 aj33-rollback
+```
+
+Lima rilis terakhir disimpan, jadi bisa mundur beberapa langkah. Hitungan
+detik — symlink dipindah, service restart, tidak ada yang dibangun ulang.
+
+Perhatikan `aj33-terima` **sudah melakukan rollback sendiri** kalau rilis baru
+gagal sehat dalam 40 detik. Perintah di atas untuk kasus yang lolos pemeriksaan
+tapi ternyata salah perilakunya.
 
 ### Yang TIDAK ikut mundur saat rollback
 
@@ -778,17 +796,16 @@ Log: `journalctl -u aj33-backend -f`, `journalctl -u aj33-web -f`,
 
 ## 12. Yang belum ada
 
-- **Tidak ada rate limit di `POST /api/auth/login`.** Itu satu-satunya
-  permukaan bisnis tanpa autentikasi yang bisa dijangkau dari internet. Login
-  sudah tahan timing attack (verifikasi tetap dijalankan terhadap hash umpan
-  saat user tidak ditemukan), tapi tidak ada yang menahan percobaan berulang.
-  Caddy bisa membatasinya di depan.
 - **Tidak ada `fail2ban`.** Log sshd menunjukkan pemindaian otomatis terus
   menerus dari berbagai IP (`Invalid user ubuntu`, `root`, `solv`). Semuanya
   gagal karena login password sudah mati, tapi tidak ada yang memblokir
   pengetuk yang berulang.
-- **Tidak ada pemantauan** selain `/api/health` — tidak ada yang memberi tahu
-  kalau service mati di luar jam kerja.
+- **Pemantauan belum punya saluran alarm.** `aj33-cek` berjalan tiap 10 menit
+  dan siap mengirim ke Telegram, tapi `/etc/aj33/pantau.env` belum diisi — jadi
+  hasilnya hanya masuk journal, dan baru terbaca kalau ada yang melihat.
+- **Tidak ada pengawas dari luar.** `aj33-cek` berjalan di dalam VPS, jadi ia
+  tidak bisa melapor apa pun kalau mesinnya mati total. Perlu layanan uptime
+  eksternal yang menembak `https://tokoayamaj33.my.id/login`.
 - **Tidak ada staging.** Deploy langsung ke satu-satunya mesin yang ada.
 - **Backup belum otomatis tersalin ke luar VPS** (§9) — bagian itu masih
   manual dan bergantung pada kedisiplinanmu.

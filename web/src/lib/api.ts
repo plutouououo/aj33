@@ -114,8 +114,20 @@ export interface Product {
   id: string;
   category_id: string | null;
   category_name: string | null;
+  /** Nama identifikasi internal: yang dicari pegawai dan dibaca pengepak. */
   name: string;
+  /** Judul untuk marketplace. `null` berarti belum diisi. */
+  seo_name: string | null;
+  /** Selalu hasil rakitan [Merek] - [Jenis] - [Warna] - [Ukuran]. */
   sku: string | null;
+  brand_name: string | null;
+  product_type: string | null;
+  variant_color: string | null;
+  variant_size: string | null;
+  /** Terisi berarti produk ini varian dari produk lain. */
+  parent_id: string | null;
+  /** Induk yang punya varian tidak dijual langsung — variannya yang dijual. */
+  variant_count: number;
   /** Harga dasar: yang dipakai kasir, sekaligus rujukan saat harga kanal kosong. */
   price: number;
   /** `null` berarti belum diatur -- bukan gratis. */
@@ -129,9 +141,30 @@ export interface Product {
   unit: string | null;
   /** Label rak internal, mis. "Rak A3". */
   storage_location: string | null;
+  /** Kedaluwarsa terdekat dari seluruh batch produk ini. */
+  nearest_expiry: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Satu catatan barang masuk. `quantity` adalah jumlah yang masuk saat itu,
+ * bukan sisa yang belum terjual — stok berjalan tetap di `Product.stock_qty`.
+ */
+export interface ProductBatch {
+  id: string;
+  product_id: string;
+  batch_number: string | null;
+  quantity: number;
+  expiry_date: string | null;
+  received_at: string;
+}
+
+/** Bentuk `GET /products/{id}`: produk beserta varian dan batch-nya. */
+export interface ProductDetail extends Product {
+  variants: Product[];
+  batches: ProductBatch[];
 }
 
 export interface PaginatedProducts {
@@ -160,12 +193,27 @@ export interface Transaction {
   type: string;
   payment_method: string;
   subtotal: number;
+  /** Ongkir tidak termasuk `subtotal`; hanya menambah `total_amount`. */
+  shipping_cost: number;
   total_amount: number;
   amount_paid: number | null;
   change_amount: number | null;
   status: string;
   created_at: string;
   items: TransactionItem[];
+}
+
+/**
+ * Pelanggan toko. `name` boleh null sejak skema awal — pelanggan hasil impor
+ * pesanan marketplace kadang hanya membawa username.
+ */
+export interface Customer {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  /** `walk_in` untuk yang dibuat di kasir, `marketplace` untuk hasil impor. */
+  source: string;
+  created_at: string;
 }
 
 export interface StockAdjustment {

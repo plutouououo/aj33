@@ -1,0 +1,653 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import { api, ApiRequestError, type Category, type ProductDetail } from '../../lib/api';
+import { rupiah, tanggal, waktu, sisaHari } from '../../lib/format';
+import { berandaUntuk } from '../../lib/session';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+// Halaman ini seluruhnya tentang menyunting katalog, yang hanya boleh
+// dikerjakan Owner. Peran lain dikembalikan ke berandanya masing-masing.
+if (user.role !== 'owner') {
+  return Astro.redirect(berandaUntuk(user.role), 302);
+}
+
+const { id } = Astro.params;
+
+let galat: string | null = null;
+// Halaman /produk/baru mendarat di sini setelah berhasil menyimpan.
+let sukses: string | null = Astro.url.searchParams.get('dibuat')
+  ? 'Produk ditambahkan. Tambahkan varian atau batch berikutnya di bawah.'
+  : null;
+
+/** Nilai teks dari form. Kosong berarti "kosongkan kolomnya", bukan "abaikan". */
+function teks(form: FormData, kolom: string): string | null {
+  return String(form.get(kolom) ?? '').trim() || null;
+}
+
+/**
+ * Angka dari form. Kosong dikirim sebagai `null` supaya backend benar-benar
+ * mengosongkan kolomnya — harga marketplace yang salah isi harus bisa
+ * dikembalikan ke "belum diatur", bukan menempel selamanya.
+ */
+function angka(form: FormData, kolom: string): number | null {
+  const mentah = String(form.get(kolom) ?? '').trim();
+  if (!mentah) return null;
+  const nilai = Number(mentah);
+  return Number.isFinite(nilai) ? nilai : null;
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = String(form.get('aksi') ?? '');
+
+  try {
+    if (aksi === 'simpan') {
+      await api(`/products/${id}`, {
+        method: 'PATCH',
+        token,
+        body: {
+          name: String(form.get('name') ?? '').trim(),
+          seo_name: teks(form, 'seo_name'),
+          brand_name: teks(form, 'brand_name'),
+          product_type: teks(form, 'product_type'),
+          variant_color: teks(form, 'variant_color'),
+          variant_size: teks(form, 'variant_size'),
+          category_id: teks(form, 'category_id'),
+          price: angka(form, 'price') ?? 0,
+          price_shopee: angka(form, 'price_shopee'),
+          price_tiktok: angka(form, 'price_tiktok'),
+          cost_price: angka(form, 'cost_price'),
+          low_stock_threshold: angka(form, 'low_stock_threshold') ?? 5,
+          unit: teks(form, 'unit'),
+          storage_location: teks(form, 'storage_location'),
+          is_active: form.get('is_active') === '1',
+        },
+      });
+      sukses = 'Perubahan disimpan.';
+    } else if (aksi === 'hapus') {
+      await api(`/products/${id}`, { method: 'DELETE', token });
+      return Astro.redirect('/produk', 303);
+    } else if (aksi === 'varian') {
+      await api('/products', {
+        method: 'POST',
+        token,
+        body: {
+          parent_id: id,
+          name: String(form.get('name') ?? '').trim(),
+          seo_name: teks(form, 'seo_name'),
+          brand_name: teks(form, 'brand_name'),
+          product_type: teks(form, 'product_type'),
+          variant_color: teks(form, 'variant_color'),
+          variant_size: teks(form, 'variant_size'),
+          category_id: teks(form, 'category_id'),
+          price: angka(form, 'price') ?? 0,
+          price_shopee: angka(form, 'price_shopee'),
+          price_tiktok: angka(form, 'price_tiktok'),
+          stock_qty: angka(form, 'stock_qty') ?? 0,
+          batch_number: teks(form, 'batch_number'),
+          expiry_date: teks(form, 'expiry_date'),
+          unit: teks(form, 'unit'),
+          storage_location: teks(form, 'storage_location'),
+        },
+      });
+      sukses = 'Varian ditambahkan.';
+    } else if (aksi === 'batch') {
+      await api(`/products/${id}/batches`, {
+        method: 'POST',
+        token,
+        body: {
+          batch_number: teks(form, 'batch_number'),
+          quantity: angka(form, 'quantity') ?? 0,
+          expiry_date: teks(form, 'expiry_date'),
+        },
+      });
+      sukses = 'Batch dicatat dan stok bertambah.';
+    } else if (aksi === 'hapus-batch') {
+      await api(`/products/${id}/batches/${form.get('batch_id')}`, { method: 'DELETE', token });
+      sukses = 'Batch dibatalkan dan stoknya ditarik kembali.';
+    } else if (aksi === 'koreksi') {
+      await api(`/products/${id}/stock-adjustments`, {
+        method: 'POST',
+        token,
+        body: { change_qty: angka(form, 'change_qty') ?? 0 },
+      });
+      sukses = 'Stok dikoreksi.';
+    }
+  } catch (err) {
+    galat = err instanceof ApiRequestError ? err.message : 'Aksi gagal dijalankan.';
+    sukses = null;
+  }
+}
+
+// Dibaca setelah aksi selesai, jadi yang tampil selalu keadaan terakhir --
+// termasuk ketika aksinya gagal dan tidak ada yang berubah.
+let produk: ProductDetail | null = null;
+try {
+  produk = await api<ProductDetail>(`/products/${id}`, { token });
+} catch (err) {
+  if (err instanceof ApiRequestError && err.status === 404) {
+    Astro.response.status = 404;
+  } else {
+    throw err;
+  }
+}
+
+const kategori = await api<Category[]>('/categories', { token });
+
+const punyaVarian = (produk?.variant_count ?? 0) > 0;
+const induk = produk?.parent_id
+  ? await api<ProductDetail>(`/products/${produk.parent_id}`, { token })
+  : null;
+
+// Bagian yang benar-benar ada di halaman ini. Varian tidak punya sub-varian,
+// jadi tabnya ikut menyesuaikan.
+const BAGIAN = [
+  { id: 'data', judul: 'Data Produk' },
+  ...(produk && !produk.parent_id ? [{ id: 'varian', judul: 'Varian' }] : []),
+  { id: 'batch', judul: 'Batch & Stok' },
+  { id: 'hapus', judul: 'Hapus' },
+];
+
+/** Ambang "sudah dekat" untuk kedaluwarsa, dalam hari. */
+const DEKAT_KEDALUWARSA = 30;
+---
+
+<AppShell judul={produk ? produk.name : 'Produk'} user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/produk">Produk</a>
+    <span aria-hidden="true">›</span>
+    {
+      induk && (
+        <Fragment>
+          <a href={`/produk/${induk.id}`}>{induk.name}</a>
+          <span aria-hidden="true">›</span>
+        </Fragment>
+      )
+    }
+    <span aria-current="page">{produk ? produk.name : 'Tidak ditemukan'}</span>
+  </nav>
+
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+
+  {!produk && <p class="kartu">Produk tidak ditemukan.</p>}
+
+  {
+    produk && (
+      <Fragment>
+        <nav class="bilah-tab" aria-label="Bagian halaman">
+          {BAGIAN.map((b) => (
+            <a class="tab-bagian" href={`#${b.id}`}>{b.judul}</a>
+          ))}
+        </nav>
+
+        <div class="flex flex-col gap-5">
+          {/* ---------------------------------------------------------- */}
+          {/* Data produk                                                */}
+          {/* ---------------------------------------------------------- */}
+          <section id="data" class="kartu sasaran-bagian" aria-labelledby="j-data">
+            <div class="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 id="j-data" class="font-semibold">Data Produk</h2>
+              <p class="text-xs text-[var(--color-teks-lembut)]">
+                SKU <span class="font-mono text-[var(--color-teks)]">{produk.sku ?? '—'}</span> —
+                dirakit otomatis dari Merek - Jenis Produk - Warna - Ukuran
+              </p>
+            </div>
+
+            {/* id dipakai tombol simpan di bilah lengket lewat atribut form=. */}
+            <form method="POST" id="borang-produk" class="borang-tegak">
+              <input type="hidden" name="aksi" value="simpan" />
+
+              <div class="isian">
+                <label class="label" for="name">Nama produk</label>
+                <input class="kolom" id="name" name="name" value={produk.name} required />
+                <p class="isian-bantu">Nama identifikasi internal.</p>
+              </div>
+
+              <div class="isian">
+                <label class="label" for="seo_name">Nama SEO produk</label>
+                <input class="kolom" id="seo_name" name="seo_name" value={produk.seo_name ?? ''} />
+                <p class="isian-bantu">Nama yang ditampilkan di marketplace.</p>
+              </div>
+
+              <div class="isian">
+                <label class="label" for="category_id">Kategori</label>
+                <select class="kolom" id="category_id" name="category_id">
+                  <option value="" selected={!produk.category_id}>— tanpa kategori —</option>
+                  {kategori.map((k) => (
+                    <option value={k.id} selected={produk!.category_id === k.id}>
+                      {k.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div class="isian">
+                <label class="label" for="brand_name">Merek</label>
+                <input class="kolom" id="brand_name" name="brand_name" value={produk.brand_name ?? ''} />
+              </div>
+
+              <div class="isian">
+                <label class="label" for="product_type">Jenis produk</label>
+                <input
+                  class="kolom"
+                  id="product_type"
+                  name="product_type"
+                  value={produk.product_type ?? ''}
+                />
+              </div>
+
+              <div class="isian isian-pendek">
+                <label class="label" for="variant_color">Warna</label>
+                <input
+                  class="kolom"
+                  id="variant_color"
+                  name="variant_color"
+                  value={produk.variant_color ?? ''}
+                />
+              </div>
+
+              <div class="isian isian-pendek">
+                <label class="label" for="variant_size">Ukuran</label>
+                <input
+                  class="kolom"
+                  id="variant_size"
+                  name="variant_size"
+                  value={produk.variant_size ?? ''}
+                />
+              </div>
+
+              <div class="isian isian-pendek">
+                <label class="label" for="unit">Satuan</label>
+                <input class="kolom" id="unit" name="unit" value={produk.unit ?? ''} />
+              </div>
+
+              <div class="isian isian-pendek">
+                <label class="label" for="price">Harga dasar / kasir (Rp)</label>
+                <input
+                  class="kolom"
+                  id="price"
+                  name="price"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={produk.price}
+                  required
+                />
+              </div>
+
+              <div class="isian isian-pendek">
+                <label class="label" for="price_shopee">Harga Shopee (Rp)</label>
+                <input
+                  class="kolom"
+                  id="price_shopee"
+                  name="price_shopee"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={produk.price_shopee ?? ''}
+                  placeholder="ikut harga dasar"
+                />
+              </div>
+
+              <div class="isian isian-pendek">
+                <label class="label" for="price_tiktok">Harga Tokopedia / TikTok (Rp)</label>
+                <input
+                  class="kolom"
+                  id="price_tiktok"
+                  name="price_tiktok"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={produk.price_tiktok ?? ''}
+                  placeholder="ikut harga dasar"
+                />
+              </div>
+
+              <div class="isian isian-pendek">
+                <label class="label" for="cost_price">Harga modal (Rp)</label>
+                <input
+                  class="kolom"
+                  id="cost_price"
+                  name="cost_price"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={produk.cost_price ?? ''}
+                />
+              </div>
+
+              {punyaVarian && (
+                <p class="isian isian-bantu">
+                  Produk ini punya varian, jadi harga yang benar-benar dipakai adalah harga tiap
+                  varian di bawah.
+                </p>
+              )}
+
+              <div class="isian isian-pendek">
+                <label class="label" for="low_stock_threshold">Batas stok menipis</label>
+                <input
+                  class="kolom"
+                  id="low_stock_threshold"
+                  name="low_stock_threshold"
+                  type="number"
+                  min="0"
+                  value={produk.low_stock_threshold}
+                />
+              </div>
+
+              <div class="isian">
+                <label class="label" for="storage_location">Lokasi penyimpanan</label>
+                <input
+                  class="kolom"
+                  id="storage_location"
+                  name="storage_location"
+                  value={produk.storage_location ?? ''}
+                />
+              </div>
+
+              <label class="isian flex items-center gap-2 text-sm">
+                <input type="checkbox" name="is_active" value="1" checked={produk.is_active} />
+                Produk aktif
+              </label>
+            </form>
+          </section>
+
+          {/* ---------------------------------------------------------- */}
+          {/* Varian                                                     */}
+          {/* ---------------------------------------------------------- */}
+          {!produk.parent_id && (
+            <section id="varian" class="kartu sasaran-bagian" aria-labelledby="j-varian">
+              <h2 id="j-varian" class="mb-4 font-semibold">Varian</h2>
+
+              <div class="kartu-rapat mb-4 overflow-x-auto">
+                <table class="tabel">
+                  <thead>
+                    <tr>
+                      <th>SKU</th>
+                      <th>Nama</th>
+                      <th>Warna</th>
+                      <th>Ukuran</th>
+                      <th class="text-right">Harga</th>
+                      <th class="text-right">Stok</th>
+                      <th class="text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {produk.variants.map((v) => (
+                      <tr>
+                        <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+                          {v.sku ?? '—'}
+                        </td>
+                        <td class="font-medium">{v.name}</td>
+                        <td>{v.variant_color ?? '—'}</td>
+                        <td>{v.variant_size ?? '—'}</td>
+                        <td class="sel-angka">{rupiah(v.price)}</td>
+                        <td class="sel-angka">{v.stock_qty}</td>
+                        <td class="text-right">
+                          <a class="aksi-baris" href={`/produk/${v.id}`}>Kelola</a>
+                        </td>
+                      </tr>
+                    ))}
+                    {produk.variants.length === 0 && (
+                      <tr>
+                        <td colspan="7" class="py-8 text-center text-[var(--color-teks-lembut)]">
+                          Belum ada varian. Produk ini dijual apa adanya.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <details>
+                <summary class="tombol-halus cursor-pointer list-none">+ Tambah Varian</summary>
+
+                <form method="POST" class="borang-tegak mt-4">
+                  <input type="hidden" name="aksi" value="varian" />
+                  {/* Atribut yang sama untuk semua varian diwariskan dari induk
+                      lewat nilai tersembunyi ini, jadi SKU-nya tetap segaris
+                      tanpa harus diketik ulang tiap kali. */}
+                  <input type="hidden" name="brand_name" value={produk.brand_name ?? ''} />
+                  <input type="hidden" name="product_type" value={produk.product_type ?? ''} />
+                  <input type="hidden" name="category_id" value={produk.category_id ?? ''} />
+                  <input type="hidden" name="unit" value={produk.unit ?? ''} />
+                  <input type="hidden" name="storage_location" value={produk.storage_location ?? ''} />
+                  <input type="hidden" name="seo_name" value={produk.seo_name ?? ''} />
+
+                  <div class="isian">
+                    <label class="label" for="v_name">Nama varian</label>
+                    <input class="kolom" id="v_name" name="name" value={produk.name} required />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="v_color">Warna</label>
+                    <input class="kolom" id="v_color" name="variant_color" />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="v_size">Ukuran</label>
+                    <input class="kolom" id="v_size" name="variant_size" />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="v_price">Harga dasar (Rp)</label>
+                    <input
+                      class="kolom"
+                      id="v_price"
+                      name="price"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={produk.price}
+                      required
+                    />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="v_shopee">Harga Shopee (Rp)</label>
+                    <input
+                      class="kolom"
+                      id="v_shopee"
+                      name="price_shopee"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="ikut harga dasar"
+                    />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="v_tiktok">Harga Tokopedia / TikTok (Rp)</label>
+                    <input
+                      class="kolom"
+                      id="v_tiktok"
+                      name="price_tiktok"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="ikut harga dasar"
+                    />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="v_stok">Stok awal</label>
+                    <input class="kolom" id="v_stok" name="stock_qty" type="number" min="0" value="0" />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="v_batch">No. batch</label>
+                    <input class="kolom" id="v_batch" name="batch_number" placeholder="opsional" />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="v_exp">Kedaluwarsa</label>
+                    <input class="kolom" id="v_exp" name="expiry_date" type="date" />
+                  </div>
+
+                  <div class="isian">
+                    <button class="tombol-halus" type="submit">Simpan varian</button>
+                  </div>
+                </form>
+              </details>
+            </section>
+          )}
+
+          {/* ---------------------------------------------------------- */}
+          {/* Batch & stok                                               */}
+          {/* ---------------------------------------------------------- */}
+          <section id="batch" class="kartu sasaran-bagian" aria-labelledby="j-batch">
+            <h2 id="j-batch" class="mb-4 font-semibold">Batch & Stok</h2>
+
+            {punyaVarian ? (
+              <p class="text-sm text-[var(--color-teks-lembut)]">
+                Produk ini punya varian, jadi barang masuk dicatat di masing-masing varian — di
+                situlah stoknya berada.
+              </p>
+            ) : (
+              <Fragment>
+                <div class="kartu-rapat mb-3 overflow-x-auto">
+                  <table class="tabel">
+                    <thead>
+                      <tr>
+                        <th>No. Batch</th>
+                        <th class="text-right">Jumlah Masuk</th>
+                        <th>Kedaluwarsa</th>
+                        <th>Diterima</th>
+                        <th class="text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {produk.batches.map((b) => {
+                        const dekat =
+                          b.expiry_date !== null && DEKAT_KEDALUWARSA >= sisaHari(b.expiry_date);
+                        return (
+                          <tr>
+                            <td class="font-mono text-xs">{b.batch_number ?? '—'}</td>
+                            <td class="sel-angka">{b.quantity}</td>
+                            <td class="whitespace-nowrap">
+                              {b.expiry_date ? (
+                                <span class={dekat ? 'font-semibold text-red-600' : ''}>
+                                  {tanggal(b.expiry_date)}
+                                </span>
+                              ) : (
+                                <span class="text-[var(--color-teks-samar)]">—</span>
+                              )}
+                            </td>
+                            <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+                              {waktu(b.received_at)}
+                            </td>
+                            <td class="text-right">
+                              <form method="POST" class="inline">
+                                <input type="hidden" name="aksi" value="hapus-batch" />
+                                <input type="hidden" name="batch_id" value={b.id} />
+                                <button class="aksi-baris text-red-600" type="submit">
+                                  Batalkan
+                                </button>
+                              </form>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {produk.batches.length === 0 && (
+                        <tr>
+                          <td colspan="5" class="py-8 text-center text-[var(--color-teks-lembut)]">
+                            Belum ada batch yang dicatat.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <p class="mb-4 text-xs text-[var(--color-teks-lembut)]">
+                  Stok berjalan sekarang <strong class="tabular-nums">{produk.stock_qty}</strong>
+                  {produk.unit ? ` ${produk.unit}` : ''}. Jumlah di tabel adalah jumlah yang masuk
+                  saat itu, bukan sisa yang belum terjual. Membatalkan batch menarik kembali
+                  stoknya, dan ditolak kalau stok yang ada sudah tidak cukup.
+                </p>
+
+                <form method="POST" class="borang-tegak mb-6">
+                  <input type="hidden" name="aksi" value="batch" />
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="b_nomor">No. batch</label>
+                    <input class="kolom" id="b_nomor" name="batch_number" placeholder="opsional" />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="b_jumlah">Jumlah masuk</label>
+                    <input class="kolom" id="b_jumlah" name="quantity" type="number" min="1" required />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="b_exp">Kedaluwarsa</label>
+                    <input class="kolom" id="b_exp" name="expiry_date" type="date" />
+                  </div>
+
+                  <div class="isian">
+                    <button class="tombol-halus" type="submit">Catat batch</button>
+                  </div>
+                </form>
+
+                <h3 class="mb-3 font-semibold">Koreksi stok</h3>
+                <form method="POST" class="borang-tegak">
+                  <input type="hidden" name="aksi" value="koreksi" />
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="koreksi">Selisih</label>
+                    <input class="kolom" id="koreksi" name="change_qty" type="number" step="1" required />
+                  </div>
+
+                  <p class="isian isian-bantu">
+                    Untuk selisih opname atau barang rusak — positif menambah, negatif mengurangi.
+                    Barang yang baru datang dicatat sebagai batch, bukan di sini, supaya tanggal
+                    kedaluwarsanya ikut tersimpan.
+                  </p>
+
+                  <div class="isian">
+                    <button class="tombol-halus" type="submit">Koreksi stok</button>
+                  </div>
+                </form>
+              </Fragment>
+            )}
+          </section>
+
+          {/* ---------------------------------------------------------- */}
+          {/* Hapus                                                      */}
+          {/* ---------------------------------------------------------- */}
+          <section id="hapus" class="kartu sasaran-bagian" aria-labelledby="j-hapus">
+            <h2 id="j-hapus" class="mb-4 font-semibold">Hapus Produk</h2>
+
+            <form method="POST" class="flex flex-wrap items-center justify-between gap-3">
+              <input type="hidden" name="aksi" value="hapus" />
+              <p class="max-w-xl text-xs text-[var(--color-teks-lembut)]">
+                Menghapus produk hanya mungkin selama produk ini belum tersangkut di mana-mana.
+                Begitu pernah terjual atau masuk tiket packing, yang tersisa adalah
+                menonaktifkannya supaya riwayat penjualan tetap utuh.
+              </p>
+              <button class="tombol-bahaya" type="submit">Hapus produk</button>
+            </form>
+          </section>
+        </div>
+
+        {/* Di LUAR semua form: satu bilah tidak bisa mengirim lima form
+            sekaligus, jadi tombolnya menunjuk form "Data produk" lewat
+            atribut form=. Labelnya menyebut "produk" supaya orang yang sedang
+            di bagian Batch tidak mengira tombol ini menyimpan batch. */}
+        <div class="bilah-aksi">
+          <a class="tombol-halus flex-1 text-center sm:flex-none" href="/produk">Kembali</a>
+          <button
+            class="tombol-utama flex-1 sm:flex-none"
+            type="submit"
+            form="borang-produk"
+          >
+            Simpan perubahan produk
+          </button>
+        </div>
+      </Fragment>
+    )
+  }
+</AppShell>

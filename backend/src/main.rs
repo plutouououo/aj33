@@ -1,6 +1,7 @@
 mod auth;
 mod catalog;
 mod config;
+mod customers;
 mod db;
 mod error;
 mod marketplace;
@@ -30,6 +31,16 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
+    // Memuat `backend/.env` kalau ada. Dipanggil paling awal supaya RUST_LOG
+    // di berkas itu ikut terbaca penyetelan tracing di bawah.
+    //
+    // Berkasnya tidak wajib ada, jadi galatnya dibuang: di produksi setelan
+    // datang dari `EnvironmentFile=` systemd dan `.env` memang tidak pernah
+    // ikut terkirim (masuk .gitignore). Kalaupun suatu saat ada, `dotenvy`
+    // TIDAK menimpa variabel yang sudah diset, jadi systemd tetap menang --
+    // dan begitu pula override di baris perintah saat development.
+    dotenvy::dotenv().ok();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -77,6 +88,7 @@ async fn main() {
         .route("/api/health", get(health))
         .nest("/api", auth::router())
         .nest("/api", catalog::router())
+        .nest("/api", customers::router())
         .nest("/api", orders::router())
         .nest("/api", pos::router())
         .nest("/api", tickets::router())

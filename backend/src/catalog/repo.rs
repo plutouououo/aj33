@@ -1,23 +1,46 @@
-//! Akses tabel `products` dan `categories`.
+//! Akses tabel `products`, `categories`, dan `product_batches`.
 
-use crate::error::AppResult;
-use chrono::{DateTime, Utc};
+use crate::error::{AppError, AppResult};
+use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
-use serde::Serialize;
-use sqlx::PgPool;
+use serde::{Deserialize, Serialize};
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
+
+use super::sku;
 
 /// Bentuk produk yang dikirim ke frontend. `category_name` hasil JOIN,
 /// mengikuti skema `Product` di `contracts/api.yaml`.
+///
+/// Daftar kolomnya ditulis ulang di tiap query, bukan disatukan lewat
+/// konstanta: `query_as!` memeriksa SQL saat compile, jadi yang diterimanya
+/// harus berupa literal utuh. Harganya pengulangan; imbalannya, kolom yang
+/// salah ketik ketahuan saat build, bukan saat halaman dibuka.
 #[derive(Debug, Serialize)]
 pub struct Product {
     pub id: Uuid,
     pub category_id: Option<Uuid>,
     pub category_name: Option<String>,
+    /// Nama identifikasi internal: yang dicari pegawai di kasir dan dibaca
+    /// pengepak. Pendek dan cepat dikenali.
     pub name: String,
+    /// Judul untuk marketplace. `None` berarti belum diisi -- pemanggil yang
+    /// memutuskan apakah jatuh kembali ke `name`.
+    pub seo_name: Option<String>,
+    /// Selalu hasil rakitan dari merek/jenis/warna/ukuran, tidak pernah
+    /// diketik manual. Lihat modul `sku`.
     pub sku: Option<String>,
-    /// Harga dasar: yang dipakai kasir di toko, sekaligus rujukan saat
-    /// harga kanal belum diisi.
+    pub brand_name: Option<String>,
+    pub product_type: Option<String>,
+    pub variant_color: Option<String>,
+    pub variant_size: Option<String>,
+    /// Terisi berarti baris ini varian dari produk lain.
+    pub parent_id: Option<Uuid>,
+    /// Banyaknya varian di bawah produk ini. Induk yang punya varian tidak
+    /// dijual langsung -- yang dijual varian-variannya.
+    pub variant_count: i64,
+    /// Harga dasar: yang dipakai kasir di toko, sekaligus rujukan saat harga
+    /// kanal belum diisi.
     pub price: Decimal,
     /// `None` berarti belum diatur -- bukan gratis. Lihat migrasi 0005.
     pub price_shopee: Option<Decimal>,
@@ -30,6 +53,10 @@ pub struct Product {
     pub unit: Option<String>,
     /// Label rak internal yang dibaca pengepak, mis. "Rak A3".
     pub storage_location: Option<String>,
+    /// Kedaluwarsa terdekat dari seluruh batch produk ini. Diambil di query
+    /// yang sama supaya daftar produk bisa menandai barang yang mendekati
+    /// kedaluwarsa tanpa query tambahan per baris.
+    pub nearest_expiry: Option<NaiveDate>,
     pub is_active: bool,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
@@ -58,9 +85,50 @@ pub struct StockAdjustment {
     pub created_at: DateTime<Utc>,
 }
 
+/// Satu catatan barang masuk. `quantity` adalah jumlah yang MASUK saat itu,
+/// bukan sisa yang belum terjual: stok berjalan tetap dipegang
+/// `products.stock_qty` beserta ledger `stock_adjustments`, supaya tidak ada
+/// dua sumber kebenaran untuk angka stok yang bisa berselisih.
+#[derive(Debug, Serialize)]
+pub struct ProductBatch {
+    pub id: Uuid,
+    pub product_id: Uuid,
+    pub batch_number: Option<String>,
+    pub quantity: i32,
+    pub expiry_date: Option<NaiveDate>,
+    pub received_at: DateTime<Utc>,
+    pub created_by: Option<Uuid>,
+}
+
+/// Bagian katalog yang diminta pemanggil. Halaman produk mengurus induk,
+/// kasir hanya boleh melihat yang benar-benar bisa dijual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// Semua baris, varian sekalipun.
+    Semua,
+    /// Hanya produk induk (`parent_id IS NULL`).
+    Induk,
+    /// Hanya yang bisa dijual: produk tanpa varian, dan varian itu sendiri.
+    /// Induk yang punya varian tidak punya harga yang berlaku -- harganya ada
+    /// di masing-masing varian -- jadi tidak boleh muncul di kasir.
+    Terjual,
+}
+
+impl Scope {
+    fn as_str(self) -> Option<&'static str> {
+        match self {
+            Self::Semua => None,
+            Self::Induk => Some("induk"),
+            Self::Terjual => Some("terjual"),
+        }
+    }
+}
+
 pub struct ProductFilter {
     pub search: Option<String>,
     pub category_id: Option<Uuid>,
+    pub parent_id: Option<Uuid>,
+    pub scope: Scope,
     pub only_active: bool,
     pub limit: i64,
     pub offset: i64,
@@ -77,22 +145,37 @@ pub async fn list_products(
         Product,
         r#"
         SELECT
-            p.id, p.category_id, c.name AS "category_name?", p.name, p.sku,
+            p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
+            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,
+            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.unit, p.storage_location, p.is_active, p.created_by,
+            p.image_url, p.unit, p.storage_location,
+            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
+                AS "nearest_expiry?",
+            p.is_active, p.created_by,
             p.created_at AS "created_at!", p.updated_at AS "updated_at!"
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
-        WHERE ($1::text IS NULL OR p.name ILIKE '%' || $1 || '%' OR p.sku ILIKE '%' || $1 || '%')
+        WHERE ($1::text IS NULL
+               OR p.name ILIKE '%' || $1 || '%'
+               OR p.seo_name ILIKE '%' || $1 || '%'
+               OR p.sku ILIKE '%' || $1 || '%')
           AND ($2::uuid IS NULL OR p.category_id = $2)
           AND (NOT $3::bool OR p.is_active)
+          AND ($4::uuid IS NULL OR p.parent_id = $4)
+          AND ($5::text IS NULL
+               OR ($5 = 'induk' AND p.parent_id IS NULL)
+               OR ($5 = 'terjual'
+                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))
         ORDER BY p.name
-        LIMIT $4 OFFSET $5
+        LIMIT $6 OFFSET $7
         "#,
         filter.search.as_deref(),
         filter.category_id,
         filter.only_active,
+        filter.parent_id,
+        filter.scope.as_str(),
         filter.limit,
         filter.offset
     )
@@ -103,13 +186,23 @@ pub async fn list_products(
         r#"
         SELECT count(*) AS "count!"
         FROM products p
-        WHERE ($1::text IS NULL OR p.name ILIKE '%' || $1 || '%' OR p.sku ILIKE '%' || $1 || '%')
+        WHERE ($1::text IS NULL
+               OR p.name ILIKE '%' || $1 || '%'
+               OR p.seo_name ILIKE '%' || $1 || '%'
+               OR p.sku ILIKE '%' || $1 || '%')
           AND ($2::uuid IS NULL OR p.category_id = $2)
           AND (NOT $3::bool OR p.is_active)
+          AND ($4::uuid IS NULL OR p.parent_id = $4)
+          AND ($5::text IS NULL
+               OR ($5 = 'induk' AND p.parent_id IS NULL)
+               OR ($5 = 'terjual'
+                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))
         "#,
         filter.search.as_deref(),
         filter.category_id,
-        filter.only_active
+        filter.only_active,
+        filter.parent_id,
+        filter.scope.as_str()
     )
     .fetch_one(pool)
     .await?;
@@ -122,10 +215,15 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
         Product,
         r#"
         SELECT
-            p.id, p.category_id, c.name AS "category_name?", p.name, p.sku,
+            p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
+            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,
+            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.unit, p.storage_location, p.is_active, p.created_by,
+            p.image_url, p.unit, p.storage_location,
+            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
+                AS "nearest_expiry?",
+            p.is_active, p.created_by,
             p.created_at AS "created_at!", p.updated_at AS "updated_at!"
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
@@ -139,15 +237,50 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
     Ok(row)
 }
 
+/// Varian sebuah produk, diurutkan menurut sumbu variannya supaya daftarnya
+/// tampil dengan urutan yang sama setiap kali dibuka.
+pub async fn list_variants(pool: &PgPool, parent_id: Uuid) -> AppResult<Vec<Product>> {
+    let rows = sqlx::query_as!(
+        Product,
+        r#"
+        SELECT
+            p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
+            p.brand_name, p.product_type, p.variant_color, p.variant_size, p.parent_id,
+            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
+            p.price, p.price_shopee, p.price_tiktok, p.cost_price,
+            p.stock_qty, p.low_stock_threshold,
+            p.image_url, p.unit, p.storage_location,
+            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
+                AS "nearest_expiry?",
+            p.is_active, p.created_by,
+            p.created_at AS "created_at!", p.updated_at AS "updated_at!"
+        FROM products p
+        LEFT JOIN categories c ON c.id = p.category_id
+        WHERE p.parent_id = $1
+        ORDER BY p.variant_color NULLS FIRST, p.variant_size NULLS FIRST, p.name
+        "#,
+        parent_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 pub struct NewProduct {
     pub name: String,
+    pub seo_name: Option<String>,
     pub sku: Option<String>,
+    pub brand_name: Option<String>,
+    pub product_type: Option<String>,
+    pub variant_color: Option<String>,
+    pub variant_size: Option<String>,
+    pub parent_id: Option<Uuid>,
     pub category_id: Option<Uuid>,
     pub price: Decimal,
     pub price_shopee: Option<Decimal>,
     pub price_tiktok: Option<Decimal>,
     pub cost_price: Option<Decimal>,
-    pub stock_qty: i32,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
     pub unit: Option<String>,
@@ -155,92 +288,217 @@ pub struct NewProduct {
     pub created_by: Uuid,
 }
 
-pub async fn insert_product(pool: &PgPool, input: &NewProduct) -> AppResult<Uuid> {
+/// Produk selalu lahir dengan stok nol. Stok awal masuk lewat batch (lihat
+/// `insert_batch` dan `stock::tambah`), supaya tidak pernah ada butir stok
+/// yang muncul tanpa baris ledger yang menjelaskan asalnya.
+pub async fn insert_product(
+    tx: &mut Transaction<'_, Postgres>,
+    input: &NewProduct,
+) -> AppResult<Uuid> {
     let id = sqlx::query_scalar!(
         r#"
         INSERT INTO products
-            (name, sku, category_id, price, price_shopee, price_tiktok,
+            (name, seo_name, sku, brand_name, product_type, variant_color, variant_size,
+             parent_id, category_id, price, price_shopee, price_tiktok,
              cost_price, stock_qty, low_stock_threshold, image_url, unit,
              storage_location, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0,
+                $14, $15, $16, $17, $18)
         RETURNING id
         "#,
         input.name,
+        input.seo_name,
         input.sku,
+        input.brand_name,
+        input.product_type,
+        input.variant_color,
+        input.variant_size,
+        input.parent_id,
         input.category_id,
         input.price,
         input.price_shopee,
         input.price_tiktok,
         input.cost_price,
-        input.stock_qty,
         input.low_stock_threshold,
         input.image_url,
         input.unit,
         input.storage_location,
         input.created_by
     )
-    .fetch_one(pool)
+    .fetch_one(&mut **tx)
     .await?;
 
     Ok(id)
 }
 
-/// Semua kolom opsional: yang `None` dibiarkan seperti semula. Stok TIDAK
-/// ikut di sini -- satu-satunya jalan mengubah stok adalah lewat `stock.rs`,
-/// supaya tidak ada perubahan yang lolos tanpa tercatat di ledger.
+/// Kolom yang boleh dikosongkan kembali, bukan sekadar diganti isinya.
+///
+/// `None` berarti kolomnya tidak disebut permintaan -- biarkan apa adanya.
+/// `Some(None)` berarti pengguna sengaja mengosongkannya. Keduanya harus
+/// dibedakan: tanpa itu, harga Shopee yang terlanjur diisi tidak akan pernah
+/// bisa dikembalikan ke "belum diatur", dan warna varian yang salah ketik
+/// menempel selamanya di SKU.
+pub type Ubah<T> = Option<Option<T>>;
+
+/// Deserializer untuk `Ubah<T>`, wajib dipasang lewat `deserialize_with`.
+///
+/// Tanpa ini serde membaca `"price_shopee": null` sebagai `None` -- sama
+/// dengan field yang tidak disebut sama sekali -- sehingga permintaan
+/// mengosongkan kolom diam-diam berubah jadi "biarkan apa adanya". Di sini
+/// yang null dibungkus jadi `Some(None)`, dan yang benar-benar tidak disebut
+/// ditangani `#[serde(default)]` di field-nya.
+pub fn ubah_terkirim<'de, D, T>(deserializer: D) -> Result<Ubah<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::deserialize(deserializer).map(Some)
+}
+
+fn teks(kolom: &Ubah<String>) -> (bool, Option<&str>) {
+    match kolom {
+        None => (false, None),
+        Some(isi) => (true, isi.as_deref()),
+    }
+}
+
+fn salinan<T: Copy>(kolom: &Ubah<T>) -> (bool, Option<T>) {
+    match kolom {
+        None => (false, None),
+        Some(isi) => (true, *isi),
+    }
+}
+
+/// Semua kolom opsional: yang tidak disebut dibiarkan seperti semula. Stok
+/// TIDAK ikut di sini -- satu-satunya jalan mengubah stok adalah lewat
+/// `stock.rs`, supaya tidak ada perubahan yang lolos tanpa tercatat di
+/// ledger.
 #[derive(Default)]
 pub struct ProductPatch {
     pub name: Option<String>,
-    pub sku: Option<String>,
-    pub category_id: Option<Uuid>,
+    pub seo_name: Ubah<String>,
+    /// Selalu hasil rakitan ulang di `routes`, tidak pernah dari pengguna.
+    pub sku: Ubah<String>,
+    pub brand_name: Ubah<String>,
+    pub product_type: Ubah<String>,
+    pub variant_color: Ubah<String>,
+    pub variant_size: Ubah<String>,
+    pub category_id: Ubah<Uuid>,
     pub price: Option<Decimal>,
-    pub price_shopee: Option<Decimal>,
-    pub price_tiktok: Option<Decimal>,
-    pub cost_price: Option<Decimal>,
+    pub price_shopee: Ubah<Decimal>,
+    pub price_tiktok: Ubah<Decimal>,
+    pub cost_price: Ubah<Decimal>,
     pub low_stock_threshold: Option<i32>,
-    pub image_url: Option<String>,
-    pub unit: Option<String>,
-    pub storage_location: Option<String>,
+    pub image_url: Ubah<String>,
+    pub unit: Ubah<String>,
+    pub storage_location: Ubah<String>,
     pub is_active: Option<bool>,
 }
 
 pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> AppResult<bool> {
+    let (ubah_seo, seo_name) = teks(&patch.seo_name);
+    let (ubah_sku, sku) = teks(&patch.sku);
+    let (ubah_merek, brand_name) = teks(&patch.brand_name);
+    let (ubah_jenis, product_type) = teks(&patch.product_type);
+    let (ubah_warna, variant_color) = teks(&patch.variant_color);
+    let (ubah_ukuran, variant_size) = teks(&patch.variant_size);
+    let (ubah_kategori, category_id) = salinan(&patch.category_id);
+    let (ubah_shopee, price_shopee) = salinan(&patch.price_shopee);
+    let (ubah_tiktok, price_tiktok) = salinan(&patch.price_tiktok);
+    let (ubah_modal, cost_price) = salinan(&patch.cost_price);
+    let (ubah_gambar, image_url) = teks(&patch.image_url);
+    let (ubah_satuan, unit) = teks(&patch.unit);
+    let (ubah_lokasi, storage_location) = teks(&patch.storage_location);
+
+    // Kolom yang tidak boleh NULL memakai COALESCE; sisanya memakai CASE
+    // dengan penanda tersendiri, karena COALESCE tidak bisa membedakan
+    // "tidak disebut" dari "sengaja dikosongkan".
     let hasil = sqlx::query!(
         r#"
         UPDATE products SET
             name                = COALESCE($2, name),
-            sku                 = COALESCE($3, sku),
-            category_id         = COALESCE($4, category_id),
-            price               = COALESCE($5, price),
-            price_shopee        = COALESCE($6, price_shopee),
-            price_tiktok        = COALESCE($7, price_tiktok),
-            cost_price          = COALESCE($8, cost_price),
-            low_stock_threshold = COALESCE($9, low_stock_threshold),
-            image_url           = COALESCE($10, image_url),
-            unit                = COALESCE($11, unit),
-            storage_location    = COALESCE($12, storage_location),
-            is_active           = COALESCE($13, is_active),
+            price               = COALESCE($3, price),
+            low_stock_threshold = COALESCE($4, low_stock_threshold),
+            is_active           = COALESCE($5, is_active),
+            seo_name            = CASE WHEN $6::bool  THEN $7::varchar  ELSE seo_name END,
+            sku                 = CASE WHEN $8::bool  THEN $9::varchar  ELSE sku END,
+            brand_name          = CASE WHEN $10::bool THEN $11::varchar ELSE brand_name END,
+            product_type        = CASE WHEN $12::bool THEN $13::varchar ELSE product_type END,
+            variant_color       = CASE WHEN $14::bool THEN $15::varchar ELSE variant_color END,
+            variant_size        = CASE WHEN $16::bool THEN $17::varchar ELSE variant_size END,
+            category_id         = CASE WHEN $18::bool THEN $19::uuid    ELSE category_id END,
+            price_shopee        = CASE WHEN $20::bool THEN $21::numeric ELSE price_shopee END,
+            price_tiktok        = CASE WHEN $22::bool THEN $23::numeric ELSE price_tiktok END,
+            cost_price          = CASE WHEN $24::bool THEN $25::numeric ELSE cost_price END,
+            image_url           = CASE WHEN $26::bool THEN $27::varchar ELSE image_url END,
+            unit                = CASE WHEN $28::bool THEN $29::varchar ELSE unit END,
+            storage_location    = CASE WHEN $30::bool THEN $31::varchar ELSE storage_location END,
             updated_at          = now()
         WHERE id = $1
         "#,
         id,
         patch.name.as_deref(),
-        patch.sku.as_deref(),
-        patch.category_id,
         patch.price,
-        patch.price_shopee,
-        patch.price_tiktok,
-        patch.cost_price,
         patch.low_stock_threshold,
-        patch.image_url.as_deref(),
-        patch.unit.as_deref(),
-        patch.storage_location.as_deref(),
-        patch.is_active
+        patch.is_active,
+        ubah_seo,
+        seo_name,
+        ubah_sku,
+        sku,
+        ubah_merek,
+        brand_name,
+        ubah_jenis,
+        product_type,
+        ubah_warna,
+        variant_color,
+        ubah_ukuran,
+        variant_size,
+        ubah_kategori,
+        category_id,
+        ubah_shopee,
+        price_shopee,
+        ubah_tiktok,
+        price_tiktok,
+        ubah_modal,
+        cost_price,
+        ubah_gambar,
+        image_url,
+        ubah_satuan,
+        unit,
+        ubah_lokasi,
+        storage_location
     )
     .execute(pool)
     .await?;
 
     Ok(hasil.rows_affected() > 0)
+}
+
+/// SKU hasil rakitan yang dijamin belum dipakai produk lain.
+///
+/// Dua produk bisa saja punya merek, jenis, warna, dan ukuran yang persis
+/// sama -- toko memang kadang menjual barang serupa dari pemasok berbeda.
+/// Daripada menolak simpanan dan memaksa pengguna mengarang pembeda, SKU
+/// yang kedua diberi akhiran urut.
+pub async fn sku_unik(pool: &PgPool, basis: &str, kecuali: Option<Uuid>) -> AppResult<String> {
+    // Berbatas, supaya salah pakai (mis. impor massal dengan atribut yang
+    // sama persis) berhenti dengan galat alih-alih memutari database tanpa
+    // ujung.
+    for n in 1..=50u32 {
+        let kandidat = if n == 1 {
+            basis.to_string()
+        } else {
+            sku::dengan_akhiran(basis, n)
+        };
+
+        if !sku_dipakai(pool, &kandidat, kecuali).await? {
+            return Ok(kandidat);
+        }
+    }
+
+    Err(AppError::conflict(
+        "Terlalu banyak produk dengan merek, jenis, warna, dan ukuran yang sama.",
+    ))
 }
 
 pub async fn sku_dipakai(pool: &PgPool, sku: &str, kecuali: Option<Uuid>) -> AppResult<bool> {
@@ -265,6 +523,152 @@ pub async fn category_ada(pool: &PgPool, id: Uuid) -> AppResult<bool> {
 
     Ok(ada)
 }
+
+/// Apa yang menahan sebuah produk sehingga tidak boleh dihapus. `None`
+/// berarti tidak ada -- produk itu belum menyentuh apa pun dan aman dibuang.
+pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static str>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            EXISTS(SELECT 1 FROM products WHERE parent_id = $1)              AS "varian!",
+            EXISTS(SELECT 1 FROM transaction_items WHERE product_id = $1)    AS "penjualan!",
+            EXISTS(SELECT 1 FROM ticket_items WHERE product_id = $1)         AS "tiket!",
+            EXISTS(SELECT 1 FROM external_order_items WHERE product_id = $1) AS "pesanan!",
+            EXISTS(SELECT 1 FROM channel_listings WHERE product_id = $1)     AS "listing!",
+            EXISTS(SELECT 1 FROM shopping_list_items WHERE product_id = $1)  AS "belanja!"
+        "#,
+        id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(if row.varian {
+        Some("masih punya varian")
+    } else if row.penjualan {
+        Some("sudah pernah terjual di kasir")
+    } else if row.tiket {
+        Some("tercatat di tiket packing")
+    } else if row.pesanan {
+        Some("tercatat di pesanan marketplace")
+    } else if row.listing {
+        Some("terhubung ke listing marketplace")
+    } else if row.belanja {
+        Some("ada di daftar belanja")
+    } else {
+        None
+    })
+}
+
+/// Menghapus produk berikut catatan yang hanya berarti bersama produk itu:
+/// batch barang masuk dan baris ledger stoknya. Pemanggil wajib memeriksa
+/// `penahan_hapus` lebih dulu -- riwayat penjualan tidak pernah ikut terhapus
+/// lewat jalan ini.
+pub async fn delete_product(pool: &PgPool, id: Uuid) -> AppResult<bool> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query!("DELETE FROM product_batches WHERE product_id = $1", id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!("DELETE FROM stock_adjustments WHERE product_id = $1", id)
+        .execute(&mut *tx)
+        .await?;
+
+    let hasil = sqlx::query!("DELETE FROM products WHERE id = $1", id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+
+    Ok(hasil.rows_affected() > 0)
+}
+
+// ---------------------------------------------------------------------
+// Batch barang masuk
+// ---------------------------------------------------------------------
+
+pub async fn list_batches(pool: &PgPool, product_id: Uuid) -> AppResult<Vec<ProductBatch>> {
+    let rows = sqlx::query_as!(
+        ProductBatch,
+        r#"
+        SELECT id, product_id, batch_number, quantity, expiry_date,
+               received_at AS "received_at!", created_by
+        FROM product_batches
+        WHERE product_id = $1
+        ORDER BY expiry_date NULLS LAST, received_at DESC
+        "#,
+        product_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+pub struct NewBatch {
+    pub product_id: Uuid,
+    pub batch_number: Option<String>,
+    pub quantity: i32,
+    pub expiry_date: Option<NaiveDate>,
+    pub created_by: Uuid,
+}
+
+/// Mencatat satu batch. Penambahan stoknya dikerjakan pemanggil lewat
+/// `stock.rs` di transaksi yang sama, jadi batch dan ledger tidak pernah bisa
+/// bercerita berbeda.
+pub async fn insert_batch(tx: &mut Transaction<'_, Postgres>, input: &NewBatch) -> AppResult<Uuid> {
+    let id = sqlx::query_scalar!(
+        r#"
+        INSERT INTO product_batches (product_id, batch_number, quantity, expiry_date, created_by)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+        "#,
+        input.product_id,
+        input.batch_number,
+        input.quantity,
+        input.expiry_date,
+        input.created_by
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(id)
+}
+
+/// Dibaca di dalam transaksi penghapusan: jumlahnya dipakai untuk menarik
+/// kembali stok yang dulu ditambahkan batch ini.
+pub async fn find_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    product_id: Uuid,
+    id: Uuid,
+) -> AppResult<Option<ProductBatch>> {
+    let row = sqlx::query_as!(
+        ProductBatch,
+        r#"
+        SELECT id, product_id, batch_number, quantity, expiry_date,
+               received_at AS "received_at!", created_by
+        FROM product_batches
+        WHERE id = $1 AND product_id = $2
+        "#,
+        id,
+        product_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn delete_batch(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> AppResult<()> {
+    sqlx::query!("DELETE FROM product_batches WHERE id = $1", id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------
+// Kategori dan ledger stok
+// ---------------------------------------------------------------------
 
 pub async fn list_categories(pool: &PgPool) -> AppResult<Vec<Category>> {
     let rows = sqlx::query_as!(

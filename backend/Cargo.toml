@@ -44,6 +44,10 @@ reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
 ] }
 
+# Memuat backend/.env saat development. Di produksi setelan datang dari
+# systemd, dan dotenvy tidak pernah menimpa variabel yang sudah ada.
+dotenvy = "0.15"
+
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

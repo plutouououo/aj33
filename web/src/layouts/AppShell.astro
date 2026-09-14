@@ -88,10 +88,38 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
     {
       user ? (
         <div class="flex min-h-screen">
+          {/*
+            Saklar laci menu di layar kecil. Checkbox, bukan tombol ber-JS:
+            kalau menunya cuma bisa dibuka dengan JavaScript, mematikan JS
+            berarti tidak bisa berpindah halaman sama sekali. Diletakkan
+            sebagai anak pertama supaya `peer-checked:` bisa menjangkau
+            sidebar, tirai, dan kolom isi yang semuanya saudara di bawahnya.
+
+            `sr-only` menyembunyikan tanpa membuang dari urutan fokus, jadi
+            menu tetap bisa dibuka lewat Tab + Spasi.
+          */}
+          <input
+            type="checkbox"
+            id="buka-menu"
+            class="peer sr-only"
+            aria-label="Buka menu navigasi"
+          />
+
+          {/* Tirai gelap. Mengklik di mana pun di luar laci menutupnya --
+              perilaku yang diharapkan orang dari laci di ponsel. */}
+          <label
+            for="buka-menu"
+            class="fixed inset-0 z-20 hidden bg-black/40 peer-checked:block md:peer-checked:hidden"
+            aria-hidden="true"
+          />
+
           <aside
             id="sidebar"
-            class="fixed inset-y-0 left-0 z-20 flex w-[var(--lebar-sidebar)] flex-col
-                   border-r border-[var(--color-garis)] bg-white transition-[width]"
+            class="fixed inset-y-0 left-0 z-30 flex w-[var(--lebar-sidebar)] -translate-x-full
+                   flex-col border-r border-[var(--color-garis)] bg-white
+                   transition-[width,transform] peer-checked:translate-x-0
+                   peer-focus-visible:ring-2 peer-focus-visible:ring-merah-600
+                   md:z-20 md:translate-x-0"
           >
             <div class="flex items-center gap-2.5 px-4 py-4">
               <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-merah-600 text-sm font-bold text-white">
@@ -138,11 +166,13 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
               ))}
             </nav>
 
+            {/* Hanya di layar lebar. Di ponsel laci sudah selebar penuh dan
+                menciutkannya jadi rel ikon tidak menambah ruang apa pun. */}
             <button
               id="ciutkan"
               type="button"
-              class="flex items-center gap-3 border-t border-[var(--color-garis)] px-5 py-3.5
-                     text-sm text-[var(--color-teks-lembut)] hover:text-merah-700"
+              class="hidden items-center gap-3 border-t border-[var(--color-garis)] px-5 py-3.5
+                     text-sm text-[var(--color-teks-lembut)] hover:text-merah-700 md:flex"
               aria-controls="sidebar"
               aria-expanded="true"
             >
@@ -151,9 +181,31 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             </button>
           </aside>
 
-          <div class="ml-[var(--lebar-sidebar)] flex min-w-0 flex-1 flex-col transition-[margin]">
-            <header class="flex items-center justify-between gap-4 border-b border-[var(--color-garis)] bg-white px-6 py-4">
-              <h1 class="truncate text-2xl font-bold tracking-tight">{judul}</h1>
+          <div class="flex min-w-0 flex-1 flex-col transition-[margin] md:ml-[var(--lebar-sidebar)]">
+            <header class="flex items-center justify-between gap-3 border-b border-[var(--color-garis)] bg-white px-4 py-3 md:gap-4 md:px-6 md:py-4">
+              <div class="flex min-w-0 items-center gap-2">
+                {/* Pemicu laci. <label>, bukan <button>, karena yang
+                    menggerakkannya checkbox di atas -- lihat komentar di sana. */}
+                <label
+                  for="buka-menu"
+                  class="aksi-baris -ml-1 shrink-0 cursor-pointer md:hidden"
+                  title="Buka menu navigasi"
+                >
+                  <svg
+                    class="h-6 w-6"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 7h16M4 12h16M4 17h16" />
+                  </svg>
+                </label>
+
+                <h1 class="truncate text-xl font-bold tracking-tight md:text-2xl">{judul}</h1>
+              </div>
 
               <div class="flex shrink-0 items-center gap-3">
                 <span class="grid h-9 w-9 place-items-center rounded-full bg-merah-600 text-sm font-bold text-white">
@@ -171,7 +223,11 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
               </div>
             </header>
 
-            <main class="flex-1 px-6 py-6">
+            {/* Padding lebih rapat di ponsel. Bilah menempel (.bilah-tab,
+                .bilah-aksi, .bilah-bawah) membatalkan padding ini dengan
+                margin negatif, jadi keduanya harus berubah bersamaan --
+                lihat theme.css. */}
+            <main class="flex-1 px-4 py-4 md:px-6 md:py-6">
               <slot />
             </main>
           </div>

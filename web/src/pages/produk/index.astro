@@ -1,7 +1,7 @@
 ---
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type PaginatedProducts } from '../../lib/api';
-import { rupiah } from '../../lib/format';
+import { rupiah, tanggal, sisaHari } from '../../lib/format';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -16,8 +16,10 @@ if (Astro.request.method === 'POST') {
     galat = 'Kamu tidak punya akses ke fitur ini.';
   } else {
     const form = await Astro.request.formData();
-    const aksi = String(form.get('aksi') ?? 'tambah');
+    const aksi = String(form.get('aksi') ?? '');
 
+    // Satu-satunya aksi yang tersisa di halaman daftar. Menambah produk
+    // pindah ke /produk/baru, yang punya ruang untuk form berbagian.
     if (aksi === 'aktif') {
       const id = String(form.get('id') ?? '');
       const jadikanAktif = form.get('is_active') === '1';
@@ -31,52 +33,6 @@ if (Astro.request.method === 'POST') {
       } catch (err) {
         galat = err instanceof ApiRequestError ? err.message : 'Gagal mengubah status produk.';
       }
-    } else {
-      const nama = String(form.get('name') ?? '').trim();
-      const harga = Number(form.get('price'));
-      const stok = Number(form.get('stock_qty') ?? 0);
-
-      // Harga marketplace boleh dikosongkan: kosong berarti "belum diatur,
-      // pakai harga dasar". Dikirim sebagai undefined, bukan 0 -- 0 berarti
-      // gratis, dan produk gratis di marketplace adalah kerugian langsung.
-      const hargaKanal = (kolom: string): number | undefined => {
-        const mentah = String(form.get(kolom) ?? '').trim();
-        if (!mentah) return undefined;
-        const nilai = Number(mentah);
-        return Number.isFinite(nilai) ? nilai : undefined;
-      };
-      const hargaShopee = hargaKanal('price_shopee');
-      const hargaTiktok = hargaKanal('price_tiktok');
-
-      if (!nama) {
-        galat = 'Nama produk wajib diisi.';
-      } else if (!Number.isFinite(harga) || harga < 0) {
-        galat = 'Harga dasar harus berupa angka yang tidak negatif.';
-      } else if ((hargaShopee ?? 0) < 0 || (hargaTiktok ?? 0) < 0) {
-        galat = 'Harga marketplace tidak boleh negatif.';
-      } else {
-        try {
-          await api('/products', {
-            method: 'POST',
-            token,
-            body: {
-              name: nama,
-              sku: String(form.get('sku') ?? '').trim() || undefined,
-              category_id: String(form.get('category_id') ?? '') || undefined,
-              price: harga,
-              price_shopee: hargaShopee,
-              price_tiktok: hargaTiktok,
-              stock_qty: Number.isFinite(stok) ? stok : 0,
-              low_stock_threshold: Number(form.get('low_stock_threshold')) || 5,
-              unit: String(form.get('unit') ?? '').trim() || undefined,
-              storage_location: String(form.get('storage_location') ?? '').trim() || undefined,
-            },
-          });
-          sukses = `Produk "${nama}" ditambahkan.`;
-        } catch (err) {
-          galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan produk.';
-        }
-      }
     }
   }
 }
@@ -88,6 +44,10 @@ const kategoriDipilih = params.get('kategori') ?? '';
 // Pilihan status di sini mengikuti itu apa adanya, bukan menjanjikan saringan
 // "hanya nonaktif" yang tidak bisa dilayani.
 const status = params.get('status') === 'semua' ? 'semua' : 'aktif';
+// Baku: hanya produk induk. Varian dikelola dari halaman induknya, jadi
+// menampilkan semuanya sekaligus hanya membuat daftar ini panjang tanpa
+// menambah yang bisa dikerjakan di sini.
+const tampil = params.get('tampil') === 'semua' ? 'semua' : 'induk';
 const PER_HALAMAN = [10, 25, 50, 100];
 const limit = PER_HALAMAN.includes(Number(params.get('per'))) ? Number(params.get('per')) : 25;
 const halaman = Math.max(1, Number(params.get('halaman')) || 1);
@@ -96,6 +56,7 @@ const kueri = new URLSearchParams({ limit: String(limit), page: String(halaman) 
 if (cari) kueri.set('search', cari);
 if (kategoriDipilih) kueri.set('category_id', kategoriDipilih);
 if (status === 'semua') kueri.set('include_inactive', 'true');
+if (tampil === 'induk') kueri.set('scope', 'induk');
 
 const [daftar, kategori] = await Promise.all([
   api<PaginatedProducts>(`/products?${kueri}`, { token }),
@@ -112,130 +73,23 @@ function tautanHalaman(ke: number): string {
   if (cari) p.set('cari', cari);
   if (kategoriDipilih) p.set('kategori', kategoriDipilih);
   if (status === 'semua') p.set('status', 'semua');
+  if (tampil === 'semua') p.set('tampil', 'semua');
   if (limit !== 25) p.set('per', String(limit));
   if (ke !== 1) p.set('halaman', String(ke));
   const q = p.toString();
   return q ? `/produk?${q}` : '/produk';
 }
+
+/** Ambang "sudah dekat" untuk kedaluwarsa, dalam hari. */
+const DEKAT_KEDALUWARSA = 30;
 ---
 
 <AppShell judul="Produk" user={user}>
   {
     user.role === 'owner' && (
-      <details class="mb-5" open={galat !== null}>
-        <summary class="tombol-utama cursor-pointer list-none">+ Tambah Produk</summary>
-
-        <form method="POST" class="kartu mt-3 grid gap-4 sm:grid-cols-2">
-          <input type="hidden" name="aksi" value="tambah" />
-
-          <div class="sm:col-span-2">
-            <label class="label" for="name">Nama produk</label>
-            <input class="kolom" id="name" name="name" required />
-          </div>
-
-          <div>
-            <label class="label" for="sku">SKU</label>
-            <input class="kolom" id="sku" name="sku" placeholder="opsional" />
-          </div>
-
-          <div>
-            <label class="label" for="category_id">Kategori</label>
-            <select class="kolom" id="category_id" name="category_id">
-              <option value="">— tanpa kategori —</option>
-              {kategori.map((k) => (
-                <option value={k.id}>{k.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div class="sm:col-span-2">
-            <p class="label mb-2">Harga</p>
-            <div class="grid gap-4 sm:grid-cols-3">
-              <div>
-                <label class="label" for="price">Dasar / kasir (Rp)</label>
-                <input
-                  class="kolom"
-                  id="price"
-                  name="price"
-                  type="number"
-                  min="0"
-                  step="1"
-                  required
-                />
-              </div>
-
-              <div>
-                <label class="label" for="price_shopee">Shopee (Rp)</label>
-                <input
-                  class="kolom"
-                  id="price_shopee"
-                  name="price_shopee"
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="ikut harga dasar"
-                />
-              </div>
-
-              <div>
-                <label class="label" for="price_tiktok">Tokopedia / TikTok (Rp)</label>
-                <input
-                  class="kolom"
-                  id="price_tiktok"
-                  name="price_tiktok"
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="ikut harga dasar"
-                />
-              </div>
-            </div>
-            <p class="mt-1.5 text-xs text-[var(--color-teks-lembut)]">
-              Harga marketplace boleh dikosongkan — artinya belum diatur dan mengikuti harga
-              dasar. Mengisi 0 berarti digratiskan.
-            </p>
-          </div>
-
-          <div>
-            <label class="label" for="unit">Satuan</label>
-            <input class="kolom" id="unit" name="unit" placeholder="pcs" />
-          </div>
-
-          <div>
-            <label class="label" for="storage_location">Lokasi penyimpanan</label>
-            <input
-              class="kolom"
-              id="storage_location"
-              name="storage_location"
-              placeholder="mis. Rak A3"
-            />
-            <p class="mt-1.5 text-xs text-[var(--color-teks-lembut)]">
-              Ditampilkan ke pengepak di tiket packing.
-            </p>
-          </div>
-
-          <div>
-            <label class="label" for="stock_qty">Stok awal</label>
-            <input class="kolom" id="stock_qty" name="stock_qty" type="number" min="0" value="0" />
-          </div>
-
-          <div>
-            <label class="label" for="low_stock_threshold">Batas stok menipis</label>
-            <input
-              class="kolom"
-              id="low_stock_threshold"
-              name="low_stock_threshold"
-              type="number"
-              min="0"
-              value="5"
-            />
-          </div>
-
-          <div class="sm:col-span-2">
-            <button class="tombol-utama" type="submit">Simpan produk</button>
-          </div>
-        </form>
-      </details>
+      <p class="mb-5">
+        <a class="tombol-utama" href="/produk/baru">+ Tambah Produk</a>
+      </p>
     )
   }
 
@@ -244,7 +98,10 @@ function tautanHalaman(ke: number): string {
 
   {/* Saringan dikirim sebagai GET biasa, jadi keadaan daftar selalu ada di
       URL -- bisa di-bookmark, dibagikan, dan tombol kembali bekerja. */}
-  <form method="GET" class="kartu mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_13rem_11rem_8rem]">
+  <form
+    method="GET"
+    class="kartu mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_12rem_10rem_10rem_7rem]"
+  >
     <div>
       <label class="label" for="cari">Cari</label>
       <input
@@ -253,7 +110,7 @@ function tautanHalaman(ke: number): string {
         type="search"
         name="cari"
         value={cari}
-        placeholder="Cari nama atau SKU..."
+        placeholder="Cari nama, nama SEO, atau SKU..."
       />
     </div>
 
@@ -278,6 +135,14 @@ function tautanHalaman(ke: number): string {
     </div>
 
     <div>
+      <label class="label" for="tampil">Varian</label>
+      <select class="kolom" id="tampil" name="tampil">
+        <option value="induk" selected={tampil === 'induk'}>Induk Saja</option>
+        <option value="semua" selected={tampil === 'semua'}>Ikut Varian</option>
+      </select>
+    </div>
+
+    <div>
       <label class="label" for="per">Per Halaman</label>
       <select class="kolom" id="per" name="per">
         {PER_HALAMAN.map((n) => (
@@ -288,7 +153,7 @@ function tautanHalaman(ke: number): string {
       </select>
     </div>
 
-    <div class="sm:col-span-2 lg:col-span-4">
+    <div class="sm:col-span-2 lg:col-span-5">
       <button class="tombol-halus" type="submit">Terapkan</button>
     </div>
   </form>
@@ -302,6 +167,7 @@ function tautanHalaman(ke: number): string {
           <th>Kategori</th>
           <th class="text-right">Harga</th>
           <th class="text-right">Stok</th>
+          <th>Kedaluwarsa</th>
           <th>Status</th>
           {user.role === 'owner' && <th class="text-right">Aksi</th>}
         </tr>
@@ -313,19 +179,64 @@ function tautanHalaman(ke: number): string {
             // parser Astro membaca `<=` di dalam ekspresi template
             // sebagai awal tag Fragment dan menolak berkas ini.
             const menipis = p.low_stock_threshold >= p.stock_qty;
+            // Induk yang punya varian tidak dijual sendiri: harga dan
+            // stoknya ada di tiap varian, jadi angka di barisnya sendiri
+            // tidak berarti apa-apa dan tidak pantas ditampilkan.
+            const punyaVarian = p.variant_count > 0;
+            const dekat = p.nearest_expiry !== null && DEKAT_KEDALUWARSA >= sisaHari(p.nearest_expiry);
             return (
               <tr>
                 <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
                   {p.sku ?? '—'}
                 </td>
-                <td class="font-medium">{p.name}</td>
+                <td>
+                  <a class="font-medium hover:underline" href={`/produk/${p.id}`}>
+                    {p.name}
+                  </a>
+                  {p.seo_name && (
+                    <span class="block text-xs text-[var(--color-teks-lembut)]">{p.seo_name}</span>
+                  )}
+                  {punyaVarian && (
+                    <span class="mt-1 inline-block text-xs text-[var(--color-teks-lembut)]">
+                      {p.variant_count} varian
+                    </span>
+                  )}
+                  {p.parent_id && (
+                    <span class="mt-1 inline-block text-xs text-[var(--color-teks-samar)]">
+                      varian
+                    </span>
+                  )}
+                </td>
                 <td class="text-[var(--color-teks-lembut)]">{p.category_name ?? '—'}</td>
-                <td class="sel-angka">{rupiah(p.price)}</td>
                 <td class="sel-angka">
-                  {/* Stok menipis diwarnai merah bahaya, bukan merah merek:
-                      ini peringatan, bukan penanda merek. */}
-                  <span class={menipis ? 'font-semibold text-red-600' : ''}>{p.stock_qty}</span>
-                  {p.unit && <span class="ml-1 text-xs text-[var(--color-teks-samar)]">{p.unit}</span>}
+                  {punyaVarian ? (
+                    <span class="text-xs text-[var(--color-teks-samar)]">per varian</span>
+                  ) : (
+                    rupiah(p.price)
+                  )}
+                </td>
+                <td class="sel-angka">
+                  {punyaVarian ? (
+                    <span class="text-xs text-[var(--color-teks-samar)]">per varian</span>
+                  ) : (
+                    <Fragment>
+                      {/* Stok menipis diwarnai merah bahaya, bukan merah merek:
+                          ini peringatan, bukan penanda merek. */}
+                      <span class={menipis ? 'font-semibold text-red-600' : ''}>{p.stock_qty}</span>
+                      {p.unit && (
+                        <span class="ml-1 text-xs text-[var(--color-teks-samar)]">{p.unit}</span>
+                      )}
+                    </Fragment>
+                  )}
+                </td>
+                <td class="whitespace-nowrap text-xs">
+                  {p.nearest_expiry ? (
+                    <span class={dekat ? 'font-semibold text-red-600' : 'text-[var(--color-teks-lembut)]'}>
+                      {tanggal(p.nearest_expiry)}
+                    </span>
+                  ) : (
+                    <span class="text-[var(--color-teks-samar)]">—</span>
+                  )}
                 </td>
                 <td>
                   <span class={p.is_active ? 'lencana-selesai' : 'lencana-nonaktif'}>
@@ -333,7 +244,8 @@ function tautanHalaman(ke: number): string {
                   </span>
                 </td>
                 {user.role === 'owner' && (
-                  <td class="text-right">
+                  <td class="whitespace-nowrap text-right">
+                    <a class="aksi-baris" href={`/produk/${p.id}`}>Kelola</a>
                     <form method="POST" class="inline">
                       <input type="hidden" name="aksi" value="aktif" />
                       <input type="hidden" name="id" value={p.id} />
@@ -351,7 +263,7 @@ function tautanHalaman(ke: number): string {
         {
           daftar.data.length === 0 && (
             <tr>
-              <td colspan="7" class="py-12 text-center text-[var(--color-teks-lembut)]">
+              <td colspan="8" class="py-12 text-center text-[var(--color-teks-lembut)]">
                 {cari ? `Tidak ada produk yang cocok dengan "${cari}".` : 'Belum ada produk.'}
               </td>
             </tr>

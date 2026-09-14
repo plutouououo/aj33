@@ -66,6 +66,8 @@ pub struct CheckoutInput {
     pub customer_id: Option<Uuid>,
     pub payment_method: PaymentMethod,
     pub amount_paid: Option<Decimal>,
+    /// Ongkos kirim. `None` berarti nol -- bukan "tidak diketahui".
+    pub shipping_cost: Option<Decimal>,
     pub items: Vec<CheckoutItem>,
     pub cashier_user_id: Uuid,
 }
@@ -75,6 +77,20 @@ pub struct CheckoutInput {
 /// tercatat.
 fn uang(nilai: Decimal) -> Decimal {
     nilai.round_dp(2)
+}
+
+/// Nominal uang sebagai bahan sidik jari, SELALU dua angka di belakang koma.
+///
+/// Nilai yang sama bisa tiba dengan skala berbeda: `70000` datang dari JSON
+/// request, `70000.00` dibaca balik dari kolom `NUMERIC(14,2)`. `Decimal`
+/// menganggap keduanya sama, tapi `to_string()` menghasilkan teks berbeda --
+/// dan sidik jari bekerja di atas teks. Tanpa penyeragaman ini, pengiriman
+/// ulang yang sah ditolak sebagai "isi berbeda", justru kegagalan yang
+/// `Idempotency-Key` ada untuk mencegahnya.
+fn sidik_uang(nilai: Option<Decimal>) -> String {
+    nilai
+        .map(|v| format!("{v:.2}"))
+        .unwrap_or_else(|| "null".into())
 }
 
 /// Sidik jari isi transaksi, untuk mendeteksi `Idempotency-Key` yang dipakai
@@ -89,6 +105,7 @@ fn sidik_jari(
     customer_id: Option<Uuid>,
     payment_method: PaymentMethod,
     amount_paid: Option<Decimal>,
+    shipping_cost: Decimal,
     items: &[(Uuid, i32)],
 ) -> String {
     let mut urut: Vec<(Uuid, i32)> = items.to_vec();
@@ -106,12 +123,14 @@ fn sidik_jari(
     hasher.update(b"|");
     hasher.update(payment_method.as_str().as_bytes());
     hasher.update(b"|");
-    hasher.update(
-        amount_paid
-            .map(|a| a.to_string())
-            .unwrap_or_else(|| "null".into())
-            .as_bytes(),
-    );
+    hasher.update(sidik_uang(amount_paid).as_bytes());
+    hasher.update(b"|");
+    // Ongkir WAJIB ikut. Tanpa ini, kasir yang sadar ongkirnya belum terisi
+    // lalu mengirim ulang keranjang yang sama dengan ongkir baru akan
+    // dianggap mengirim permintaan kembar: backend mengembalikan transaksi
+    // lama, layar menampilkan struk yang kurang sebesar ongkirnya, dan tidak
+    // ada galat di mana pun yang memberi tahu.
+    hasher.update(sidik_uang(Some(shipping_cost)).as_bytes());
     for (product_id, qty) in urut {
         hasher.update(b"|");
         hasher.update(product_id.as_bytes());
@@ -130,6 +149,13 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     }
     if input.items.iter().any(|i| i.qty <= 0) {
         return Err(AppError::bad_request("Jumlah item harus lebih dari 0."));
+    }
+
+    // Dinormalkan sekali di sini lalu dipakai untuk sidik jari MAUPUN total,
+    // supaya angka yang di-hash persis angka yang tersimpan.
+    let ongkir = uang(input.shipping_cost.unwrap_or(Decimal::ZERO));
+    if ongkir.is_sign_negative() {
+        return Err(AppError::bad_request("Ongkos kirim tidak boleh negatif."));
     }
 
     // Digabung DULU, baru disidikjari: yang tersimpan di database juga versi
@@ -161,6 +187,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         input.customer_id,
         input.payment_method,
         amount_paid_tersimpan,
+        ongkir,
         &bahan,
     );
 
@@ -173,6 +200,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             existing.customer_id,
             parse_payment(&existing.payment_method)?,
             existing.amount_paid,
+            existing.shipping_cost,
             &items_lama,
         );
 
@@ -215,9 +243,11 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     }
 
     let subtotal = uang(subtotal);
-    // Belum ada diskon di slice ini, jadi total sama dengan subtotal. Tetap
-    // disimpan di kolomnya sendiri karena skema memisahkan keduanya.
-    let total_amount = subtotal;
+    // `subtotal` tetap harga barang saja; ongkir hanya menambah total. Itulah
+    // yang membuat margin masih bisa dihitung dari subtotal, dan sekaligus
+    // membuat pemeriksaan uang tunai serta kembalian di bawah otomatis benar
+    // tanpa disentuh -- keduanya sudah memakai `total_amount`.
+    let total_amount = uang(subtotal + ongkir);
 
     if input.payment_method == PaymentMethod::Cash {
         let dibayar = amount_paid_tersimpan
@@ -240,6 +270,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             cashier_user_id: input.cashier_user_id,
             payment_method: input.payment_method.as_str().to_string(),
             subtotal,
+            shipping_cost: ongkir,
             total_amount,
             amount_paid: amount_paid_tersimpan,
             change_amount,
@@ -299,6 +330,7 @@ mod tests {
             None,
             PaymentMethod::Cash,
             Some(Decimal::new(10000, 0)),
+            Decimal::ZERO,
             &[(produk(1), 2), (produk(2), 1)],
         );
         let b = sidik_jari(
@@ -306,6 +338,7 @@ mod tests {
             None,
             PaymentMethod::Cash,
             Some(Decimal::new(10000, 0)),
+            Decimal::ZERO,
             &[(produk(2), 1), (produk(1), 2)],
         );
 
@@ -319,6 +352,7 @@ mod tests {
             None,
             PaymentMethod::Cash,
             Some(Decimal::new(10000, 0)),
+            Decimal::ZERO,
             &[(produk(1), 2)],
         );
 
@@ -327,6 +361,7 @@ mod tests {
             None,
             PaymentMethod::Cash,
             Some(Decimal::new(10000, 0)),
+            Decimal::ZERO,
             &[(produk(1), 3)],
         );
         assert_ne!(dasar, qty_beda);
@@ -336,6 +371,7 @@ mod tests {
             None,
             PaymentMethod::Cash,
             Some(Decimal::new(20000, 0)),
+            Decimal::ZERO,
             &[(produk(1), 2)],
         );
         assert_ne!(dasar, bayar_beda);
@@ -345,6 +381,7 @@ mod tests {
             None,
             PaymentMethod::Transfer,
             Some(Decimal::new(10000, 0)),
+            Decimal::ZERO,
             &[(produk(1), 2)],
         );
         assert_ne!(dasar, metode_beda);
@@ -354,5 +391,60 @@ mod tests {
     fn pembulatan_uang_konsisten_dua_desimal() {
         assert_eq!(uang(Decimal::new(1005, 3)), Decimal::new(100, 2));
         assert_eq!(uang(Decimal::new(70000, 0)), Decimal::new(70000, 0));
+    }
+
+    #[test]
+    fn skala_desimal_tidak_mengubah_sidik_jari() {
+        // Nominal yang sama bisa sampai ke fungsi ini dengan skala berbeda:
+        // `70000` datang dari JSON request (skala 0), `70000.00` dibaca balik
+        // dari kolom NUMERIC(14,2) (skala 2). Keduanya rupiah yang sama.
+        //
+        // Kalau sidik jarinya berbeda, pengiriman ulang yang SAH -- jaringan
+        // putus lalu kasir menekan Bayar lagi -- dijawab "isi berbeda", justru
+        // kegagalan yang Idempotency-Key ada untuk mencegahnya.
+        let dari_request = sidik_jari(
+            TransactionType::WalkIn,
+            None,
+            PaymentMethod::Cash,
+            Some(Decimal::new(70000, 0)),
+            Decimal::ZERO,
+            &[(produk(1), 1)],
+        );
+        let dari_database = sidik_jari(
+            TransactionType::WalkIn,
+            None,
+            PaymentMethod::Cash,
+            Some(Decimal::new(7000000, 2)),
+            Decimal::ZERO,
+            &[(produk(1), 1)],
+        );
+
+        assert_eq!(dari_request, dari_database);
+    }
+
+    #[test]
+    fn ongkir_berbeda_menghasilkan_sidik_jari_berbeda() {
+        // Keranjang yang sama dengan ongkir berbeda adalah transaksi yang
+        // BERBEDA. Kalau sidik jarinya sama, mengirim ulang setelah ongkir
+        // diperbaiki akan mengembalikan transaksi lama yang nilainya kurang --
+        // tanpa galat apa pun yang memberi tahu.
+        let tanpa_ongkir = sidik_jari(
+            TransactionType::WalkIn,
+            None,
+            PaymentMethod::Cash,
+            Some(Decimal::new(70000, 0)),
+            Decimal::ZERO,
+            &[(produk(1), 1)],
+        );
+        let dengan_ongkir = sidik_jari(
+            TransactionType::WalkIn,
+            None,
+            PaymentMethod::Cash,
+            Some(Decimal::new(70000, 0)),
+            Decimal::new(20000, 0),
+            &[(produk(1), 1)],
+        );
+
+        assert_ne!(tanpa_ongkir, dengan_ongkir);
     }
 }

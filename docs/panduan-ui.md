@@ -16,6 +16,16 @@ daripada tidak ada panduan.
 3. **HTML dulu, JavaScript kalau terpaksa.** Semua form bekerja dengan POST
    biasa. JS hanya dipakai kalau tanpa itu fiturnya mustahil (mis. status
    sidebar yang harus bertahan lintas halaman).
+
+   **Satu pengecualian yang disetujui: halaman kasir.** Di sana JS dipakai
+   untuk tap-to-add, tombol −/+, dan total yang berubah seketika — tanpa itu
+   tiap satu barang berarti satu muat-ulang halaman, dan kasir yang berdiri
+   di depan pembeli membayar ongkosnya. Aturannya tetap ketat:
+   **tanpa JS halaman itu wajib berfungsi penuh**, dan skripnya hanya boleh
+   menulis ke isian yang sudah ada di HTML — tidak pernah merakit body
+   request, mencegat submit, atau merender baris sendiri. Dengan begitu
+   server menerima bentuk data yang sama persis di kedua keadaan. Saklarnya
+   `.hanya-js` / `.tanpa-js`, lihat bagian Komponen.
 4. **Keadaan halaman ada di URL.** Saringan dan paginasi dikirim lewat GET,
    jadi bisa di-bookmark, dibagikan ke rekan, dan tombol "kembali" bekerja.
 
@@ -44,6 +54,14 @@ lolos WCAG AA, sekaligus jelas berbeda dari merah peringatan yang terang.
 | `--color-teks` | `#1c1917` | Teks utama |
 | `--color-teks-lembut` | `#78716c` | Keterangan, kolom sekunder |
 | `--color-teks-samar` | `#a8a29e` | Placeholder, judul grup menu |
+
+### Ukuran
+
+| Token | Nilai | Dipakai untuk |
+| --- | --- | --- |
+| `--lebar-sidebar` | `15rem` (ciut `4.25rem`) | Lebar sidebar dan margin kolom isi |
+| `--tinggi-bilah-tab` | `3.25rem` | Tinggi `.bilah-tab` sekaligus `scroll-margin` tiap bagian — satu angka supaya lompatan `#anchor` tidak berhenti di balik bilahnya |
+| `--lebar-borang` | `34rem` | Lebar maksimum satu kolom isian |
 
 Latar aplikasi sengaja abu sangat muda supaya kartu putih punya tepi tanpa
 perlu bayangan tebal.
@@ -96,6 +114,30 @@ digitnya sejajar dan selisih besaran terlihat dari panjangnya.
   `localStorage` karena tiap klik menu memuat halaman baru — tanpa disimpan,
   tombolnya tidak ada gunanya.
 
+### Di bawah `md` (768px)
+
+Sidebar berubah jadi **laci geser** yang menutupi isi, bukan kolom di
+sampingnya. Kolom isi memakai seluruh lebar layar, dan tombol hamburger muncul
+di topbar.
+
+Pemicunya **checkbox tersembunyi + `<label>`, bukan tombol ber-JavaScript.**
+Kalau menu hanya bisa dibuka dengan JS, mematikan JS berarti tidak bisa
+berpindah halaman sama sekali — kegagalan yang jauh lebih parah daripada
+kehilangan animasi. Checkbox-nya `sr-only`, jadi tetap bisa dicapai Tab dan
+ditekan Spasi; tirai gelapnya `<label>` kedua yang menutup laci saat diklik.
+
+Tombol "Ciutkan" disembunyikan di sini: lacinya sudah selebar penuh, dan
+menciutkannya jadi rel ikon tidak menambah ruang. Lebar laci juga dipaksa
+kembali 15rem lewat media query, karena pilihan "ciut" yang tersimpan dari
+desktop akan ikut terbawa dan menghasilkan menu ikon tanpa teks.
+
+Padding `<main>` turun jadi `px-4 py-4`. **Semua bilah menempel ikut berubah**
+— margin negatifnya harus cocok dengan padding itu, lihat bagian Bilah
+menempel.
+
+Aksi utama di bilah bawah dibuat selebar penuh di layar sempit (`flex-1`,
+`w-full`) supaya bisa ditekan tanpa membidik.
+
 ## Komponen
 
 ### Tombol
@@ -119,6 +161,75 @@ digitnya sejajar dan selisih besaran terlihat dari panjangnya.
 `.kolom` untuk `input`/`select`/`textarea`, `.label` untuk labelnya. **Setiap
 kolom wajib punya `<label for>`** — placeholder bukan pengganti label, karena
 hilang begitu pengguna mulai mengetik.
+
+**Satu isian per baris.** Bungkus dengan `.borang-tegak` dan beri tiap isian
+kelas `.isian`; angka, tanggal, dan satuan pakai `.isian-pendek`. Keterangan
+di bawahnya `.isian-bantu`. Isian bersebelahan membuat mata memindai zig-zag
+dan urutan Tab berhenti sama dengan urutan bacanya.
+
+Lebar satu kolom dibatasi `--lebar-borang`. Tanpa batas itu, isian yang
+menurun justru lebih sulit dibaca di monitor lebar.
+
+Grid menyamping tetap dipakai untuk **bilah saringan** — itu deretan kontrol
+pendek, bukan pengisian data, dan menyusunnya ke bawah mendorong tabel turun
+satu layar penuh.
+
+### Remah roti
+
+`.remah` untuk halaman dalam yang punya induk jelas, mis. `Produk › Tambah
+Produk Baru`. Topbar hanya memuat judul halaman itu sendiri, jadi jalan
+kembalinya harus ditulis di badan halaman. Ruas terakhir ditandai
+`aria-current="page"`, pemisahnya `›` dengan `aria-hidden`.
+
+### Bilah tab bagian
+
+`.bilah-tab` berisi `.tab-bagian`, dipakai pada formulir panjang. Isinya
+**tautan lompat** ke bagian ber-`id`, bukan panel yang saling menyembunyikan
+— seluruh bagian tetap terlihat saat digulir. Tiap bagian diberi
+`.sasaran-bagian` supaya judulnya tidak tertutup bilah yang menempel.
+
+**Sengaja tidak ada penanda "tab aktif".** CSS hanya tahu fragmen URL, tidak
+pernah tahu posisi gulir; penanda yang mengikuti klik terakhir akan menunjuk
+bagian yang salah begitu pengguna menggulir sendiri — lebih buruk daripada
+tidak ada penanda, karena salah dengan percaya diri. Mengikuti gulir butuh
+`IntersectionObserver`, yaitu JavaScript untuk hiasan semata. Sebagai gantinya
+`.sasaran-bagian:target` menyorot bagian tujuannya. **Jangan "memperbaiki" ini
+dengan JS.**
+
+### Bilah menempel
+
+| Kelas | Kapan |
+| --- | --- |
+| `.bilah-aksi` | Tombol simpan formulir panjang, rata kanan, menempel di dasar layar |
+| `.bilah-bawah` | Ringkasan + aksi di kasir; tidak rata kanan dan berbayang karena isinya harus terbaca sekilas |
+
+Keduanya membatalkan padding `<main>` di `AppShell` dengan margin negatif —
+`-mx-4 -mb-4` di ponsel, `md:-mx-6 md:-mb-6` di layar lebar. **Angkanya harus
+selalu sama dengan padding `<main>`**; kalau padding itu berubah dan ini tidak,
+bilahnya mengambang dan terlihat seperti kartu yang tersangkut, bukan dasar
+layar. `.bilah-tab` memakai aturan yang sama untuk sumbu mendatar.
+
+Kalau satu bilah harus menyimpan form yang bukan induknya — misalnya halaman
+yang berisi beberapa form berdiri sendiri — pakai atribut HTML biasa
+`form="id-form"` pada tombolnya, jangan JavaScript. Beri label yang menyebut
+form mana yang disimpan.
+
+### Komponen kasir
+
+| Kelas | Untuk |
+| --- | --- |
+| `.langkah` / `.langkah-aktif` / `.langkah-selesai` | Bulatan penunjuk langkah. Angka tetap ditulis, bukan hanya warna |
+| `.langkah-penghubung` / `-lewat` | Garis antar bulatan |
+| `pil` (@utility) + `.pil-diam` / `.pil-aktif` | Saringan yang ditekan satu ketukan. Berbeda dari `.lencana` yang hanya menampilkan status dan tidak bisa diklik |
+| `.baris-produk` / `.baris-produk-terpilih` | Satu barang yang bisa dijual; seluruh blok informasinya target ketuk |
+| `.tombol-bulat` | Tombol −/+, 36px — target sentuh terkecil yang masih bisa dikenai jempol tanpa melihat |
+| `.kotak-kembalian` + `-angka` | Angka yang dibacakan ke pembeli, sengaja besar |
+| `.hanya-js` / `.tanpa-js` | Saklar progressive enhancement |
+
+`.hanya-js` dan `.tanpa-js` bekerja lewat `data-js` di `:root`, yang dipasang
+skrip halaman sebagai baris pertamanya. **Kedua versi selalu ada di HTML dan
+selalu ikut terkirim** — yang berubah cuma yang terlihat. Itulah yang membuat
+server menerima data yang sama apakah JS hidup atau mati.
 
 ### Tabel
 
@@ -162,6 +273,32 @@ Urutannya tetap, dari atas ke bawah:
 Saringan memakai GET, bukan POST: hasilnya tercermin di URL. Ganti saringan
 selalu mengembalikan ke halaman 1 (parameter `halaman` tidak ikut dikirim form
 saringan); tautan paginasi membawa seluruh saringan yang sedang aktif.
+
+## Pola halaman formulir panjang
+
+Dipakai `/produk/baru` dan `/produk/[id]`. Urutannya tetap, dari atas ke
+bawah:
+
+1. **Remah** — `.remah`, jalan kembali ke induknya
+2. **Pesan** — galat atau sukses dari aksi barusan
+3. **Bilah tab** — `.bilah-tab`, tautan lompat ke tiap bagian
+4. **Kartu bagian** — satu `.kartu.sasaran-bagian` ber-`id` per bagian,
+   isinya `.borang-tegak`
+5. **Bilah aksi** — `.bilah-aksi`, menempel di dasar layar
+
+Bagian dan tab disetir **satu larik yang sama** di frontmatter, jadi keduanya
+tidak bisa lepas sinkron.
+
+Jangan membuat bagian yang isinya belum ada. Kartu kosong adalah janji yang
+tidak bisa ditepati aplikasi; lebih baik tabnya tidak ada sama sekali.
+
+Formulir yang gagal validasi **wajib mengembalikan isian yang sudah diketik**
+— baca ulang dari `FormData` yang barusan dikirim. Satu galat validasi yang
+menghapus belasan isian adalah cara tercepat membuat orang berhenti memakai
+halaman itu.
+
+Simpan yang berhasil memakai **POST/redirect/GET** (`303`) ke halaman hasilnya,
+supaya refresh tidak membuat data kedua.
 
 ## Aksesibilitas
 
