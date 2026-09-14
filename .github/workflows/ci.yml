@@ -56,7 +56,7 @@ jobs:
 
       - name: Siapkan database
         run: |
-          cargo install sqlx-cli --version 0.8 --no-default-features --features rustls,postgres --locked
+          cargo install sqlx-cli --version ^0.8 --no-default-features --features rustls,postgres --locked
           sqlx migrate run --source db/migrations
 
       - name: Clippy
