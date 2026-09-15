@@ -223,8 +223,21 @@ form mana yang disimpan.
 | `pil` (@utility) + `.pil-diam` / `.pil-aktif` | Saringan yang ditekan satu ketukan. Berbeda dari `.lencana` yang hanya menampilkan status dan tidak bisa diklik |
 | `.baris-produk` / `.baris-produk-terpilih` | Satu barang yang bisa dijual; seluruh blok informasinya target ketuk |
 | `.tombol-bulat` | Tombol −/+, 36px — target sentuh terkecil yang masih bisa dikenai jempol tanpa melihat |
+| `.kotak-total` + `-angka` | Total yang ditagih di langkah 2, tepat di bawah kolom ongkir dan uang diterima |
 | `.kotak-kembalian` + `-angka` | Angka yang dibacakan ke pembeli, sengaja besar |
 | `.hanya-js` / `.tanpa-js` | Saklar progressive enhancement |
+
+`.kotak-total` dan `.kotak-kembalian` sengaja seukuran (`text-2xl`) dan
+dibedakan hanya oleh warnanya — netral untuk yang ditagih, hijau untuk yang
+dikembalikan. Keduanya angka yang diucapkan ke pembeli; membuat salah satunya
+lebih kecil membuat yang itu terbaca belakangan, dan urutan baca yang salah di
+meja kasir berarti salah sebut nominal.
+
+Di langkah 1, nama barang mendapat satu baris penuh untuk dirinya sendiri dan
+kendali jumlah turun ke baris kedua. Sebaris bertiga, nama hanya kebagian sisa
+~130px di sel grid selebar 300px. Kendali jumlah dibungkus satu `<div
+class="ml-auto">` — `ml-auto` tidak boleh menempel di tombol `−` karena tombol
+itu `.hanya-js` dan menghilang saat JavaScript mati, membawa serta perataannya.
 
 `.hanya-js` dan `.tanpa-js` bekerja lewat `data-js` di `:root`, yang dipasang
 skrip halaman sebagai baris pertamanya. **Kedua versi selalu ada di HTML dan

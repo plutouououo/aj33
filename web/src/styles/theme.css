@@ -351,11 +351,14 @@
     @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border-2
            border-emerald-600 bg-emerald-600 text-sm font-bold text-white;
   }
+  /* Menyempit di ponsel: tiga bulatan plus labelnya ("Pilih produk",
+     "Pembayaran", "Selesai") sudah hampir memenuhi layar 360px, dan
+     penghubung selebar 2rem membuatnya meluber. */
   .langkah-penghubung {
-    @apply h-0.5 w-8 shrink-0 bg-[var(--color-garis)];
+    @apply h-0.5 w-4 shrink-0 bg-[var(--color-garis)] sm:w-8;
   }
   .langkah-penghubung-lewat {
-    @apply h-0.5 w-8 shrink-0 bg-emerald-600;
+    @apply h-0.5 w-4 shrink-0 bg-emerald-600 sm:w-8;
   }
 
   /* --- Pil saringan ---------------------------------------------------- */
@@ -405,6 +408,21 @@
            bg-[var(--color-permukaan)] px-4 py-3
            shadow-[0_-2px_8px_rgba(0,0,0,0.06)]
            md:-mx-6 md:-mb-6 md:px-6;
+  }
+
+  /* --- Kotak total tagihan ---------------------------------------------- */
+
+  /* Angka yang diminta ke pembeli. Sebelumnya ditulis sebagai teks biasa
+     seukuran keterangan, padahal kembalian di bawahnya besar -- kasir jadi
+     membaca angka yang salah lebih dulu. Keduanya sekarang sama besar:
+     total yang ditagih dan kembalian yang diberikan sama pentingnya, dan
+     dibedakan warnanya saja (netral vs hijau), bukan ukurannya. */
+  .kotak-total {
+    @apply flex items-baseline justify-between gap-4 rounded-xl border
+           border-[var(--color-garis)] bg-stone-50 px-4 py-3;
+  }
+  .kotak-total-angka {
+    @apply text-2xl font-bold tabular-nums;
   }
 
   /* --- Kotak kembalian -------------------------------------------------- */

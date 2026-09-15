@@ -45,11 +45,20 @@ if (Astro.request.method === 'POST') {
 
   try {
     if (aksi === 'simpan') {
+      // SKU dibekukan saat produk dibuat. Backend menolak mengubahnya begitu
+      // produknya pernah bergerak, jadi kolomnya hanya ikut terkirim kalau
+      // memang diketik berbeda -- kalau selalu ikut, menyimpan perubahan
+      // harga pada produk yang sudah terjual akan gagal tanpa sebab yang
+      // dimengerti pengguna.
+      const skuBaru = teks(form, 'sku');
+      const skuLama = teks(form, 'sku_lama');
+
       await api(`/products/${id}`, {
         method: 'PATCH',
         token,
         body: {
           name: String(form.get('name') ?? '').trim(),
+          sku: skuBaru && skuBaru !== skuLama ? skuBaru : undefined,
           seo_name: teks(form, 'seo_name'),
           brand_name: teks(form, 'brand_name'),
           product_type: teks(form, 'product_type'),
@@ -191,7 +200,7 @@ const DEKAT_KEDALUWARSA = 30;
               <h2 id="j-data" class="font-semibold">Data Produk</h2>
               <p class="text-xs text-[var(--color-teks-lembut)]">
                 SKU <span class="font-mono text-[var(--color-teks)]">{produk.sku ?? '—'}</span> —
-                dirakit otomatis dari inisial Jenis+Grade, Merek, dan Ukuran
+                dibekukan sejak produk dibuat
               </p>
             </div>
 
@@ -270,6 +279,29 @@ const DEKAT_KEDALUWARSA = 30;
                   value={produk.variant_size ?? ''}
                   placeholder="mis. 2 kg"
                 />
+              </div>
+
+              <div class="isian isian-pendek">
+                <label class="label" for="sku">SKU</label>
+                <input
+                  class="kolom font-mono"
+                  id="sku"
+                  name="sku"
+                  value={produk.sku ?? ''}
+                  placeholder="mis. CBSB-AFC-2KG"
+                />
+                {/*
+                  Nilai lama dibawa diam-diam supaya halaman bisa tahu SKU-nya
+                  benar-benar diketik berbeda, bukan sekadar ikut terkirim
+                  bersama isian lain.
+                */}
+                <input type="hidden" name="sku_lama" value={produk.sku ?? ''} />
+                <p class="isian-bantu">
+                  Memperbaiki atribut di atas <strong>tidak</strong> mengubah SKU — label yang
+                  sudah tertempel di pack dan listing marketplace menunjuk kode ini. Kalau
+                  kodenya memang salah ketik sejak awal, betulkan di sini; hanya bisa selama
+                  produknya belum pernah terjual, masuk tiket, atau punya varian.
+                </p>
               </div>
 
               <div class="isian isian-pendek">
@@ -416,8 +448,9 @@ const DEKAT_KEDALUWARSA = 30;
                 <form method="POST" class="borang-tegak mt-4">
                   <input type="hidden" name="aksi" value="varian" />
                   {/* Atribut yang sama untuk semua varian diwariskan dari induk
-                      lewat nilai tersembunyi ini, jadi SKU-nya tetap segaris
-                      tanpa harus diketik ulang tiap kali. */}
+                      lewat nilai tersembunyi ini, supaya tidak perlu diketik
+                      ulang tiap kali. SKU varian sendiri tidak dirakit dari
+                      sini melainkan dari SKU induknya -- lihat `catalog::sku`. */}
                   <input type="hidden" name="brand_name" value={produk.brand_name ?? ''} />
                   <input type="hidden" name="product_type" value={produk.product_type ?? ''} />
                   <input type="hidden" name="category_id" value={produk.category_id ?? ''} />
@@ -438,6 +471,14 @@ const DEKAT_KEDALUWARSA = 30;
                     <label class="label" for="v_size">Ukuran (isi pack)</label>
                     <input class="kolom" id="v_size" name="variant_size" />
                   </div>
+
+                  <p class="isian isian-bantu">
+                    SKU varian dibuat dari SKU induk
+                    {' '}<strong class="font-mono">{produk.sku ?? '—'}</strong>{' '}
+                    ditambah grade dan ukurannya, jadi seluruh varian berbagi satu awalan dan
+                    sekali cari ketemu semua. Grade dan ukuran dikosongkan berarti varian itu
+                    dibedakan dengan nomor urut saja.
+                  </p>
 
                   <div class="isian isian-pendek">
                     <label class="label" for="v_price">Harga dasar (Rp)</label>

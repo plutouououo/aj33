@@ -118,7 +118,12 @@ export interface Product {
   name: string;
   /** Judul untuk marketplace. `null` berarti belum diisi. */
   seo_name: string | null;
-  /** Selalu hasil rakitan: inisial Jenis+Grade - Merek - Ukuran. */
+  /**
+   * Dirakit otomatis sekali saat produk dibuat, lalu dibekukan: menyunting
+   * atribut tidak mengubahnya. Induk berbentuk `Jenis+Grade - Merek -
+   * Ukuran`; varian menambahkan sumbu variannya di belakang SKU induknya,
+   * jadi seluruh varian satu produk berbagi satu awalan.
+   */
   sku: string | null;
   brand_name: string | null;
   product_type: string | null;

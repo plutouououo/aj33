@@ -1,6 +1,10 @@
 //! Perakitan SKU otomatis dari atribut produk.
 //!
-//! Bentuknya `[Jenis Produk + Grade]-[Merek]-[Ukuran]`, mis. `CBSB-AFC-2KG`.
+//! Bentuk kode induk adalah `[Jenis Produk + Grade]-[Merek]-[Ukuran]`, mis.
+//! `CBSB-AFC-2KG`. Varian menambahkan sumbu variannya di belakang kode
+//! induknya, jadi seluruh varian satu produk berbagi satu awalan: `CB-AFC`
+//! melahirkan `CB-AFC-SB-2KG` dan `CB-AFC-SB-5KG`. Mencari "CB-AFC" menemukan
+//! semuanya sekaligus.
 //!
 //! Aturan ini bukan karangan baru: toko sudah memakainya bertahun-tahun,
 //! diketik tangan di nama produk. `CBSB` adalah **C**eker **B**ersih
@@ -9,10 +13,24 @@
 //! yang sudah dihafal pegawai, tidak ada yang perlu belajar ulang -- dan
 //! pencarian dengan kode lama tetap menemukan barangnya.
 //!
-//! SKU tidak pernah diketik manual. SKU yang diketik manusia cepat menyimpang
-//! -- spasi berlebih, huruf besar-kecil campur, urutan bagian yang berbeda
-//! antar pegawai -- dan begitu menyimpang, dua barang yang sama tidak lagi
-//! bisa dikenali sebagai satu.
+//! SKU tidak diketik saat produk dibuat. SKU yang diketik manusia cepat
+//! menyimpang -- spasi berlebih, huruf besar-kecil campur, urutan bagian yang
+//! berbeda antar pegawai -- dan begitu menyimpang, dua barang yang sama tidak
+//! lagi bisa dikenali sebagai satu.
+//!
+//! # SKU dibekukan setelah dirakit
+//!
+//! Sekali terpasang, SKU tidak pernah dirakit ulang -- termasuk saat atribut
+//! pembentuknya disunting. SKU yang ikut berubah memutus tiga hal sekaligus:
+//! label yang sudah dicetak dan ditempel di pack, listing marketplace yang
+//! sudah memetakan SKU lama, dan hafalan pegawai yang mencari dengan kode
+//! lama. Atribut adalah kebenaran barangnya; SKU cuma namanya, dan nama tidak
+//! ikut berubah tiap kali keterangannya diperbaiki.
+//!
+//! Karena beku, harus ada jalan koreksi untuk salah ketik di awal, dan itu
+//! `normalkan`: SKU boleh diperbaiki manual selama produknya belum bergerak
+//! (penjagaannya `repo::penahan_hapus`, sama persis dengan larangan hapus).
+//! Setelah bergerak, yang tersisa adalah menonaktifkan produknya.
 //!
 //! Modul ini murni perhitungan teks. Penjaminan keunikan butuh database dan
 //! ada di `repo::sku_unik`.
@@ -71,6 +89,38 @@ pub fn rakit(
     Some(potong(&segmen.join(PEMISAH), BASIS_MAKS))
 }
 
+/// Bagian SKU yang membedakan satu varian dari saudara-saudaranya, dirakit
+/// dari sumbu varian: grade dan ukuran. Dipasang di belakang SKU induknya,
+/// sehingga seluruh varian satu produk berbagi awalan yang sama dan satu
+/// pencarian menemukan semuanya.
+///
+/// Merek dan jenis produk sengaja tidak ikut: keduanya milik induk, dan
+/// mengulangnya di tiap varian hanya memanjangkan kode tanpa membedakan apa
+/// pun.
+///
+/// Mengembalikan `None` kalau kedua sumbunya kosong -- varian yang tidak
+/// punya pembeda untuk ditulis. Pemanggil yang memutuskan apa gantinya.
+pub fn varian(grade: Option<&str>, ukuran: Option<&str>) -> Option<String> {
+    let mut segmen: Vec<String> = Vec::new();
+
+    if let Some(grade) = grade.map(inisial) {
+        if !grade.is_empty() {
+            segmen.push(grade);
+        }
+    }
+
+    if let Some(ukuran) = ukuran.map(rapatkan) {
+        if !ukuran.is_empty() {
+            segmen.push(ukuran);
+        }
+    }
+
+    if segmen.is_empty() {
+        return None;
+    }
+
+    Some(segmen.join(PEMISAH))
+}
 /// Kode inisial satu bagian.
 ///
 /// Bagian yang **mengandung angka** dibawa utuh, bukan diambil inisialnya:
@@ -138,6 +188,41 @@ fn potong(nilai: &str, maks: usize) -> String {
 /// produk lain. `n` dimulai dari 2 -- yang pertama memakai SKU tanpa akhiran.
 pub fn dengan_akhiran(basis: &str, n: u32) -> String {
     potong(&format!("{basis}{PEMISAH}{n}"), SKU_MAKS)
+}
+
+/// Membersihkan SKU yang diketik manusia menjadi bentuk yang sama dengan
+/// hasil rakitan: huruf besar semua, dan tiap rentetan karakter bukan
+/// huruf-angka -- spasi, garis bawah, garis miring, pemisah berulang --
+/// menyusut jadi satu pemisah. Tanpa ini "cbsb afc / 2kg" dan "CBSB-AFC-2KG"
+/// lolos sebagai dua SKU berbeda untuk barang yang sama, yang justru
+/// penyimpangan yang dihindari dengan merakit SKU otomatis.
+///
+/// Dipakai hanya di jalur koreksi; produk baru tidak pernah mengetik SKU.
+///
+/// Mengembalikan `None` kalau tidak tersisa satu pun huruf atau angka.
+pub fn normalkan(kode: &str) -> Option<String> {
+    let mut hasil = String::new();
+    // Pemisah baru benar-benar ditulis saat ada isi sesudahnya, jadi pemisah
+    // di ujung depan dan ujung belakang tidak pernah ikut tersimpan.
+    let mut tertunda = false;
+
+    for c in kode.chars() {
+        if c.is_alphanumeric() {
+            if tertunda && !hasil.is_empty() {
+                hasil.push_str(PEMISAH);
+            }
+            tertunda = false;
+            hasil.extend(c.to_uppercase());
+        } else {
+            tertunda = true;
+        }
+    }
+
+    if hasil.is_empty() {
+        return None;
+    }
+
+    Some(potong(&hasil, BASIS_MAKS))
 }
 
 #[cfg(test)]
@@ -245,6 +330,70 @@ mod tests {
         let panjang = "é".repeat(150);
         let hasil = rakit(Some(&panjang), None, None, None).unwrap();
         assert!(hasil.chars().count() <= BASIS_MAKS);
+    }
+
+    #[test]
+    fn varian_dirakit_dari_sumbu_variannya_saja() {
+        // Grade tanpa angka diambil inisialnya, ukuran dibawa utuh.
+        assert_eq!(
+            varian(Some("Super Besar"), Some("2 kg")).as_deref(),
+            Some("SB-2KG")
+        );
+        // Grade berangka tetap dibawa utuh, sama seperti di kode induk.
+        assert_eq!(varian(Some("SP 08"), None).as_deref(), Some("SP08"));
+        assert_eq!(varian(None, Some("5 kg")).as_deref(), Some("5KG"));
+    }
+
+    #[test]
+    fn varian_tanpa_sumbu_tidak_menghasilkan_pembeda() {
+        // Bukan string kosong: string kosong akan menempel ke SKU induk
+        // sebagai pemisah menggantung ("CB-AFC-").
+        assert_eq!(varian(None, None), None);
+        assert_eq!(varian(Some("  "), Some("")), None);
+    }
+
+    #[test]
+    fn seluruh_varian_satu_induk_berbagi_awalan() {
+        // Inilah sebabnya varian memakai SKU induk sebagai awalan: satu
+        // pencarian "CB-AFC" harus menemukan seluruh ukurannya.
+        let induk = rakit(Some("Ceker Bersih"), None, Some("afco"), None).unwrap();
+        let dua = format!("{induk}-{}", varian(None, Some("2 kg")).unwrap());
+        let lima = format!("{induk}-{}", varian(None, Some("5 kg")).unwrap());
+
+        assert_eq!(dua, "CB-AFC-2KG");
+        assert_eq!(lima, "CB-AFC-5KG");
+        assert!(dua.starts_with(&induk) && lima.starts_with(&induk));
+    }
+
+    #[test]
+    fn koreksi_manual_dinormalkan_ke_bentuk_yang_sama_dengan_rakitan() {
+        // Tiga ketikan untuk barang yang sama harus bermuara ke satu SKU,
+        // kalau tidak koreksi manual justru melahirkan penyimpangan yang
+        // dihindari dengan merakit otomatis.
+        assert_eq!(normalkan("cbsb afc 2kg").as_deref(), Some("CBSB-AFC-2KG"));
+        assert_eq!(normalkan("CBSB-AFC-2KG").as_deref(), Some("CBSB-AFC-2KG"));
+        assert_eq!(
+            normalkan("  cbsb / afc__2kg  ").as_deref(),
+            Some("CBSB-AFC-2KG")
+        );
+    }
+
+    #[test]
+    fn koreksi_manual_tanpa_huruf_maupun_angka_ditolak() {
+        // Tanpa ini SKU bisa jadi "-" atau string kosong, dan produk berhenti
+        // bisa dikenali sama sekali.
+        assert_eq!(normalkan("   "), None);
+        assert_eq!(normalkan("---"), None);
+        assert_eq!(normalkan(""), None);
+    }
+
+    #[test]
+    fn koreksi_manual_selalu_muat_di_kolom_sku() {
+        let panjang = "a".repeat(500);
+        let hasil = normalkan(&panjang).unwrap();
+        assert!(hasil.chars().count() <= BASIS_MAKS);
+        // Masih tersisa ruang untuk akhiran pembeda.
+        assert!(dengan_akhiran(&hasil, 999).chars().count() <= SKU_MAKS);
     }
 
     #[test]

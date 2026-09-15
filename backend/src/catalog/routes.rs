@@ -191,14 +191,21 @@ async fn create_product(
     // Varian menempel pada induk yang harus benar-benar ada, dan induk itu
     // tidak boleh varian: katalog bertingkat-tingkat tidak punya wujud yang
     // masuk akal di layar kasir maupun di marketplace.
-    if let Some(parent_id) = body.parent_id {
-        let induk = ambil_produk(&state, parent_id).await?;
-        if induk.parent_id.is_some() {
-            return Err(AppError::bad_request(
-                "Varian tidak bisa punya varian lagi.",
-            ));
+    //
+    // Induknya ditahan, bukan dibuang setelah diperiksa: SKU varian dirakit
+    // di atas SKU induknya.
+    let induk = match body.parent_id {
+        Some(parent_id) => {
+            let induk = ambil_produk(&state, parent_id).await?;
+            if induk.parent_id.is_some() {
+                return Err(AppError::bad_request(
+                    "Varian tidak bisa punya varian lagi.",
+                ));
+            }
+            Some(induk)
         }
-    }
+        None => None,
+    };
 
     if let Some(category_id) = body.category_id {
         if !repo::category_ada(&state.pool, category_id).await? {
@@ -213,12 +220,12 @@ async fn create_product(
 
     let sku = rakit_sku(
         &state,
+        induk.as_ref(),
         &brand_name,
         &product_type,
         &variant_grade,
         &variant_size,
         name,
-        None,
     )
     .await?;
 
@@ -282,6 +289,10 @@ async fn create_product(
 #[derive(Debug, Deserialize)]
 struct ProductUpdateRequest {
     name: Option<String>,
+    /// Koreksi SKU. Bukan jalur biasa -- SKU dirakit otomatis saat produk
+    /// dibuat dan dibekukan di situ; ini hanya untuk membetulkan salah ketik
+    /// selama produknya belum bergerak. Tidak disebut berarti biarkan.
+    sku: Option<String>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     seo_name: Ubah<String>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
@@ -341,36 +352,17 @@ async fn update_product(
     let variant_grade = ubah_teks(body.variant_grade);
     let variant_size = ubah_teks(body.variant_size);
 
-    // SKU selalu ikut atribut pembentuknya. Kalau tidak dirakit ulang di
-    // sini, produk yang warnanya diperbaiki akan menyimpan SKU yang
-    // menyebut warna lamanya -- dan SKU yang berbohong lebih buruk daripada
-    // SKU yang tidak ada.
-    let sku = if brand_name.is_some()
-        || product_type.is_some()
-        || variant_grade.is_some()
-        || variant_size.is_some()
-        || name.is_some()
-    {
-        let terpakai = |ubah: &Ubah<String>, lama: &Option<String>| -> Option<String> {
-            match ubah {
-                None => lama.clone(),
-                Some(isi) => isi.clone(),
-            }
-        };
-
-        let sku = rakit_sku(
-            &state,
-            &terpakai(&brand_name, &sekarang.brand_name),
-            &terpakai(&product_type, &sekarang.product_type),
-            &terpakai(&variant_grade, &sekarang.variant_grade),
-            &terpakai(&variant_size, &sekarang.variant_size),
-            name.as_deref().unwrap_or(&sekarang.name),
-            Some(id),
-        )
-        .await?;
-        Some(Some(sku))
-    } else {
-        None
+    // SKU TIDAK dirakit ulang di sini, sekalipun atribut pembentuknya
+    // berubah. SKU yang ikut berubah memutus label yang sudah dicetak dan
+    // ditempel di pack, pemetaan listing marketplace, dan hafalan pegawai
+    // yang mencari dengan kode lama. Yang berubah cuma keterangan barangnya,
+    // dan barang tidak berganti nama tiap keterangannya diperbaiki.
+    //
+    // Yang tersisa adalah koreksi eksplisit, dan itu punya syarat sendiri di
+    // bawah.
+    let sku = match body.sku {
+        None => None,
+        Some(diminta) => Some(Some(koreksi_sku(&state, &sekarang, &diminta).await?)),
     };
 
     let patch = ProductPatch {
@@ -679,30 +671,76 @@ fn periksa_harga(
     Ok(())
 }
 
-/// SKU siap pakai: dirakit dari atributnya, lalu dipastikan belum dipakai
-/// produk lain. Produk yang belum punya satu pun atribut jatuh ke namanya --
-/// tanpa itu produk lama yang disunting akan kehilangan SKU-nya.
+/// SKU hasil koreksi manual, setelah dipastikan produknya memang masih boleh
+/// dikoreksi.
+///
+/// Syaratnya sama persis dengan syarat menghapus produk, dan itu disengaja:
+/// keduanya menanyakan hal yang sama -- apakah produk ini sudah tersangkut ke
+/// tempat lain. Begitu pernah terjual, masuk tiket packing, atau terpetakan
+/// ke listing marketplace, SKU-nya sudah beredar di luar sistem ini dan
+/// mengubahnya hanya memindahkan kekacauan ke sana. Produk yang sudah punya
+/// varian juga terkunci: kode induk adalah awalan SKU seluruh variannya.
+///
+/// Pengecualiannya produk yang SKU-nya masih kosong. Mengisi lubang bukan
+/// mengubah apa pun -- tidak ada kode lama yang beredar -- dan tanpa
+/// pengecualian ini produk lama yang terlanjur tanpa SKU tidak akan pernah
+/// bisa diberi SKU lagi.
+async fn koreksi_sku(state: &AppState, sekarang: &Product, diminta: &str) -> AppResult<String> {
+    if sekarang.sku.is_some() {
+        if let Some(penahan) = repo::penahan_hapus(&state.pool, sekarang.id).await? {
+            return Err(AppError::conflict(format!(
+                "SKU tidak bisa diubah karena produk {penahan}. Nonaktifkan produknya."
+            )));
+        }
+    }
+
+    // Dinormalkan lebih dulu: koreksi yang masuk apa adanya justru melahirkan
+    // penyimpangan bentuk yang dihindari dengan merakit SKU otomatis.
+    let basis = sku::normalkan(diminta)
+        .ok_or_else(|| AppError::bad_request("SKU harus berisi huruf atau angka."))?;
+
+    repo::sku_unik(&state.pool, &basis, Some(sekarang.id)).await
+}
+
+/// SKU untuk produk yang baru dibuat, dipastikan belum dipakai produk lain.
+/// Dipanggil sekali seumur produk: menyunting atribut tidak merakit ulang
+/// SKU-nya (lihat dokumentasi modul `sku`).
+///
+/// Varian dirakit di atas SKU induknya supaya seluruh varian satu produk
+/// berbagi satu awalan -- mencari "CB-AFC" menemukan `CB-AFC-2KG` dan
+/// `CB-AFC-5KG` sekaligus. Produk tanpa induk merakit kode penuh dari
+/// atributnya sendiri.
 async fn rakit_sku(
     state: &AppState,
+    induk: Option<&Product>,
     brand_name: &Option<String>,
     product_type: &Option<String>,
     variant_grade: &Option<String>,
     variant_size: &Option<String>,
     name: &str,
-    kecuali: Option<Uuid>,
 ) -> AppResult<String> {
-    let basis = sku::rakit(
-        product_type.as_deref(),
-        variant_grade.as_deref(),
-        brand_name.as_deref(),
-        variant_size.as_deref(),
-    )
-    // Produk yang belum punya satu pun atribut jatuh ke inisial namanya --
-    // tanpa itu produk lama yang disunting akan kehilangan SKU-nya.
-    .or_else(|| sku::rakit(Some(name), None, None, None))
-    .ok_or_else(|| AppError::bad_request("Nama produk wajib diisi."))?;
+    let basis = match induk.and_then(|induk| induk.sku.as_deref()) {
+        // Varian tanpa grade maupun ukuran tidak punya pembeda untuk
+        // ditulis; kode induknya dipakai apa adanya sebagai basis, dan
+        // `sku_unik` yang memasang akhiran urut -- induknya sendiri sudah
+        // memakai kode itu, jadi varian pertama pasti dapat akhiran.
+        Some(induk_sku) => match sku::varian(variant_grade.as_deref(), variant_size.as_deref()) {
+            Some(pembeda) => format!("{induk_sku}-{pembeda}"),
+            None => induk_sku.to_string(),
+        },
+        None => sku::rakit(
+            product_type.as_deref(),
+            variant_grade.as_deref(),
+            brand_name.as_deref(),
+            variant_size.as_deref(),
+        )
+        // Produk yang belum punya satu pun atribut jatuh ke inisial namanya,
+        // supaya tidak ada produk yang lahir tanpa SKU.
+        .or_else(|| sku::rakit(Some(name), None, None, None))
+        .ok_or_else(|| AppError::bad_request("Nama produk wajib diisi."))?,
+    };
 
-    repo::sku_unik(&state.pool, &basis, kecuali).await
+    repo::sku_unik(&state.pool, &basis, None).await
 }
 
 /// Menulis satu batch sekaligus menambah stoknya lewat ledger. Keduanya

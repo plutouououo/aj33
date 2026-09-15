@@ -185,6 +185,14 @@ const jumlahDipilih = new Map(keranjang.map((b) => [b.product_id, b.qty]));
 const totalItem = keranjang.reduce((n, b) => n + b.qty, 0);
 const totalBelanja = keranjang.reduce((n, b) => n + b.harga * b.qty, 0);
 
+// Ongkir ikut dihitung DI SINI, bukan hanya di skrip langkah 2. Tanpa ini
+// angka "Total" yang dirender server adalah subtotal tanpa ongkir -- benar
+// saat langkah 2 pertama kali dibuka (ongkir masih kosong), tapi salah
+// begitu pembayaran gagal dan form terisi ulang dengan ongkir yang sudah
+// diketik. Angka total yang salah di layar kasir berarti salah tagih.
+const ongkirAngka = Math.max(0, Number(ongkirIsi) || 0);
+const totalTagihan = totalBelanja + ongkirAngka;
+
 const LANGKAH = [
   { n: 1, label: 'Pilih produk' },
   { n: 2, label: 'Pembayaran' },
@@ -304,7 +312,10 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
           </p>
         )}
 
-        <div class="flex flex-col gap-2" data-daftar>
+        {/* Satu kolom di ponsel, dua di tablet, tiga di monitor lebar.
+            Satu kolom penuh di layar lebar berarti kasir menggulung
+            berlembar-lembar untuk daftar yang sebenarnya muat sekali lihat. */}
+        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-daftar>
           {barang.map((p) => {
             const jumlah = jumlahDipilih.get(p.id) ?? 0;
             return (
@@ -323,8 +334,20 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
 
                 {/* Dua versi blok informasi. Yang bisa diketuk adalah tombol
                     sungguhan (bisa dicapai keyboard, tidak men-submit); yang
-                    tanpa JS adalah teks biasa. Hanya satu yang terlihat. */}
-                <button type="button" class="hanya-js min-w-0 flex-1 text-left" data-tambah>
+                    tanpa JS adalah teks biasa. Hanya satu yang terlihat.
+
+                    Keduanya `basis-full`: nama barang mendapat SATU BARIS
+                    PENUH untuk dirinya sendiri, dan kendali jumlah turun ke
+                    baris kedua. Sebaris dengan −/+ dan kolom angka, nama
+                    hanya kebagian sisa ~130px di sel grid selebar 300px, dan
+                    "Ceker Bersih Super Besar" terpotong jadi "Ceker Bers…" --
+                    kasir tidak bisa memastikan barang mana yang ditambahnya.
+                    Nama tetap `truncate` sebagai jaring terakhir. */}
+                <button
+                  type="button"
+                  class="hanya-js min-w-0 basis-full text-left"
+                  data-tambah
+                >
                   <span class="block truncate text-sm font-medium">{p.name}</span>
                   <span class="block text-xs text-[var(--color-teks-lembut)]">
                     {p.sku ?? '—'} · Stok: {p.stock_qty}
@@ -332,7 +355,7 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
                   <span class="block text-sm font-semibold">{rupiah(p.price)}</span>
                 </button>
 
-                <div class="tanpa-js min-w-0 flex-1">
+                <div class="tanpa-js min-w-0 basis-full">
                   <span class="block truncate text-sm font-medium">{p.name}</span>
                   <span class="block text-xs text-[var(--color-teks-lembut)]">
                     {p.sku ?? '—'} · Stok: {p.stock_qty}
@@ -340,34 +363,43 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
                   <span class="block text-sm font-semibold">{rupiah(p.price)}</span>
                 </div>
 
-                <button
-                  type="button"
-                  class="tombol-bulat hanya-js"
-                  data-kurang
-                  aria-label={`Kurangi ${p.name}`}
-                >
-                  −
-                </button>
+                {/* Kendali jumlah dibungkus jadi satu gugus yang didorong ke
+                    kanan. Pembungkusnya yang memegang `ml-auto`, bukan tombol
+                    "−": tombol itu `.hanya-js`, jadi saat JavaScript mati ia
+                    display:none dan `ml-auto`-nya ikut hilang -- kolom angka
+                    akan terlempar ke kiri, dan letaknya berbeda antara dua
+                    keadaan yang seharusnya terlihat sama. */}
+                <div class="ml-auto flex shrink-0 items-center gap-3">
+                  <button
+                    type="button"
+                    class="tombol-bulat hanya-js"
+                    data-kurang
+                    aria-label={`Kurangi ${p.name}`}
+                  >
+                    −
+                  </button>
 
-                <input
-                  class="kolom w-16 shrink-0 text-center"
-                  type="number"
-                  name="qty"
-                  min="0"
-                  max={p.stock_qty}
-                  value={jumlah}
-                  data-qty
-                  aria-label={`Jumlah ${p.name}`}
-                />
+                  <input
+                    class="kolom w-16 shrink-0 text-center tabular-nums"
+                    type="number"
+                    inputmode="numeric"
+                    name="qty"
+                    min="0"
+                    max={p.stock_qty}
+                    value={jumlah}
+                    data-qty
+                    aria-label={`Jumlah ${p.name}`}
+                  />
 
-                <button
-                  type="button"
-                  class="tombol-bulat hanya-js"
-                  data-tambah
-                  aria-label={`Tambah ${p.name}`}
-                >
-                  +
-                </button>
+                  <button
+                    type="button"
+                    class="tombol-bulat hanya-js"
+                    data-tambah
+                    aria-label={`Tambah ${p.name}`}
+                  >
+                    +
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -566,10 +598,27 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
               </p>
             </div>
 
-            <p class="isian text-sm">
-              Total dibayar:
-              <strong class="tabular-nums" data-total>{rupiah(totalBelanja)}</strong>
-            </p>
+            {/* Total ditaruh tepat di bawah kolom ongkir dan jumlah diterima,
+                bukan di tabel ringkasan yang sudah tergulir jauh ke atas --
+                inilah angka yang dibacakan ke pembeli, dan matanya sedang di
+                sini. Ukurannya disamakan dengan kembalian: sebelumnya total
+                seukuran teks bantu sementara kembalian dua kali lipatnya,
+                sehingga yang lebih dulu terbaca justru yang bukan tagihan. */}
+            <div class="isian">
+              <div class="kotak-total">
+                <div>
+                  <p class="font-medium">Total</p>
+                  <p class="text-xs text-[var(--color-teks-lembut)]">
+                    Subtotal {rupiah(totalBelanja)}
+                    <span class:list={[ongkirAngka > 0 ? '' : 'hidden']} data-baris-ongkir>
+                      {' + ongkir '}
+                      <span data-ongkir-tampil>{rupiah(ongkirAngka)}</span>
+                    </span>
+                  </p>
+                </div>
+                <p class="kotak-total-angka" data-total>{rupiah(totalTagihan)}</p>
+              </div>
+            </div>
 
             <p class="isian hidden text-sm font-semibold text-red-600" data-kurang>
               Uang yang diterima masih kurang.
@@ -604,63 +653,95 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
   {/* ================================================================= */}
   {
     langkah === 3 && struk && (
-      <div class="mx-auto max-w-md text-center">
-        <div class="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-emerald-100">
-          <span class="text-3xl text-emerald-600" aria-hidden="true">✓</span>
-        </div>
-        <h2 class="text-xl font-bold">Penjualan berhasil!</h2>
-        <p class="mt-1 text-sm text-[var(--color-teks-lembut)]">
-          #{struk.id.slice(0, 8)}
-        </p>
+      <Fragment>
+        <div class="mx-auto max-w-md text-center">
+          <div class="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-emerald-100">
+            <span class="text-3xl text-emerald-600" aria-hidden="true">✓</span>
+          </div>
+          <h2 class="text-xl font-bold">Penjualan berhasil!</h2>
+          <p class="mt-1 text-sm text-[var(--color-teks-lembut)]">
+            #{struk.id.slice(0, 8)}
+          </p>
 
-        <div class="kartu mt-5 text-left">
-          <table class="w-full text-sm">
-            <tbody>
-              {struk.items.map((it) => (
-                <tr>
-                  <td class="py-1">
-                    {it.product_name_snapshot}
-                    <span class="text-[var(--color-teks-lembut)]"> × {it.qty}</span>
-                  </td>
-                  <td class="py-1 text-right tabular-nums">{rupiah(it.subtotal)}</td>
-                </tr>
-              ))}
-              <tr class="border-t border-[var(--color-garis)]">
-                <td class="py-2">Subtotal</td>
-                <td class="py-2 text-right tabular-nums">{rupiah(struk.subtotal)}</td>
-              </tr>
-              {struk.shipping_cost > 0 && (
-                <tr>
-                  <td class="py-1">Ongkos kirim</td>
-                  <td class="py-1 text-right tabular-nums">{rupiah(struk.shipping_cost)}</td>
-                </tr>
-              )}
-              <tr class="border-t border-[var(--color-garis)] font-bold">
-                <td class="py-2">Total</td>
-                <td class="py-2 text-right tabular-nums">{rupiah(struk.total_amount)}</td>
-              </tr>
-              {struk.amount_paid !== null && (
-                <Fragment>
+          {/* Kembalian diangkat ke atas tabel, bukan dibiarkan jadi satu baris
+              kecil di antara sembilan baris lain. Inilah satu-satunya angka di
+              layar ini yang masih harus DIKERJAKAN kasir -- sisanya sudah
+              selesai dan cuma perlu ada kalau ditanya. Angka yang salah baca di
+              sini berarti uang hilang. */}
+          {struk.change_amount !== null && struk.change_amount > 0 && (
+            <div class="kotak-kembalian mt-5 text-left">
+              <p class="text-sm">Kembalian</p>
+              <p class="kotak-kembalian-angka">{rupiah(struk.change_amount)}</p>
+            </div>
+          )}
+
+          <div class="kartu mt-5 text-left">
+            <table class="w-full text-sm">
+              <tbody>
+                {struk.items.map((it) => (
                   <tr>
-                    <td class="py-1 text-[var(--color-teks-lembut)]">Dibayar</td>
-                    <td class="py-1 text-right tabular-nums">{rupiah(struk.amount_paid)}</td>
-                  </tr>
-                  <tr class="font-semibold text-emerald-700">
-                    <td class="py-1">Kembalian</td>
-                    <td class="py-1 text-right tabular-nums">
-                      {rupiah(struk.change_amount ?? 0)}
+                    <td class="py-1">
+                      {it.product_name_snapshot}
+                      <span class="text-[var(--color-teks-lembut)]"> × {it.qty}</span>
                     </td>
+                    <td class="py-1 text-right tabular-nums">{rupiah(it.subtotal)}</td>
                   </tr>
-                </Fragment>
-              )}
-            </tbody>
-          </table>
+                ))}
+                <tr class="border-t border-[var(--color-garis)]">
+                  <td class="py-2">Subtotal</td>
+                  <td class="py-2 text-right tabular-nums">{rupiah(struk.subtotal)}</td>
+                </tr>
+                {struk.shipping_cost > 0 && (
+                  <tr>
+                    <td class="py-1">Ongkos kirim</td>
+                    <td class="py-1 text-right tabular-nums">{rupiah(struk.shipping_cost)}</td>
+                  </tr>
+                )}
+                <tr class="border-t border-[var(--color-garis)] font-bold">
+                  <td class="py-2">Total</td>
+                  <td class="py-2 text-right tabular-nums">{rupiah(struk.total_amount)}</td>
+                </tr>
+                {struk.amount_paid !== null && (
+                  <Fragment>
+                    <tr>
+                      <td class="py-1 text-[var(--color-teks-lembut)]">Dibayar</td>
+                      <td class="py-1 text-right tabular-nums">{rupiah(struk.amount_paid)}</td>
+                    </tr>
+                    {/* Tetap ada supaya rincian struknya utuh dan bisa
+                        dicocokkan (Dibayar − Total), tapi tidak lagi ditebalkan
+                        hijau: penekanannya sudah dipegang kotak besar di atas,
+                        dan dua penekanan untuk satu angka membuat keduanya
+                        berhenti menonjol. */}
+                    <tr>
+                      <td class="py-1">Kembalian</td>
+                      <td class="py-1 text-right tabular-nums">
+                        {rupiah(struk.change_amount ?? 0)}
+                      </td>
+                    </tr>
+                  </Fragment>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* Tautan GET, bukan tombol: itulah yang memberi kunci idempotensi
-            baru untuk transaksi berikutnya. */}
-        <a href="/kasir" class="tombol-utama mt-5 w-full">Penjualan baru</a>
-      </div>
+        {/* Tautan GET, bukan tombol: itulah yang memberi kunci idempotensi baru
+            untuk transaksi berikutnya.
+
+            Ikut menempel di dasar layar seperti aksi utama langkah 1 dan 2 --
+            struk dengan banyak barang lebih panjang dari layar ponsel, dan
+            tanpa ini kasir harus menggulung ke bawah dulu sebelum bisa
+            melayani pembeli berikutnya.
+
+            Saudara kolom struk, bukan anaknya: margin negatif `.bilah-bawah`
+            membatalkan padding <main>, jadi di dalam kolom selebar 28rem itu
+            bilahnya akan tergeser dan tidak sampai ke tepi layar. */}
+        <div class="bilah-bawah">
+          <a href="/kasir" class="tombol-utama w-full sm:mx-auto sm:max-w-xs">
+            Penjualan baru
+          </a>
+        </div>
+      </Fragment>
     )
   }
 </AppShell>
@@ -817,9 +898,18 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
       return !m || m.value === 'cash';
     }
 
+    var barisOngkir = document.querySelector('[data-baris-ongkir]');
+    var ongkirTampil = document.querySelector('[data-ongkir-tampil]');
+
     function hitung() {
-      var total = subtotal + (parseFloat(ongkir.value) || 0);
+      var biaya = Math.max(0, parseFloat(ongkir.value) || 0);
+      var total = subtotal + biaya;
       selTotal.textContent = rupiah.format(total);
+
+      // Rincian di bawah "Total" ikut berubah; kalau hanya angka totalnya
+      // yang diperbarui, rinciannya membantah totalnya sendiri.
+      if (barisOngkir) barisOngkir.classList.toggle('hidden', biaya <= 0);
+      if (ongkirTampil) ongkirTampil.textContent = rupiah.format(biaya);
 
       var bayar = parseFloat(dibayar.value);
       var adaBayar = tunai() && !isNaN(bayar);
