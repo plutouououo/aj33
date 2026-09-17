@@ -1,6 +1,8 @@
 //! Endpoint pelanggan.
 
-use super::repo::{self, Customer, CustomerFilter, CustomerPatch, FavoriteProduct, PurchaseRow, Urutan};
+use super::repo::{
+    self, Customer, CustomerFilter, CustomerPatch, FavoriteProduct, PurchaseRow, Urutan,
+};
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
@@ -15,7 +17,9 @@ pub fn router() -> Router<AppState> {
         .route("/customers", get(list_customers).post(create_customer))
         .route(
             "/customers/{id}",
-            get(get_customer).patch(update_customer).delete(delete_customer),
+            get(get_customer)
+                .patch(update_customer)
+                .delete(delete_customer),
         )
 }
 
@@ -142,7 +146,10 @@ fn periksa_nama(nama: &str) -> AppResult<()> {
 /// diperlakukan sebagai "tidak diisi" -- bukan sebagai string kosong yang
 /// nanti tampil sebagai baris alamat hampa di layar.
 fn bersihkan(nilai: Option<String>, maks: usize, nama: &str) -> AppResult<Option<String>> {
-    let Some(nilai) = nilai.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) else {
+    let Some(nilai) = nilai
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    else {
         return Ok(None);
     };
 

@@ -415,10 +415,8 @@ pub async fn kurangi(
 
     // Tahap 3 -- baru menulis. Semua sudah dipastikan cukup di atas, jadi
     // tidak ada pemeriksaan yang bisa gagal di tengah jalan.
-    let mut berjalan: BTreeMap<Uuid, i32> = terkunci
-        .iter()
-        .map(|(id, p)| (*id, p.stock_qty))
-        .collect();
+    let mut berjalan: BTreeMap<Uuid, i32> =
+        terkunci.iter().map(|(id, p)| (*id, p.stock_qty)).collect();
 
     for alokasi in &rencana {
         let stock_before = berjalan[&alokasi.product_id];
@@ -467,10 +465,8 @@ pub async fn tambah(
     let ids: Vec<Uuid> = lines.iter().map(|l| l.product_id).collect();
     let terkunci = kunci_produk(tx, &ids).await?;
 
-    let mut berjalan: BTreeMap<Uuid, i32> = terkunci
-        .iter()
-        .map(|(id, p)| (*id, p.stock_qty))
-        .collect();
+    let mut berjalan: BTreeMap<Uuid, i32> =
+        terkunci.iter().map(|(id, p)| (*id, p.stock_qty)).collect();
 
     for line in &lines {
         let product = terkunci
