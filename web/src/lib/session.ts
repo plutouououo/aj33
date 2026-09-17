@@ -48,6 +48,6 @@ export function berandaUntuk(role: User['role']): string {
     case 'pengepak':
       return '/tiket';
     case 'owner':
-      return '/produk';
+      return '/dasbor';
   }
 }

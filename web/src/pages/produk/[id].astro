@@ -561,7 +561,8 @@ const DEKAT_KEDALUWARSA = 30;
                     <thead>
                       <tr>
                         <th>No. Batch</th>
-                        <th class="text-right">Jumlah Masuk</th>
+                        <th class="text-right">Masuk</th>
+                        <th class="text-right">Sisa</th>
                         <th>Kedaluwarsa</th>
                         <th>Diterima</th>
                         <th class="text-right">Aksi</th>
@@ -569,12 +570,26 @@ const DEKAT_KEDALUWARSA = 30;
                     </thead>
                     <tbody>
                       {produk.batches.map((b) => {
+                        // Batch yang sudah habis tidak disorot merah: tidak
+                        // ada barangnya lagi yang bisa kedaluwarsa.
                         const dekat =
-                          b.expiry_date !== null && DEKAT_KEDALUWARSA >= sisaHari(b.expiry_date);
+                          b.remaining_qty > 0 &&
+                          b.expiry_date !== null &&
+                          DEKAT_KEDALUWARSA >= sisaHari(b.expiry_date);
                         return (
                           <tr>
                             <td class="font-mono text-xs">{b.batch_number ?? '—'}</td>
-                            <td class="sel-angka">{b.quantity}</td>
+                            <td class="sel-angka text-[var(--color-teks-lembut)]">{b.quantity}</td>
+                            {/* Sisa nol berarti batch ini sudah habis keluar.
+                                Barisnya tetap ditampilkan -- ia riwayat
+                                kiriman, bukan hanya penampung stok. */}
+                            <td class="sel-angka">
+                              {b.remaining_qty === 0 ? (
+                                <span class="text-[var(--color-teks-samar)]">habis</span>
+                              ) : (
+                                <span class="font-semibold">{b.remaining_qty}</span>
+                              )}
+                            </td>
                             <td class="whitespace-nowrap">
                               {b.expiry_date ? (
                                 <span class={dekat ? 'font-semibold text-red-600' : ''}>
@@ -601,7 +616,7 @@ const DEKAT_KEDALUWARSA = 30;
                       })}
                       {produk.batches.length === 0 && (
                         <tr>
-                          <td colspan="5" class="py-8 text-center text-[var(--color-teks-lembut)]">
+                          <td colspan="6" class="py-8 text-center text-[var(--color-teks-lembut)]">
                             Belum ada batch yang dicatat.
                           </td>
                         </tr>

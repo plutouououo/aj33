@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT (SELECT count(*) FROM transactions t WHERE t.customer_id = $1)\n                   AS \"transactions!\",\n               (SELECT count(*) FROM external_orders o WHERE o.customer_id = $1)\n                   AS \"orders!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "transactions!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "orders!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "8a783cd8ca1d3dd6664561a393fc1d30acef57e2688b077bffe9b503f5b2c556"
+}

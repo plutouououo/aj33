@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, batch_number, expiry_date, remaining_qty\n        FROM product_batches\n        WHERE id = $1 AND product_id = $2\n        FOR UPDATE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "batch_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "expiry_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 3,
+        "name": "remaining_qty",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "30f9555b17f69f9c09f558c685b3d1df7a42ad9c8b93e520799558e3d69b0ef1"
+}

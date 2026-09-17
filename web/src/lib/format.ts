@@ -10,13 +10,42 @@ export function rupiah(nilai: number): string {
   return RUPIAH.format(nilai);
 }
 
+/**
+ * Zona waktu toko, sama dengan yang dipakai backend saat memotong laporan
+ * per hari (lihat `backend/src/reports/mod.rs`).
+ *
+ * Disebut eksplisit karena halaman ini dirender di server, dan server
+ * produksi berjalan pada UTC: tanpa ini setiap jam yang tampil meleset tujuh
+ * jam, dan transaksi sore terlihat terjadi pada hari yang sama dengan
+ * laporan "hari ini" yang sudah berpindah.
+ */
+const ZONA = 'Asia/Jakarta';
+
 const WAKTU = new Intl.DateTimeFormat('id-ID', {
   dateStyle: 'medium',
   timeStyle: 'short',
+  timeZone: ZONA,
 });
 
 export function waktu(iso: string): string {
   return WAKTU.format(new Date(iso));
+}
+
+/**
+ * Waktu untuk berkas ekspor: `2026-09-16 14:05`, zona toko.
+ *
+ * Locale `sv-SE` dipilih bukan karena bahasanya, melainkan karena
+ * formatnya -- ISO 8601 tanpa huruf, satu-satunya bentuk yang diurutkan
+ * benar oleh spreadsheet apa pun dan tetap terbaca manusia.
+ */
+const WAKTU_EKSPOR = new Intl.DateTimeFormat('sv-SE', {
+  dateStyle: 'short',
+  timeStyle: 'short',
+  timeZone: ZONA,
+});
+
+export function waktuEkspor(iso: string): string {
+  return WAKTU_EKSPOR.format(new Date(iso));
 }
 
 const TANGGAL = new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' });

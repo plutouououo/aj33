@@ -1,0 +1,235 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import { api, ApiRequestError, type CustomerDetail } from '../../lib/api';
+import { rupiah, waktu } from '../../lib/format';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const { id } = Astro.params;
+
+let galat: string | null = null;
+let sukses: string | null = null;
+
+/**
+ * Nilai teks dari form. Kosong dikirim sebagai `null` supaya backend
+ * benar-benar mengosongkan kolomnya — alamat yang salah isi harus bisa
+ * dikembalikan ke "belum diisi", bukan menempel selamanya.
+ */
+function teks(form: FormData, kolom: string): string | null {
+  return String(form.get(kolom) ?? '').trim() || null;
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+
+  if (String(form.get('aksi') ?? '') === 'simpan') {
+    try {
+      await api(`/customers/${id}`, {
+        method: 'PATCH',
+        token,
+        body: {
+          name: String(form.get('name') ?? '').trim(),
+          phone: teks(form, 'phone'),
+          address: teks(form, 'address'),
+        },
+      });
+      sukses = 'Data pelanggan disimpan.';
+    } catch (err) {
+      galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan pelanggan.';
+    }
+  }
+}
+
+// Dibaca setelah POST supaya yang tampil adalah keadaan sesudah perubahan,
+// bukan keadaan sebelum form dikirim.
+let pelanggan: CustomerDetail | null = null;
+try {
+  pelanggan = await api<CustomerDetail>(`/customers/${id}`, { token });
+} catch (err) {
+  if (err instanceof ApiRequestError && err.status === 404) {
+    galat = err.message;
+  } else {
+    throw err;
+  }
+}
+
+const METODE: Record<string, string> = {
+  cash: 'Tunai',
+  transfer: 'Transfer',
+  ewallet: 'E-Wallet',
+};
+
+const ASAL: Record<string, string> = {
+  walk_in: 'Dicatat di kasir',
+  marketplace: 'Dari pesanan marketplace',
+};
+
+const nama = pelanggan?.name ?? 'Tanpa nama';
+
+/** Belanja rata-rata per transaksi. */
+const rataRata =
+  pelanggan && pelanggan.purchase_count > 0
+    ? pelanggan.total_spent / pelanggan.purchase_count
+    : 0;
+---
+
+<AppShell judul={pelanggan ? nama : 'Pelanggan'} user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/pelanggan">Pelanggan</a>
+    <span aria-hidden="true">›</span>
+    <span aria-current="page">{pelanggan ? nama : 'Tidak ditemukan'}</span>
+  </nav>
+
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+
+  {
+    pelanggan && (
+      <Fragment>
+        <div class="mb-6 grid gap-4 sm:grid-cols-3">
+          <div class="kartu-angka">
+            <span class="kartu-angka-label">Total Belanja</span>
+            <span class="kartu-angka-nilai">{rupiah(pelanggan.total_spent)}</span>
+            <span class="kartu-angka-bantu">harga barang, di luar ongkir</span>
+          </div>
+          <div class="kartu-angka">
+            <span class="kartu-angka-label">Jumlah Transaksi</span>
+            <span class="kartu-angka-nilai">{pelanggan.purchase_count}</span>
+            <span class="kartu-angka-bantu">rata-rata {rupiah(rataRata)} sekali belanja</span>
+          </div>
+          <div class="kartu-angka">
+            <span class="kartu-angka-label">Belanja Terakhir</span>
+            <span class="kartu-angka-nilai text-lg">
+              {pelanggan.last_purchase_at ? waktu(pelanggan.last_purchase_at) : 'Belum pernah'}
+            </span>
+            <span class="kartu-angka-bantu">
+              {ASAL[pelanggan.source] ?? pelanggan.source} · tercatat {waktu(pelanggan.created_at)}
+            </span>
+          </div>
+        </div>
+
+        <div class="grid gap-4 lg:grid-cols-[minmax(0,22rem)_1fr]">
+          <section class="kartu h-fit">
+            <h2 class="mb-4 text-base font-bold">Data Pelanggan</h2>
+
+            <form method="POST" class="borang-tegak">
+              <input type="hidden" name="aksi" value="simpan" />
+
+              <div class="isian">
+                <label class="label" for="name">Nama</label>
+                <input
+                  class="kolom"
+                  id="name"
+                  name="name"
+                  required
+                  maxlength="150"
+                  value={pelanggan.name ?? ''}
+                />
+              </div>
+
+              <div class="isian">
+                <label class="label" for="phone">Telepon</label>
+                <input
+                  class="kolom"
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  maxlength="30"
+                  value={pelanggan.phone ?? ''}
+                />
+              </div>
+
+              <div class="isian">
+                <label class="label" for="address">Alamat Antar</label>
+                {/* Isi ditulis rapat pada satu baris: apa pun di antara tag
+                    <textarea> adalah nilainya, jadi indentasi yang rapi di
+                    sini akan muncul sebagai spasi di dalam kolom isian. */}
+                <textarea class="kolom" id="address" name="address" rows="3" maxlength="500">{pelanggan.address ?? ''}</textarea>
+                <p class="isian-bantu">
+                  Dikosongkan berarti pelanggan ini mengambil sendiri di toko.
+                </p>
+              </div>
+
+              <div>
+                <button class="tombol-utama" type="submit">Simpan Perubahan</button>
+              </div>
+            </form>
+          </section>
+
+          <div class="grid gap-4">
+            <section class="kartu-rapat">
+              <h2 class="border-b border-[var(--color-garis)] px-5 py-4 text-base font-bold">
+                Paling Sering Dibeli
+              </h2>
+
+              {pelanggan.favorite_products.length === 0 ? (
+                <p class="px-5 py-10 text-center text-sm text-[var(--color-teks-lembut)]">
+                  Belum ada pembelian.
+                </p>
+              ) : (
+                <ul>
+                  {pelanggan.favorite_products.map((p) => (
+                    <li class="flex items-baseline justify-between gap-4 border-b border-[var(--color-garis-lembut)] px-5 py-3 last:border-b-0">
+                      <a class="min-w-0 truncate text-sm hover:underline" href={`/produk/${p.product_id}`}>
+                        {p.name}
+                      </a>
+                      <span class="shrink-0 text-sm tabular-nums">
+                        {p.qty} pack
+                        <span class="ml-3 font-semibold">{rupiah(p.spent)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section class="kartu-rapat overflow-x-auto">
+              <h2 class="border-b border-[var(--color-garis)] px-5 py-4 text-base font-bold">
+                Riwayat Belanja
+              </h2>
+
+              <table class="tabel">
+                <thead>
+                  <tr>
+                    <th>Waktu</th>
+                    <th>Metode</th>
+                    <th class="text-right">Item</th>
+                    <th class="text-right">Barang</th>
+                    <th class="text-right">Ongkir</th>
+                    <th class="text-right">Dibayar</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pelanggan.purchases.map((t) => (
+                    <tr>
+                      <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+                        {waktu(t.created_at)}
+                      </td>
+                      <td class="text-[var(--color-teks-lembut)]">
+                        {METODE[t.payment_method] ?? t.payment_method}
+                      </td>
+                      <td class="sel-angka">{t.item_count}</td>
+                      <td class="sel-angka">{rupiah(t.revenue)}</td>
+                      <td class="sel-angka text-[var(--color-teks-lembut)]">
+                        {rupiah(t.shipping)}
+                      </td>
+                      <td class="sel-angka font-semibold">{rupiah(t.total_amount)}</td>
+                    </tr>
+                  ))}
+                  {pelanggan.purchases.length === 0 && (
+                    <tr>
+                      <td colspan="6" class="py-10 text-center text-[var(--color-teks-lembut)]">
+                        Pelanggan ini belum pernah belanja.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </section>
+          </div>
+        </div>
+      </Fragment>
+    )
+  }
+</AppShell>

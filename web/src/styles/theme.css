@@ -159,6 +159,25 @@
            bg-[var(--color-permukaan)] shadow-sm;
   }
 
+  /* Kartu satu angka, dipakai berjajar di dasbor dan laporan. Keterangan di
+     atas, angkanya di bawah: yang dicari mata saat memindai sebaris kartu
+     adalah angkanya, dan angka yang sejajar di seluruh baris lebih cepat
+     dibandingkan daripada angka yang posisinya ikut panjang keterangan. */
+  .kartu-angka {
+    @apply flex flex-col gap-1 rounded-xl border border-[var(--color-garis)]
+           bg-[var(--color-permukaan)] p-5 shadow-sm;
+  }
+  .kartu-angka-label {
+    @apply flex items-center gap-2 text-sm text-[var(--color-teks-lembut)];
+  }
+  .kartu-angka-nilai {
+    @apply text-2xl font-bold tabular-nums;
+  }
+  /* Baris ketiga opsional: pembanding atau rincian kecil di bawah angka. */
+  .kartu-angka-bantu {
+    @apply text-xs text-[var(--color-teks-lembut)];
+  }
+
   /* --- Kolom isian --------------------------------------------------- */
 
   .kolom {
@@ -450,11 +469,24 @@
   Ditaruh di luar @layer components dengan alasan yang sama seperti blok
   sidebar di bawah: `:root` bukan milik komponen mana pun.
 */
-.hanya-js {
+/*
+  KEDUANYA HANYA MENYEMBUNYIKAN, tidak pernah menentukan display saat
+  terlihat.
+
+  Sebelumnya aturannya berbunyi `:root[data-js] .hanya-js { display:
+  inline-flex }`, dan itu diam-diam menimpa display milik elemennya sendiri.
+  Dua kerusakan lahir dari satu baris itu: `.tombol-bulat` yang memusatkan
+  tanda −/+ dengan `grid place-items-center` berubah jadi flex sehingga
+  tandanya menempel ke kiri lingkaran, dan tombol informasi produk di kasir
+  berubah jadi flex baris sehingga nama, SKU, dan harga berjejer ke samping
+  padahal ketiganya sudah ditulis `block`.
+
+  Dengan bentuk di bawah, keadaan "terlihat" tidak punya deklarasi display
+  sama sekali -- tiap elemen memakai display-nya sendiri, dan menambah
+  `.hanya-js` pada elemen apa pun tidak lagi bisa mengubah tata letaknya.
+*/
+:root:not([data-js]) .hanya-js {
   display: none;
-}
-:root[data-js] .hanya-js {
-  display: inline-flex;
 }
 :root[data-js] .tanpa-js {
   display: none;

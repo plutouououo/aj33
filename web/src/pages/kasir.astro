@@ -5,10 +5,12 @@ import {
   ApiRequestError,
   type Category,
   type Customer,
+  type PaginatedCustomers,
   type PaginatedProducts,
+  type ProductBatch,
   type Transaction,
 } from '../lib/api';
-import { rupiah } from '../lib/format';
+import { rupiah, tanggal } from '../lib/format';
 import { berandaUntuk } from '../lib/session';
 
 const user = Astro.locals.user!;
@@ -31,6 +33,11 @@ interface BarisKeranjang {
   qty: number;
   nama: string;
   harga: number;
+  /**
+   * Batch yang dipilih kasir. String kosong berarti serahkan pada FEFO --
+   * backend akan mengeluarkan yang kedaluwarsanya paling dekat.
+   */
+  batch_id: string;
 }
 
 let langkah: 1 | 2 | 3 = 1;
@@ -58,6 +65,11 @@ function bacaKeranjang(form: FormData): BarisKeranjang[] {
   const qty = form.getAll('qty');
   const nama = form.getAll('nama');
   const harga = form.getAll('harga');
+  // Sejajar posisi dengan yang lain: setiap kartu produk SELALU mengirim
+  // satu `batch_id`, juga produk yang cuma punya satu batch. Kalau field
+  // ini hanya muncul pada sebagian kartu, pasangan indeksnya bergeser dan
+  // batch milik produk lain yang terkirim.
+  const batch = form.getAll('batch_id');
 
   return ids
     .map((id, i) => ({
@@ -65,6 +77,7 @@ function bacaKeranjang(form: FormData): BarisKeranjang[] {
       qty: Number(qty[i] ?? 0),
       nama: String(nama[i] ?? ''),
       harga: Number(harga[i] ?? 0),
+      batch_id: String(batch[i] ?? ''),
     }))
     .filter((b) => Number.isFinite(b.qty) && b.qty > 0);
 }
@@ -145,7 +158,14 @@ if (Astro.request.method === 'POST') {
             payment_method: metode,
             amount_paid: metode === 'cash' ? angka('amount_paid') : undefined,
             shipping_cost: angka('shipping_cost'),
-            items: keranjang.map((b) => ({ product_id: b.product_id, qty: b.qty })),
+            items: keranjang.map((b) => ({
+              product_id: b.product_id,
+              qty: b.qty,
+              // Kosong dikirim sebagai `undefined`, bukan string kosong:
+              // backend membedakan "kasir memilih batch ini" dari "terserah
+              // FEFO", dan string kosong bukan UUID mana pun.
+              batch_id: b.batch_id || undefined,
+            })),
           },
         });
         langkah = 3;
@@ -160,6 +180,8 @@ if (!kunci) kunci = crypto.randomUUID();
 
 // Hanya yang dibutuhkan langkah yang sedang dirender yang diambil.
 let produk: PaginatedProducts | null = null;
+/** Batch bersisa per produk, urut FEFO. Hanya terisi di langkah 1. */
+const batchProduk = new Map<string, ProductBatch[]>();
 let kategori: Category[] = [];
 let pelanggan: Customer[] = [];
 
@@ -168,12 +190,24 @@ if (langkah === 1) {
   if (cariIsi) kueri.set('search', cariIsi);
   if (kategoriIsi) kueri.set('category_id', kategoriIsi);
 
-  [produk, kategori] = await Promise.all([
+  let semuaBatch: ProductBatch[];
+  [produk, kategori, semuaBatch] = await Promise.all([
     api<PaginatedProducts>(`/products?${kueri}`, { token }),
     api<Category[]>('/categories', { token }),
+    // Satu permintaan untuk seluruh batch yang masih bersisa, bukan satu
+    // per produk: daftar kasir bisa berisi 200 baris, dan 200 permintaan
+    // untuk mengisi 200 dropdown akan terasa sebelum barang pertama dipindai.
+    api<ProductBatch[]>('/batches', { token }),
   ]);
+
+  // Urutan dari backend sudah FEFO, dan pengelompokan ini menjaganya.
+  for (const b of semuaBatch) {
+    const daftar = batchProduk.get(b.product_id);
+    if (daftar) daftar.push(b);
+    else batchProduk.set(b.product_id, [b]);
+  }
 } else if (langkah === 2) {
-  pelanggan = await api<Customer[]>('/customers?limit=200', { token });
+  pelanggan = (await api<PaginatedCustomers>('/customers?limit=200', { token })).data;
 }
 
 // Barang habis tidak ditampilkan sama sekali: barisnya hanya memenuhi layar
@@ -318,6 +352,12 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
         <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-daftar>
           {barang.map((p) => {
             const jumlah = jumlahDipilih.get(p.id) ?? 0;
+            const batches = batchProduk.get(p.id) ?? [];
+            // Pilihan batch hanya berarti kalau memang ada yang bisa
+            // dipilih. Produk dengan satu batch tetap MENGIRIM field-nya
+            // (lihat bacaKeranjang) tapi tidak menampilkannya -- dropdown
+            // berisi satu pilihan hanya menambah yang harus dibaca kasir.
+            const pilihBatch = batches.length > 1;
             return (
               <div
                 class={jumlah > 0 ? 'baris-produk-terpilih' : 'baris-produk'}
@@ -361,6 +401,31 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
                     {p.sku ?? '—'} · Stok: {p.stock_qty}
                   </span>
                   <span class="block text-sm font-semibold">{rupiah(p.price)}</span>
+                </div>
+
+                {/* Pilihan batch. Bakunya "otomatis" = FEFO, dan itu yang
+                    benar untuk hampir semua penjualan. Yang perlu dipilih
+                    tangan adalah perkecualian -- pembeli yang minta barang
+                    berumur panjang, atau barang yang fisiknya memang diambil
+                    dari rak lain. Apa pun pilihannya, yang keluar tercatat.
+
+                    Saat cuma ada satu batch, pembungkusnya `hidden`: elemen
+                    select-nya TETAP ada dan tetap terkirim, jadi urutan
+                    field antar kartu tidak pernah bergeser. */}
+                <div class={pilihBatch ? 'basis-full' : 'hidden'}>
+                  <label class="sr-only" for={`batch-${p.id}`}>
+                    Batch untuk {p.name}
+                  </label>
+                  <select class="kolom py-1.5 text-xs" id={`batch-${p.id}`} name="batch_id">
+                    <option value="">Otomatis — kedaluwarsa terdekat</option>
+                    {batches.map((b) => (
+                      <option value={b.id}>
+                        {b.batch_number ?? 'Tanpa nomor'} ·{' '}
+                        {b.expiry_date ? tanggal(b.expiry_date) : 'tanpa tanggal'} · sisa{' '}
+                        {b.remaining_qty}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Kendali jumlah dibungkus jadi satu gugus yang didorong ke
@@ -489,6 +554,7 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
                 <input type="hidden" name="qty" value={b.qty} />
                 <input type="hidden" name="nama" value={b.nama} />
                 <input type="hidden" name="harga" value={b.harga} />
+                <input type="hidden" name="batch_id" value={b.batch_id} />
               </Fragment>
             ))}
 
@@ -526,6 +592,7 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
               <input type="hidden" name="qty" value={b.qty} />
               <input type="hidden" name="nama" value={b.nama} />
               <input type="hidden" name="harga" value={b.harga} />
+              <input type="hidden" name="batch_id" value={b.batch_id} />
             </Fragment>
           ))}
 

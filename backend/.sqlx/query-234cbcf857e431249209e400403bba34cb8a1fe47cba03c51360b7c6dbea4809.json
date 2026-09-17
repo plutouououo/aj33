@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO product_batches (product_id, batch_number, quantity, expiry_date, created_by)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING id\n        ",
+  "query": "\n        INSERT INTO product_batches\n            (product_id, batch_number, quantity, remaining_qty, expiry_date, created_by)\n        VALUES ($1, $2, $3, 0, $4, $5)\n        RETURNING id\n        ",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "c7ce481430f578888ee932bf5364047b18491193897170cf47766315357588ac"
+  "hash": "234cbcf857e431249209e400403bba34cb8a1fe47cba03c51360b7c6dbea4809"
 }

@@ -155,14 +155,21 @@ export interface Product {
 }
 
 /**
- * Satu catatan barang masuk. `quantity` adalah jumlah yang masuk saat itu,
- * bukan sisa yang belum terjual — stok berjalan tetap di `Product.stock_qty`.
+ * Satu kiriman barang masuk.
+ *
+ * `quantity` adalah isi kiriman saat datang dan tidak pernah berubah;
+ * `remaining_qty` adalah sisa yang belum keluar, dan itulah stok sungguhan.
+ * Sejak migrasi 0011, `Product.stock_qty` sama dengan jumlah `remaining_qty`
+ * seluruh batch produk itu.
  */
 export interface ProductBatch {
   id: string;
   product_id: string;
   batch_number: string | null;
+  /** Isi kiriman saat datang. Tidak pernah berubah. */
   quantity: number;
+  /** Sisa yang belum keluar. Inilah yang dikurangi penjualan. */
+  remaining_qty: number;
   expiry_date: string | null;
   received_at: string;
 }
@@ -212,14 +219,55 @@ export interface Transaction {
 /**
  * Pelanggan toko. `name` boleh null sejak skema awal — pelanggan hasil impor
  * pesanan marketplace kadang hanya membawa username.
+ *
+ * Angka belanja selalu ikut, termasuk saat kasir hanya butuh daftar nama:
+ * satu bentuk untuk satu hal, supaya tidak ada dua daftar pelanggan yang
+ * bisa saling menyimpang. `total_spent` adalah harga barang, tanpa ongkir.
  */
 export interface Customer {
   id: string;
   name: string | null;
   phone: string | null;
+  /** Alamat antar. `null` untuk pembeli yang datang ke toko. */
+  address: string | null;
   /** `walk_in` untuk yang dibuat di kasir, `marketplace` untuk hasil impor. */
   source: string;
   created_at: string;
+  purchase_count: number;
+  total_spent: number;
+  /** `null` kalau belum pernah belanja. */
+  last_purchase_at: string | null;
+}
+
+export interface PaginatedCustomers {
+  data: Customer[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export interface FavoriteProduct {
+  product_id: string;
+  name: string;
+  qty: number;
+  spent: number;
+}
+
+/** Satu baris riwayat belanja seorang pelanggan. */
+export interface PurchaseRow {
+  id: string;
+  created_at: string;
+  payment_method: string;
+  item_count: number;
+  revenue: number;
+  shipping: number;
+  total_amount: number;
+}
+
+/** Bentuk `GET /customers/{id}`: pelanggan beserta riwayat dan favoritnya. */
+export interface CustomerDetail extends Customer {
+  favorite_products: FavoriteProduct[];
+  purchases: PurchaseRow[];
 }
 
 export interface StockAdjustment {
@@ -260,4 +308,92 @@ export interface Ticket {
   completed_at: string | null;
   notes: string | null;
   items: TicketItem[];
+}
+
+// ---------------------------------------------------------------------
+// Dasbor dan laporan
+// ---------------------------------------------------------------------
+
+/**
+ * Satu baris penjualan pada dasbor maupun laporan.
+ *
+ * `revenue` adalah omzet barang (`subtotal` di backend) dan tidak termasuk
+ * `shipping`; `total_amount` adalah jumlah yang benar-benar dibayar pembeli.
+ * Memakai `total_amount` sebagai omzet membuat margin salah -- ongkir tidak
+ * punya margin.
+ */
+export interface SaleRow {
+  id: string;
+  created_at: string;
+  /** `null` untuk pembeli yang namanya tidak dicatat kasir. */
+  customer_name: string | null;
+  type: string;
+  payment_method: string;
+  item_count: number;
+  revenue: number;
+  shipping: number;
+  total_amount: number;
+}
+
+export interface LowStockProduct {
+  id: string;
+  name: string;
+  sku: string | null;
+  stock_qty: number;
+  low_stock_threshold: number;
+}
+
+export interface Dashboard {
+  today_revenue: number;
+  month_revenue: number;
+  today_transaction_count: number;
+  product_count: number;
+  customer_count: number;
+  low_stock_count: number;
+  recent_sales: SaleRow[];
+  low_stock_products: LowStockProduct[];
+}
+
+export interface SalesSummary {
+  revenue: number;
+  shipping: number;
+  cogs: number;
+  expenses: number;
+  profit: number;
+  transaction_count: number;
+  /**
+   * Baris item yang harga pokoknya belum diisi. Selama bukan nol, `cogs`
+   * dan `profit` adalah batas atas -- dan halaman mengatakannya.
+   */
+  items_without_cost: number;
+}
+
+export interface MonthlyPoint {
+  /** `YYYY-MM` pada zona toko. */
+  month: string;
+  revenue: number;
+  expenses: number;
+}
+
+export interface ExpenseSlice {
+  category: string;
+  amount: number;
+}
+
+export interface TopProduct {
+  product_id: string;
+  name: string;
+  sku: string | null;
+  qty: number;
+  revenue: number;
+}
+
+export interface SalesReport {
+  summary: SalesSummary;
+  /** Selalu enam bulan terakhir, tidak ikut saringan periode. */
+  trend: MonthlyPoint[];
+  expense_breakdown: ExpenseSlice[];
+  top_products: TopProduct[];
+  sales: SaleRow[];
+  sales_limit: number;
 }

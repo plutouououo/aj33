@@ -19,9 +19,17 @@ const path = Astro.url.pathname;
  */
 const grup = [
   {
+    judul: 'Ringkasan',
+    menu: [
+      { href: '/dasbor', label: 'Dasbor', ikon: 'kisi', untuk: ['owner'] },
+      { href: '/laporan', label: 'Laporan', ikon: 'grafik', untuk: ['owner'] },
+    ],
+  },
+  {
     judul: 'Bisnis',
     menu: [
       { href: '/produk', label: 'Produk', ikon: 'kotak', untuk: ['owner', 'kasir'] },
+      { href: '/pelanggan', label: 'Pelanggan', ikon: 'orang', untuk: ['owner', 'kasir'] },
       { href: '/pengaturan/platform', label: 'Platform', ikon: 'tautan', untuk: ['owner'] },
     ],
   },
@@ -42,6 +50,9 @@ const IKON: Record<string, string> = {
   keranjang: 'M3 4h2l2 12h11l2-8H7M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm9 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
   amplop: 'M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7zm0 1l9 6 9-6',
   papan: 'M9 3h6v3H9V3zm-2 3H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1M9 12h6M9 16h4',
+  kisi: 'M4 4h6v6H4V4zm10 0h6v4h-6V4zM4 14h6v6H4v-6zm10-2h6v8h-6v-8z',
+  grafik: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  orang: 'M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75',
 };
 
 const grupTampil = user
@@ -126,9 +137,9 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
                 B
               </span>
               <span class="teks-sidebar min-w-0 flex-1">
-                <span class="block truncate text-sm font-bold leading-tight">Aj33 Elektronik</span>
+                <span class="block truncate text-sm font-bold leading-tight">Toko Ayam Aneka Jaya 33</span>
                 <span class="block truncate text-xs text-[var(--color-teks-lembut)]">
-                  POS Multi-Platform
+                  Bersih dan Halal
                 </span>
               </span>
             </div>

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO product_batches (product_id, batch_number, quantity, remaining_qty, expiry_date)\n        VALUES ($1, NULL, $2, 0, NULL)\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ae8b40f0083533e0e4332ee6805131a54284178a5d13b6c3bff2741ac9bde261"
+}

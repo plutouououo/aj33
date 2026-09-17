@@ -1,0 +1,125 @@
+---
+import AppShell from '../layouts/AppShell.astro';
+import { api, type Dashboard } from '../lib/api';
+import { rupiah, waktu } from '../lib/format';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+// Backend menolak peran selain owner di endpoint ini. Pemeriksaan di sini
+// hanya supaya yang salah alamat melihat halaman, bukan galat 403 mentah.
+if (user.role !== 'owner') {
+  return Astro.redirect('/', 302);
+}
+
+const data = await api<Dashboard>('/dashboard', { token });
+
+/** Nama yang ditampilkan untuk satu penjualan. */
+const JENIS: Record<string, string> = {
+  walk_in: 'Pembeli langsung',
+  pre_order: 'Pre-order',
+};
+---
+
+<AppShell judul="Dasbor" user={user}>
+  <p class="mb-5 text-sm text-[var(--color-teks-lembut)]">
+    Ringkasan toko hari ini. Angka omzet adalah harga barang, belum termasuk ongkir.
+  </p>
+
+  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Omzet Hari Ini</span>
+      <span class="kartu-angka-nilai">{rupiah(data.today_revenue)}</span>
+      <span class="kartu-angka-bantu">
+        {data.today_transaction_count} transaksi
+      </span>
+    </div>
+
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Omzet Bulan Ini</span>
+      <span class="kartu-angka-nilai">{rupiah(data.month_revenue)}</span>
+      <span class="kartu-angka-bantu">
+        <a class="hover:underline" href="/laporan">Lihat laporan lengkap →</a>
+      </span>
+    </div>
+
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Produk Aktif</span>
+      <span class="kartu-angka-nilai">{data.product_count}</span>
+      <span class="kartu-angka-bantu">{data.customer_count} pelanggan tercatat</span>
+    </div>
+
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Stok Menipis</span>
+      {/* Nol bukan peringatan, jadi tidak diwarnai merah. */}
+      <span class={data.low_stock_count > 0 ? 'kartu-angka-nilai text-red-600' : 'kartu-angka-nilai'}>
+        {data.low_stock_count}
+      </span>
+      <span class="kartu-angka-bantu">produk di bawah ambangnya</span>
+    </div>
+  </div>
+
+  <div class="grid gap-4 lg:grid-cols-2">
+    <section class="kartu-rapat">
+      <h2 class="border-b border-[var(--color-garis)] px-5 py-4 text-base font-bold">
+        Penjualan Terakhir
+      </h2>
+
+      {
+        data.recent_sales.length === 0 ? (
+          <p class="px-5 py-12 text-center text-sm text-[var(--color-teks-lembut)]">
+            Belum ada penjualan. Mulai dari <a class="font-medium hover:underline" href="/kasir">halaman kasir</a>.
+          </p>
+        ) : (
+          <ul>
+            {data.recent_sales.map((s) => (
+              <li class="flex items-baseline justify-between gap-4 border-b border-[var(--color-garis-lembut)] px-5 py-3 last:border-b-0">
+                <span class="min-w-0">
+                  <span class="block truncate text-sm">
+                    {s.customer_name ?? JENIS[s.type] ?? s.type}
+                  </span>
+                  <span class="block text-xs text-[var(--color-teks-lembut)]">
+                    {waktu(s.created_at)} · {s.item_count} item
+                  </span>
+                </span>
+                <span class="shrink-0 text-sm font-semibold tabular-nums">
+                  {rupiah(s.revenue)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section class="kartu-rapat">
+      <h2 class="border-b border-[var(--color-garis)] px-5 py-4 text-base font-bold">
+        Peringatan Stok Menipis
+      </h2>
+
+      {
+        data.low_stock_products.length === 0 ? (
+          <p class="px-5 py-12 text-center text-sm text-[var(--color-teks-lembut)]">
+            Tidak ada peringatan. Produk yang stoknya menyentuh ambang muncul di sini.
+          </p>
+        ) : (
+          <ul>
+            {data.low_stock_products.map((p) => (
+              <li class="flex items-baseline justify-between gap-4 border-b border-[var(--color-garis-lembut)] px-5 py-3 last:border-b-0">
+                <span class="min-w-0">
+                  <a class="block truncate text-sm font-medium hover:underline" href={`/produk/${p.id}`}>
+                    {p.name}
+                  </a>
+                  <span class="block text-xs text-[var(--color-teks-samar)]">{p.sku ?? '—'}</span>
+                </span>
+                <span class="shrink-0 text-sm font-semibold tabular-nums text-red-600">
+                  {p.stock_qty} / {p.low_stock_threshold}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+</AppShell>

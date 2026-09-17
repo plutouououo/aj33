@@ -72,6 +72,7 @@ pub async fn buat(pool: &PgPool, external_order_id: Uuid, notes: Option<&str>) -
                 Some(StockLine {
                     product_id: b.product_id?,
                     qty: b.qty,
+                    batch_id: None,
                 })
             })
             .collect::<Vec<_>>(),
@@ -166,6 +167,9 @@ pub async fn pindah_status(
             .map(|b| StockLine {
                 product_id: b.product_id,
                 qty: b.qty,
+                // Pesanan marketplace tidak lewat meja kasir, jadi tidak ada
+                // yang bisa memilih batch: FEFO satu-satunya aturan di sini.
+                batch_id: None,
             })
             .collect();
 

@@ -54,9 +54,14 @@ pub struct Product {
     pub image_url: Option<String>,
     /// Label rak internal yang dibaca pengepak, mis. "Rak A3".
     pub storage_location: Option<String>,
-    /// Kedaluwarsa terdekat dari seluruh batch produk ini. Diambil di query
+    /// Kedaluwarsa terdekat dari batch yang MASIH BERSISA. Diambil di query
     /// yang sama supaya daftar produk bisa menandai barang yang mendekati
     /// kedaluwarsa tanpa query tambahan per baris.
+    ///
+    /// Batch yang sudah habis tidak ikut. Sebelum migrasi 0011 sisa batch
+    /// tidak pernah berkurang, jadi tanggal batch yang barangnya sudah lama
+    /// terjual tetap menyala merah selamanya -- dan peringatan yang selalu
+    /// menyala adalah peringatan yang berhenti dibaca.
     pub nearest_expiry: Option<NaiveDate>,
     pub is_active: bool,
     pub created_by: Option<Uuid>,
@@ -87,15 +92,21 @@ pub struct StockAdjustment {
 }
 
 /// Satu catatan barang masuk. `quantity` adalah jumlah yang MASUK saat itu,
-/// bukan sisa yang belum terjual: stok berjalan tetap dipegang
-/// `products.stock_qty` beserta ledger `stock_adjustments`, supaya tidak ada
-/// dua sumber kebenaran untuk angka stok yang bisa berselisih.
+/// bukan sisa yang belum terjual -- sisanya ada di `remaining_qty`.
+///
+/// Sejak migrasi 0011 `remaining_qty` adalah stok sungguhan:
+/// `products.stock_qty` sama dengan jumlah `remaining_qty` seluruh batch
+/// produk itu, dan `stock.rs` yang menjaganya. `quantity` tinggal menjadi
+/// fakta sejarah tentang isi kiriman.
 #[derive(Debug, Serialize)]
 pub struct ProductBatch {
     pub id: Uuid,
     pub product_id: Uuid,
     pub batch_number: Option<String>,
+    /// Isi kiriman saat datang. Tidak pernah berubah.
     pub quantity: i32,
+    /// Sisa yang belum keluar. Inilah yang dikurangi penjualan.
+    pub remaining_qty: i32,
     pub expiry_date: Option<NaiveDate>,
     pub received_at: DateTime<Utc>,
     pub created_by: Option<Uuid>,
@@ -152,7 +163,8 @@ pub async fn list_products(
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url, p.storage_location,
-            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
+            (SELECT min(b.expiry_date) FROM product_batches b
+             WHERE b.product_id = p.id AND b.remaining_qty > 0)
                 AS "nearest_expiry?",
             p.is_active, p.created_by,
             p.created_at AS "created_at!", p.updated_at AS "updated_at!"
@@ -222,7 +234,8 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url, p.storage_location,
-            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
+            (SELECT min(b.expiry_date) FROM product_batches b
+             WHERE b.product_id = p.id AND b.remaining_qty > 0)
                 AS "nearest_expiry?",
             p.is_active, p.created_by,
             p.created_at AS "created_at!", p.updated_at AS "updated_at!"
@@ -251,7 +264,8 @@ pub async fn list_variants(pool: &PgPool, parent_id: Uuid) -> AppResult<Vec<Prod
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url, p.storage_location,
-            (SELECT min(b.expiry_date) FROM product_batches b WHERE b.product_id = p.id)
+            (SELECT min(b.expiry_date) FROM product_batches b
+             WHERE b.product_id = p.id AND b.remaining_qty > 0)
                 AS "nearest_expiry?",
             p.is_active, p.created_by,
             p.created_at AS "created_at!", p.updated_at AS "updated_at!"
@@ -584,7 +598,7 @@ pub async fn list_batches(pool: &PgPool, product_id: Uuid) -> AppResult<Vec<Prod
     let rows = sqlx::query_as!(
         ProductBatch,
         r#"
-        SELECT id, product_id, batch_number, quantity, expiry_date,
+        SELECT id, product_id, batch_number, quantity, remaining_qty, expiry_date,
                received_at AS "received_at!", created_by
         FROM product_batches
         WHERE product_id = $1
@@ -609,11 +623,17 @@ pub struct NewBatch {
 /// Mencatat satu batch. Penambahan stoknya dikerjakan pemanggil lewat
 /// `stock.rs` di transaksi yang sama, jadi batch dan ledger tidak pernah bisa
 /// bercerita berbeda.
+///
+/// `remaining_qty` sengaja MULAI DARI NOL, bukan dari `quantity`. Kolom itu
+/// adalah stok sungguhan, dan satu-satunya yang boleh menggerakkannya adalah
+/// `stock.rs` -- kalau di sini pun ikut mengisinya, ada dua penulis untuk
+/// satu angka dan invarian stok = jumlah sisa batch kehilangan penjaganya.
 pub async fn insert_batch(tx: &mut Transaction<'_, Postgres>, input: &NewBatch) -> AppResult<Uuid> {
     let id = sqlx::query_scalar!(
         r#"
-        INSERT INTO product_batches (product_id, batch_number, quantity, expiry_date, created_by)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO product_batches
+            (product_id, batch_number, quantity, remaining_qty, expiry_date, created_by)
+        VALUES ($1, $2, $3, 0, $4, $5)
         RETURNING id
         "#,
         input.product_id,
@@ -628,6 +648,34 @@ pub async fn insert_batch(tx: &mut Transaction<'_, Postgres>, input: &NewBatch) 
     Ok(id)
 }
 
+/// Seluruh batch yang masih bersisa, untuk produk yang benar-benar bisa
+/// dijual. Dibaca kasir sekali per halaman supaya bisa memilih sendiri batch
+/// mana yang dikeluarkan, tanpa satu permintaan per produk.
+///
+/// Urutannya SAMA PERSIS dengan urutan FEFO di `stock.rs`, jadi pilihan
+/// teratas di layar adalah pilihan yang akan diambil otomatis kalau kasir
+/// tidak memilih apa-apa. Dua urutan yang berbeda untuk hal yang sama adalah
+/// cara paling halus membuat kasir tidak percaya pada layarnya.
+pub async fn list_batches_tersedia(pool: &PgPool) -> AppResult<Vec<ProductBatch>> {
+    let rows = sqlx::query_as!(
+        ProductBatch,
+        r#"
+        SELECT b.id, b.product_id, b.batch_number, b.quantity, b.remaining_qty,
+               b.expiry_date, b.received_at AS "received_at!", b.created_by
+        FROM product_batches b
+        JOIN products p ON p.id = b.product_id
+        WHERE b.remaining_qty > 0
+          AND p.is_active
+          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)
+        ORDER BY b.product_id, b.expiry_date NULLS LAST, b.received_at, b.id
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 /// Dibaca di dalam transaksi penghapusan: jumlahnya dipakai untuk menarik
 /// kembali stok yang dulu ditambahkan batch ini.
 pub async fn find_batch(
@@ -638,7 +686,7 @@ pub async fn find_batch(
     let row = sqlx::query_as!(
         ProductBatch,
         r#"
-        SELECT id, product_id, batch_number, quantity, expiry_date,
+        SELECT id, product_id, batch_number, quantity, remaining_qty, expiry_date,
                received_at AS "received_at!", created_by
         FROM product_batches
         WHERE id = $1 AND product_id = $2

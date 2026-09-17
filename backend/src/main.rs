@@ -7,6 +7,7 @@ mod error;
 mod marketplace;
 mod orders;
 mod pos;
+mod reports;
 mod stock;
 mod tickets;
 
@@ -91,6 +92,7 @@ async fn main() {
         .nest("/api", customers::router())
         .nest("/api", orders::router())
         .nest("/api", pos::router())
+        .nest("/api", reports::router())
         .nest("/api", tickets::router())
         .layer(cors)
         .layer(TraceLayer::new_for_http())

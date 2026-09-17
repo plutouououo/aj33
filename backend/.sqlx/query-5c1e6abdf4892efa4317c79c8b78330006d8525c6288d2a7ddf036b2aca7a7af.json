@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT ti.product_id                        AS \"product_id!\",\n               max(ti.product_name_snapshot)        AS \"name!\",\n               max(p.sku)                           AS sku,\n               SUM(ti.qty)::bigint                  AS \"qty!\",\n               SUM(ti.subtotal)                     AS \"revenue!\"\n        FROM transaction_items ti\n        JOIN transactions t ON t.id = ti.transaction_id\n        LEFT JOIN products p ON p.id = ti.product_id\n        WHERE t.status = 'completed'\n          AND ($1::text IS NULL\n               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')\n                                  AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::text IS NULL OR t.payment_method = $2)\n          AND ($3::text IS NULL OR t.type = $3)\n        GROUP BY ti.product_id\n        ORDER BY \"qty!\" DESC, \"revenue!\" DESC\n        LIMIT $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "product_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "sku",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "qty!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "5c1e6abdf4892efa4317c79c8b78330006d8525c6288d2a7ddf036b2aca7a7af"
+}

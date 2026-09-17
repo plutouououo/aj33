@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT p.id, p.name, p.sku, p.stock_qty, p.low_stock_threshold\n        FROM products p\n        WHERE p.is_active\n          AND p.low_stock_threshold >= p.stock_qty\n          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)\n        ORDER BY p.stock_qty - p.low_stock_threshold, p.name\n        LIMIT $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "sku",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "stock_qty",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "low_stock_threshold",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "46f4db08d6dc11f63366eab7e03d9f06236bd5da35777dff127c23354a93afc3"
+}

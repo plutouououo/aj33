@@ -1,0 +1,336 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import { api, type SalesReport } from '../../lib/api';
+import { rupiah, waktu } from '../../lib/format';
+import {
+  JENIS,
+  METODE,
+  PERIODE,
+  bacaSaringan,
+  kueriApi,
+  kueriHalaman,
+  labelJenis,
+  labelMetode,
+  labelPeriode,
+} from '../../lib/laporan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+// Backend menolak peran selain owner. Pemeriksaan di sini hanya supaya yang
+// salah alamat melihat halaman, bukan galat 403 mentah.
+if (user.role !== 'owner') {
+  return Astro.redirect('/', 302);
+}
+
+const saringan = bacaSaringan(Astro.url);
+
+/** Baris penjualan yang ditampilkan di layar. Ekspor mengambil lebih banyak. */
+const BARIS_TAMPIL = 15;
+
+const laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, BARIS_TAMPIL)}`, {
+  token,
+});
+
+const kueri = kueriHalaman(saringan);
+const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
+
+const { summary, trend, expense_breakdown, top_products, sales } = laporan;
+
+// Skala grafik. Satu skala untuk omzet dan beban sekaligus supaya tinggi
+// batang keduanya bisa dibandingkan langsung; kalau masing-masing punya
+// skalanya sendiri, beban kecil terlihat setinggi omzet besar.
+const puncak = Math.max(1, ...trend.map((t) => Math.max(t.revenue, t.expenses)));
+
+const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+/** `2026-09` menjadi `Sep 26`. */
+function labelBulan(kunci: string): string {
+  const [tahun, bulan] = kunci.split('-').map(Number);
+  return `${BULAN[bulan - 1]} ${String(tahun).slice(2)}`;
+}
+
+/** Tinggi batang dalam persen, minimal terlihat kalau nilainya bukan nol. */
+function tinggi(nilai: number): string {
+  if (nilai <= 0) return '0%';
+  return `${Math.max(2, (nilai / puncak) * 100)}%`;
+}
+
+const totalBeban = expense_breakdown.reduce((j, b) => j + b.amount, 0);
+
+/** Marjin kotor: bagian omzet yang tersisa setelah harga pokok. */
+const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary.revenue) * 100 : 0;
+---
+
+<AppShell judul="Laporan Penjualan" user={user}>
+  {/* Saringan dikirim sebagai GET biasa, jadi keadaan laporan selalu ada di
+      URL -- bisa di-bookmark, dibagikan, dan tombol kembali bekerja. Tombol
+      ekspor membaca saringan dari URL yang sama, jadi berkas yang diunduh
+      tidak pernah berisi periode lain dari yang terlihat di layar. */}
+  <form method="GET" class="kartu mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-[12rem_12rem_12rem_1fr]">
+    <div>
+      <label class="label" for="periode">Periode</label>
+      <select class="kolom" id="periode" name="periode">
+        {PERIODE.map((p) => (
+          <option value={p.nilai} selected={saringan.periode === p.nilai}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+    </div>
+
+    <div>
+      <label class="label" for="metode">Metode Bayar</label>
+      <select class="kolom" id="metode" name="metode">
+        <option value="" selected={!saringan.metode}>Semua Metode</option>
+        {METODE.map((m) => (
+          <option value={m.nilai} selected={saringan.metode === m.nilai}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+    </div>
+
+    <div>
+      <label class="label" for="jenis">Jenis Pembeli</label>
+      <select class="kolom" id="jenis" name="jenis">
+        <option value="" selected={!saringan.jenis}>Semua Jenis</option>
+        {JENIS.map((j) => (
+          <option value={j.nilai} selected={saringan.jenis === j.nilai}>
+            {j.label}
+          </option>
+        ))}
+      </select>
+    </div>
+
+    <div class="flex items-end gap-3">
+      <button class="tombol-halus" type="submit">Terapkan</button>
+      <a class="tombol-utama" href={tautanEkspor} download>↓ Ekspor CSV</a>
+    </div>
+  </form>
+
+  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Omzet Barang</span>
+      <span class="kartu-angka-nilai">{rupiah(summary.revenue)}</span>
+      <span class="kartu-angka-bantu">
+        {labelPeriode(saringan.periode)} · ongkir {rupiah(summary.shipping)} di luar angka ini
+      </span>
+    </div>
+
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Laba</span>
+      <span class={summary.profit < 0 ? 'kartu-angka-nilai text-red-600' : 'kartu-angka-nilai'}>
+        {rupiah(summary.profit)}
+      </span>
+      <span class="kartu-angka-bantu">Omzet − harga pokok − beban</span>
+    </div>
+
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Harga Pokok</span>
+      <span class="kartu-angka-nilai">{rupiah(summary.cogs)}</span>
+      <span class="kartu-angka-bantu">Marjin kotor {marjin.toFixed(1)}%</span>
+    </div>
+
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Transaksi</span>
+      <span class="kartu-angka-nilai">{summary.transaction_count}</span>
+      <span class="kartu-angka-bantu">Beban tercatat {rupiah(summary.expenses)}</span>
+    </div>
+  </div>
+
+  {
+    /* Harga pokok yang belum diisi membuat laba terlihat lebih besar dari
+       yang sebenarnya. Dikatakan terang-terangan, bukan disembunyikan:
+       angka laba yang salah diam-diam lebih berbahaya daripada tidak ada
+       angka sama sekali. */
+    summary.items_without_cost > 0 && (
+      <p class="mb-6 rounded-lg border border-kuning-500/40 bg-kuning-50 px-4 py-3 text-sm text-kuning-700">
+        {summary.items_without_cost} baris penjualan berasal dari produk yang harga pokoknya
+        belum diisi. Selama itu, <strong>harga pokok di atas terlalu kecil dan laba terlalu
+        besar</strong>. Isi harga pokok di halaman produk supaya angkanya benar.
+      </p>
+    )
+  }
+
+  <div class="mb-6 grid gap-4 lg:grid-cols-2">
+    <section class="kartu">
+      <h2 class="mb-1 text-base font-bold">Omzet dan Beban</h2>
+      <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
+        Enam bulan terakhir. Tidak ikut saringan periode.
+      </p>
+
+      {/* Grafik batang tanpa JavaScript: tingginya dihitung saat render dan
+          ditulis sebagai persen, jadi ikut melar mengikuti lebar kartu. */}
+      <div class="flex h-48 items-end gap-3">
+        {trend.map((t) => (
+          <div class="flex h-full min-w-0 flex-1 flex-col justify-end gap-1.5">
+            <div class="flex h-full items-end justify-center gap-1">
+              <div
+                class="w-1/3 rounded-t bg-merah-600"
+                style={`height:${tinggi(t.revenue)}`}
+                title={`Omzet ${labelBulan(t.month)}: ${rupiah(t.revenue)}`}
+              />
+              <div
+                class="w-1/3 rounded-t bg-stone-300"
+                style={`height:${tinggi(t.expenses)}`}
+                title={`Beban ${labelBulan(t.month)}: ${rupiah(t.expenses)}`}
+              />
+            </div>
+            <span class="truncate text-center text-xs text-[var(--color-teks-lembut)]">
+              {labelBulan(t.month)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <p class="mt-4 flex gap-4 text-xs text-[var(--color-teks-lembut)]">
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block h-2.5 w-2.5 rounded-sm bg-merah-600" />Omzet
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block h-2.5 w-2.5 rounded-sm bg-stone-300" />Beban
+        </span>
+      </p>
+    </section>
+
+    <section class="kartu">
+      <h2 class="mb-1 text-base font-bold">Rincian Beban</h2>
+      <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
+        {labelPeriode(saringan.periode)} · total {rupiah(totalBeban)}
+      </p>
+
+      {
+        expense_breakdown.length === 0 ? (
+          <p class="py-12 text-center text-sm text-[var(--color-teks-lembut)]">
+            Belum ada beban tercatat pada periode ini.
+          </p>
+        ) : (
+          <ul class="space-y-3">
+            {expense_breakdown.map((b) => {
+              const bagian = totalBeban > 0 ? (b.amount / totalBeban) * 100 : 0;
+              return (
+                <li>
+                  <div class="flex items-baseline justify-between gap-4 text-sm">
+                    <span class="min-w-0 truncate">{b.category}</span>
+                    <span class="shrink-0 tabular-nums">
+                      {rupiah(b.amount)}
+                      <span class="ml-2 text-xs text-[var(--color-teks-lembut)]">
+                        {bagian.toFixed(0)}%
+                      </span>
+                    </span>
+                  </div>
+                  <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--color-garis-lembut)]">
+                    <div class="h-full rounded-full bg-merah-400" style={`width:${bagian}%`} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+
+  <section class="kartu-rapat mb-6 overflow-x-auto">
+    <h2 class="border-b border-[var(--color-garis)] px-5 py-4 text-base font-bold">
+      Produk Terlaris
+    </h2>
+    <table class="tabel">
+      <thead>
+        <tr>
+          <th>Produk</th>
+          <th>SKU</th>
+          <th class="text-right">Terjual</th>
+          <th class="text-right">Omzet</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          top_products.map((p) => (
+            <tr>
+              <td>
+                <a class="font-medium hover:underline" href={`/produk/${p.product_id}`}>
+                  {p.name}
+                </a>
+              </td>
+              <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+                {p.sku ?? '—'}
+              </td>
+              <td class="sel-angka">{p.qty}</td>
+              <td class="sel-angka">{rupiah(p.revenue)}</td>
+            </tr>
+          ))
+        }
+        {
+          top_products.length === 0 && (
+            <tr>
+              <td colspan="4" class="py-12 text-center text-[var(--color-teks-lembut)]">
+                Belum ada penjualan pada periode ini.
+              </td>
+            </tr>
+          )
+        }
+      </tbody>
+    </table>
+  </section>
+
+  <section class="kartu-rapat overflow-x-auto">
+    <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
+      <h2 class="text-base font-bold">Penjualan</h2>
+      <p class="text-xs text-[var(--color-teks-lembut)]">
+        {
+          summary.transaction_count > sales.length
+            ? `Menampilkan ${sales.length} terbaru dari ${summary.transaction_count} transaksi. Ekspor CSV berisi seluruhnya.`
+            : `${summary.transaction_count} transaksi`
+        }
+      </p>
+    </div>
+
+    <table class="tabel">
+      <thead>
+        <tr>
+          <th>Waktu</th>
+          <th>Pembeli</th>
+          <th>Metode</th>
+          <th class="text-right">Item</th>
+          <th class="text-right">Omzet</th>
+          <th class="text-right">Ongkir</th>
+          <th class="text-right">Dibayar</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          sales.map((s) => (
+            <tr>
+              <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+                {waktu(s.created_at)}
+              </td>
+              <td>
+                {s.customer_name ?? (
+                  <span class="text-[var(--color-teks-lembut)]">
+                    {labelJenis(s.type)}
+                  </span>
+                )}
+              </td>
+              <td class="text-[var(--color-teks-lembut)]">{labelMetode(s.payment_method)}</td>
+              <td class="sel-angka">{s.item_count}</td>
+              <td class="sel-angka">{rupiah(s.revenue)}</td>
+              <td class="sel-angka text-[var(--color-teks-lembut)]">{rupiah(s.shipping)}</td>
+              <td class="sel-angka font-semibold">{rupiah(s.total_amount)}</td>
+            </tr>
+          ))
+        }
+        {
+          sales.length === 0 && (
+            <tr>
+              <td colspan="7" class="py-12 text-center text-[var(--color-teks-lembut)]">
+                Tidak ada penjualan yang cocok dengan saringan ini.
+              </td>
+            </tr>
+          )
+        }
+      </tbody>
+    </table>
+  </section>
+</AppShell>

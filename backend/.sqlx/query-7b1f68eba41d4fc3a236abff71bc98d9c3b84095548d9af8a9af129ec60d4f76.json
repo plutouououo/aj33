@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO stock_adjustments\n            (product_id, change_qty, reason, reference_type, reference_id,\n             stock_before, stock_after, batch_id, adjusted_by_user_id)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Varchar",
+        "Varchar",
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b1f68eba41d4fc3a236abff71bc98d9c3b84095548d9af8a9af129ec60d4f76"
+}

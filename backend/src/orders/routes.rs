@@ -4,7 +4,7 @@ use super::repo::{self, Mapping, Order, PlatformStatus};
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
 use crate::marketplace::tiktok::{self, NAMA_PLATFORM};
-use crate::marketplace::{klasifikasi_sla, tenggat_sla};
+use crate::marketplace::{klasifikasi_sla, shopee, tenggat_sla, NormalizedOrder};
 use crate::AppState;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
@@ -19,9 +19,13 @@ use uuid::Uuid;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/platforms", get(list_platforms))
-        .route("/platforms/tiktok/connect", get(connect))
-        .route("/platforms/tiktok/callback", get(callback))
-        .route("/platforms/tiktok/disconnect", post(disconnect))
+        .route("/platforms/tiktok/connect", get(connect_tiktok))
+        .route("/platforms/tiktok/callback", get(callback_tiktok))
+        .route("/platforms/tiktok/disconnect", post(disconnect_tiktok))
+        .route("/platforms/shopee/connect", get(connect_shopee))
+        .route("/platforms/shopee/callback", get(callback_shopee))
+        .route("/platforms/shopee/disconnect", post(disconnect_shopee))
+        .route("/platforms/shopee/sync", post(sync_shopee))
         .route("/webhooks/tiktok", post(webhook))
         .route("/orders", get(list_orders))
         .route("/orders/{id}", get(get_order))
@@ -55,19 +59,35 @@ async fn list_platforms(
     user.require(&[Role::Owner])?;
 
     let rows = repo::list_platforms(&state.pool).await?;
-    let configured = state.config.tiktok.is_configured();
 
     Ok(Json(
         rows.into_iter()
             .map(|status| PlatformDto {
-                is_configured: status.platform_name == NAMA_PLATFORM && configured,
+                is_configured: kredensial_terisi(&state, &status.platform_name),
                 status,
             })
             .collect(),
     ))
 }
 
-async fn connect(State(state): State<AppState>, user: CurrentUser) -> AppResult<Redirect> {
+/// Apakah kredensial aplikasi untuk satu platform sudah diisi di server.
+///
+/// Platform yang belum punya adapter menjawab `false`, bukan panik: baris
+/// `platforms` untuk `tokopedia` dan `fakestore` memang boleh ada di
+/// database (CHECK constraint mengizinkannya) walaupun belum ada kodenya.
+fn kredensial_terisi(state: &AppState, platform_name: &str) -> bool {
+    match platform_name {
+        NAMA_PLATFORM => state.config.tiktok.is_configured(),
+        shopee::NAMA_PLATFORM => state.config.shopee.is_configured(),
+        _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------
+// Platform: TikTok Shop
+// ---------------------------------------------------------------------
+
+async fn connect_tiktok(State(state): State<AppState>, user: CurrentUser) -> AppResult<Redirect> {
     user.require(&[Role::Owner])?;
 
     if !state.config.tiktok.is_configured() {
@@ -98,7 +118,7 @@ struct CallbackQuery {
 /// TikTok, dan cookie sesi aplikasi tidak ikut terbawa. Yang membuktikan
 /// permintaan ini sah adalah `auth_code` -- kode sekali pakai yang hanya
 /// bisa ditukar menjadi token oleh pemegang app secret.
-async fn callback(
+async fn callback_tiktok(
     State(state): State<AppState>,
     Query(q): Query<CallbackQuery>,
 ) -> AppResult<Redirect> {
@@ -120,10 +140,195 @@ async fn callback(
     Ok(Redirect::to("/pengaturan/platform?terhubung=1"))
 }
 
-async fn disconnect(State(state): State<AppState>, user: CurrentUser) -> AppResult<Json<()>> {
+async fn disconnect_tiktok(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<Json<()>> {
     user.require(&[Role::Owner])?;
     repo::disconnect_platform(&state.pool, NAMA_PLATFORM).await?;
     Ok(Json(()))
+}
+
+// ---------------------------------------------------------------------
+// Platform: Shopee
+// ---------------------------------------------------------------------
+
+async fn connect_shopee(State(state): State<AppState>, user: CurrentUser) -> AppResult<Redirect> {
+    user.require(&[Role::Owner])?;
+
+    if !state.config.shopee.is_configured() {
+        return Err(AppError::bad_request(
+            "Kredensial Shopee belum diisi di server (SHOPEE_PARTNER_ID, SHOPEE_PARTNER_KEY, SHOPEE_HOST).",
+        ));
+    }
+
+    let state_token = Uuid::new_v4().to_string();
+    let url = shopee::auth::url_otorisasi(&state.config.shopee, &state_token)?;
+
+    Ok(Redirect::temporary(&url))
+}
+
+#[derive(Debug, Deserialize)]
+struct ShopeeCallbackQuery {
+    code: Option<String>,
+    /// Shopee menyebut toko mana yang memberi izin sejak di callback.
+    /// Berbeda dari TikTok, yang tokonya baru diketahui setelah token di
+    /// tangan -- dan di sini nilainya WAJIB, karena ikut dikirim saat
+    /// menukar kode.
+    shop_id: Option<i64>,
+}
+
+/// Dipanggil browser Owner setelah menyetujui izin di Shopee.
+///
+/// Sama seperti callback TikTok, tidak memakai `CurrentUser`: yang
+/// mengarahkan ke sini adalah Shopee, dan yang membuktikan permintaan ini
+/// sah adalah `code` -- sekali pakai, dan hanya bisa ditukar menjadi token
+/// oleh pemegang partner key.
+async fn callback_shopee(
+    State(state): State<AppState>,
+    Query(q): Query<ShopeeCallbackQuery>,
+) -> AppResult<Redirect> {
+    let code = q
+        .code
+        .filter(|c| !c.trim().is_empty())
+        .ok_or_else(|| AppError::bad_request("Shopee tidak mengirim code."))?;
+
+    let shop_id = q
+        .shop_id
+        .ok_or_else(|| AppError::bad_request("Shopee tidak mengirim shop_id."))?;
+
+    shopee::auth::tukar_kode_dengan_token(
+        &state.pool,
+        &state.config.shopee,
+        &state.config.token_encryption_key,
+        &code,
+        shop_id,
+    )
+    .await?;
+
+    Ok(Redirect::to("/pengaturan/platform?terhubung=1"))
+}
+
+async fn disconnect_shopee(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<Json<()>> {
+    user.require(&[Role::Owner])?;
+    repo::disconnect_platform(&state.pool, shopee::NAMA_PLATFORM).await?;
+    Ok(Json(()))
+}
+
+#[derive(Debug, Deserialize)]
+struct SyncQuery {
+    /// Seberapa jauh ke belakang order ditarik, dalam jam.
+    jam: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct SyncResult {
+    ditemukan: usize,
+    tersimpan: usize,
+    baru: usize,
+    dilewati: usize,
+}
+
+/// Berapa jam ke belakang yang ditarik kalau Owner tidak menyebutkan.
+/// Cukup lebar untuk menutup semalam mati listrik, cukup sempit supaya
+/// penarikan rutin tidak menyeret ribuan order lama.
+const SYNC_JAM_DEFAULT: i64 = 24;
+
+/// Menarik order Shopee ke database.
+///
+/// Shopee tidak mendorong order lewat webhook seperti TikTok, jadi inilah
+/// satu-satunya jalan masuknya. Alurnya dua langkah karena memang begitu
+/// bentuk API-nya: `get_order_list` memberi nomor order, `get_order_detail`
+/// memberi isinya -- dan yang kedua hanya menerima 50 nomor sekali panggil.
+async fn sync_shopee(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<SyncQuery>,
+) -> AppResult<Json<SyncResult>> {
+    user.require(&[Role::Owner])?;
+
+    let cfg = &state.config.shopee;
+    if !cfg.is_configured() {
+        return Err(AppError::bad_request(
+            "Kredensial Shopee belum diisi di server.",
+        ));
+    }
+
+    let jam = q.jam.unwrap_or(SYNC_JAM_DEFAULT);
+    if jam <= 0 {
+        return Err(AppError::bad_request(
+            "Rentang penarikan harus lebih dari nol jam.",
+        ));
+    }
+
+    let sampai = Utc::now();
+    let sejak = sampai - chrono::Duration::hours(jam);
+
+    let kredensial =
+        shopee::auth::token_yang_berlaku(&state.pool, cfg, &state.config.token_encryption_key)
+            .await?;
+
+    // Batas 15 hari milik Shopee ditegakkan di dalam `daftar_order`, jadi
+    // rentang yang terlalu lebar ditolak di sini dengan pesan yang menyebut
+    // batasnya -- bukan muncul sebagai `error_param` dari Shopee.
+    let nomor = shopee::client::daftar_order(
+        cfg,
+        &kredensial,
+        sejak.timestamp(),
+        sampai.timestamp(),
+        None,
+    )
+    .await?;
+
+    let ditemukan = nomor.len();
+    let mut tersimpan = 0usize;
+    let mut baru = 0usize;
+    let mut dilewati = 0usize;
+
+    for potongan in nomor.chunks(shopee::client::MAKS_DETAIL_SEKALI_MINTA) {
+        let detail = shopee::client::detail_order(cfg, &kredensial, potongan).await?;
+
+        for isi in detail {
+            let order: shopee::ShopeeOrder = match serde_json::from_value(isi.clone()) {
+                Ok(order) => order,
+                Err(err) => {
+                    // Satu order yang bentuknya tidak dikenali tidak boleh
+                    // menggagalkan seluruh penarikan -- sisanya tetap masuk,
+                    // dan yang ini tercatat untuk diperiksa.
+                    tracing::warn!(error = %err, "order Shopee dilewati: bentuknya tidak dikenali");
+                    dilewati += 1;
+                    continue;
+                }
+            };
+
+            let normal = shopee::normalisasi(&order, isi);
+            let hasil = simpan_order(&state, shopee::NAMA_PLATFORM, normal).await?;
+
+            tersimpan += 1;
+            if hasil.dibuat {
+                baru += 1;
+            }
+        }
+    }
+
+    tracing::info!(
+        ditemukan,
+        tersimpan,
+        baru,
+        dilewati,
+        jam,
+        "sinkronisasi Shopee selesai"
+    );
+
+    Ok(Json(SyncResult {
+        ditemukan,
+        tersimpan,
+        baru,
+        dilewati,
+    }))
 }
 
 // ---------------------------------------------------------------------
@@ -202,22 +407,32 @@ async fn webhook(
         return Ok("ok");
     };
 
-    simpan_order(&state, detail).await?;
+    let order: tiktok::TiktokOrder = serde_json::from_value(detail.clone())
+        .map_err(|_| AppError::bad_request("Bentuk order dari TikTok tidak dikenali."))?;
+
+    simpan_order(&state, NAMA_PLATFORM, tiktok::normalisasi(&order, detail)).await?;
 
     Ok("ok")
 }
 
-/// Menormalkan lalu menyimpan satu order. Dipakai webhook, dan dipisah
-/// supaya jalur uji bisa memakainya tanpa melalui HTTP.
-async fn simpan_order(state: &AppState, detail: serde_json::Value) -> AppResult<Uuid> {
-    let order: tiktok::TiktokOrder = serde_json::from_value(detail.clone())
-        .map_err(|_| AppError::bad_request("Bentuk order dari TikTok tidak dikenali."))?;
-
-    let normal = tiktok::normalisasi(&order, detail);
-
-    let platform_id = repo::find_platform_id(&state.pool, NAMA_PLATFORM)
+/// Menyimpan satu order yang sudah dinormalkan.
+///
+/// Menerima `NormalizedOrder`, bukan JSON mentah: penerjemahan dari bentuk
+/// asli platform adalah urusan adapter, dan fungsi ini tidak boleh perlu
+/// tahu platform mana yang sedang bicara. `platform_name` hanya dipakai
+/// untuk mencari baris `platforms` yang benar.
+async fn simpan_order(
+    state: &AppState,
+    platform_name: &str,
+    normal: NormalizedOrder,
+) -> AppResult<repo::HasilUpsert> {
+    let platform_id = repo::find_platform_id(&state.pool, platform_name)
         .await?
-        .ok_or_else(|| AppError::not_found("Platform tiktok belum terdaftar di database."))?;
+        .ok_or_else(|| {
+            AppError::not_found(format!(
+                "Platform {platform_name} belum terdaftar di database."
+            ))
+        })?;
 
     let sla = klasifikasi_sla(normal.shipping_carrier.as_deref());
     let hasil = repo::upsert_order(
@@ -230,12 +445,14 @@ async fn simpan_order(state: &AppState, detail: serde_json::Value) -> AppResult<
     .await?;
 
     tracing::info!(
+        platform = platform_name,
         order_id = %normal.external_order_id,
+        id = %hasil.id,
         dibuat = hasil.dibuat,
         "order marketplace tersimpan"
     );
 
-    Ok(hasil.id)
+    Ok(hasil)
 }
 
 // ---------------------------------------------------------------------

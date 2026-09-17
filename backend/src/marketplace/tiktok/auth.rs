@@ -9,16 +9,13 @@ use super::client;
 use super::NAMA_PLATFORM;
 use crate::config::TiktokConfig;
 use crate::error::{AppError, AppResult};
-use crate::marketplace::crypto;
+use crate::marketplace::token;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use sqlx::PgPool;
-use uuid::Uuid;
 
-/// Token diperbarui kalau sisa masa berlakunya kurang dari ini. Menunggu
-/// sampai benar-benar kedaluwarsa berarti request pertama setelah itu
-/// gagal, padahal bisa dicegah.
-const AMBANG_PERPANJANG: Duration = Duration::minutes(5);
+/// Nama platform untuk pesan yang dibaca Owner.
+const NAMA_TAMPILAN: &str = "TikTok";
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
@@ -93,9 +90,10 @@ pub async fn tukar_kode_dengan_token(
 
     let kedaluwarsa = Utc::now() + Duration::seconds(data.access_token_expire_in);
 
-    simpan_token(
+    token::simpan(
         pool,
         kunci_enkripsi,
+        NAMA_PLATFORM,
         &shop_cipher,
         &data.access_token,
         &data.refresh_token,
@@ -113,46 +111,27 @@ pub async fn token_yang_berlaku(
     cfg: &TiktokConfig,
     kunci_enkripsi: &[u8; 32],
 ) -> AppResult<Kredensial> {
-    let baris = sqlx::query!(
-        r#"
-        SELECT shop_id_external, access_token_encrypted, refresh_token_encrypted, token_expires_at
-        FROM platforms
-        WHERE platform_name = $1 AND is_connected
-        "#,
-        NAMA_PLATFORM
-    )
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| {
-        AppError::bad_request("Belum ada toko TikTok yang terhubung. Hubungkan dulu di Pengaturan.")
-    })?;
+    let tersimpan = token::muat(pool, kunci_enkripsi, NAMA_PLATFORM, NAMA_TAMPILAN).await?;
 
-    let (Some(shop_cipher), Some(access_terenkripsi), Some(kedaluwarsa)) = (
-        baris.shop_id_external,
-        baris.access_token_encrypted,
-        baris.token_expires_at,
-    ) else {
-        return Err(AppError::bad_request(
-            "Data koneksi TikTok tidak lengkap. Hubungkan ulang tokonya.",
-        ));
-    };
-
-    if kedaluwarsa - Utc::now() > AMBANG_PERPANJANG {
-        let access_token = buka(kunci_enkripsi, &access_terenkripsi)?;
+    if !tersimpan.hampir_kedaluwarsa() {
         return Ok(Kredensial {
-            shop_cipher,
-            access_token,
+            shop_cipher: tersimpan.shop_ref,
+            access_token: tersimpan.access_token,
         });
     }
 
-    let refresh_token = baris
-        .refresh_token_encrypted
-        .ok_or_else(|| {
-            AppError::bad_request("Token TikTok kedaluwarsa dan tidak ada refresh token.")
-        })
-        .and_then(|t| buka(kunci_enkripsi, &t))?;
+    let refresh_token = tersimpan.refresh_token.ok_or_else(|| {
+        AppError::bad_request("Token TikTok kedaluwarsa dan tidak ada refresh token.")
+    })?;
 
-    perbarui_token(pool, cfg, kunci_enkripsi, &shop_cipher, &refresh_token).await
+    perbarui_token(
+        pool,
+        cfg,
+        kunci_enkripsi,
+        &tersimpan.shop_ref.clone(),
+        &refresh_token,
+    )
+    .await
 }
 
 async fn perbarui_token(
@@ -173,9 +152,10 @@ async fn perbarui_token(
     let data = ambil_token(&url).await?;
     let kedaluwarsa = Utc::now() + Duration::seconds(data.access_token_expire_in);
 
-    simpan_token(
+    token::simpan(
         pool,
         kunci_enkripsi,
+        NAMA_PLATFORM,
         shop_cipher,
         &data.access_token,
         &data.refresh_token,
@@ -208,73 +188,5 @@ async fn ambil_token(url: &str) -> AppResult<TokenData> {
             "TikTok Shop menolak permintaan token: {} ({})",
             body.message, body.code
         ))
-    })
-}
-
-async fn simpan_token(
-    pool: &PgPool,
-    kunci: &[u8; 32],
-    shop_cipher: &str,
-    access_token: &str,
-    refresh_token: &str,
-    kedaluwarsa: DateTime<Utc>,
-) -> AppResult<Uuid> {
-    let id = sqlx::query_scalar!(
-        r#"
-        INSERT INTO platforms
-            (platform_name, shop_id_external, access_token_encrypted,
-             refresh_token_encrypted, token_expires_at, is_connected, updated_at)
-        VALUES ($1, $2, $3, $4, $5, true, now())
-        ON CONFLICT (id) DO NOTHING
-        RETURNING id
-        "#,
-        NAMA_PLATFORM,
-        shop_cipher,
-        crypto::encrypt(kunci, access_token),
-        crypto::encrypt(kunci, refresh_token),
-        kedaluwarsa
-    )
-    .fetch_optional(pool)
-    .await?;
-
-    if let Some(id) = id {
-        return Ok(id);
-    }
-
-    // Baris platform biasanya sudah ada (dibuat seed atau koneksi
-    // sebelumnya), jadi jalur yang lazim justru update.
-    let id = sqlx::query_scalar!(
-        r#"
-        UPDATE platforms SET
-            shop_id_external        = $2,
-            access_token_encrypted  = $3,
-            refresh_token_encrypted = $4,
-            token_expires_at        = $5,
-            is_connected            = true,
-            updated_at              = now()
-        WHERE platform_name = $1
-        RETURNING id
-        "#,
-        NAMA_PLATFORM,
-        shop_cipher,
-        crypto::encrypt(kunci, access_token),
-        crypto::encrypt(kunci, refresh_token),
-        kedaluwarsa
-    )
-    .fetch_one(pool)
-    .await?;
-
-    Ok(id)
-}
-
-fn buka(kunci: &[u8; 32], terenkripsi: &str) -> AppResult<String> {
-    crypto::decrypt(kunci, terenkripsi).map_err(|err| {
-        // Ini hampir selalu berarti TOKEN_ENCRYPTION_KEY berubah sejak
-        // token disimpan. Menghubungkan ulang toko akan menulis token baru
-        // dengan kunci yang sekarang.
-        tracing::error!(error = %err, "token marketplace tidak bisa didekripsi");
-        AppError::bad_request(
-            "Token toko tidak bisa dibuka. Hubungkan ulang toko TikTok di Pengaturan.",
-        )
     })
 }

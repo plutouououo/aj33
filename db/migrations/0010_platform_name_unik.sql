@@ -1,0 +1,35 @@
+-- Satu baris per platform, ditegakkan database.
+--
+-- Sampai sekarang `platforms` tidak punya batasan apa pun pada
+-- `platform_name`: dua baris `shopee` sama sahnya dengan satu. Seluruh kode
+-- justru mengandaikan sebaliknya -- `find_platform_id`, pembacaan token, dan
+-- pemutusan koneksi semuanya mencari lewat `WHERE platform_name = $1` dan
+-- memperlakukan hasilnya sebagai satu baris.
+--
+-- Andaian itu sudah bocor jadi bug. Penyimpanan token menulis:
+--
+--     INSERT INTO platforms (...) VALUES (...) ON CONFLICT (id) DO NOTHING
+--
+-- tanpa menyebut `id`, sehingga `gen_random_uuid()` selalu memberi id yang
+-- belum ada, konflik yang ditunggu tidak pernah terjadi, dan setiap
+-- penyimpanan token MENAMBAH baris baru alih-alih memperbarui yang lama.
+-- Akibatnya berantai: token tersimpan di baris kedua sementara order
+-- menempel di baris pertama, lalu `UPDATE ... RETURNING id` yang mengenai
+-- dua baris gagal sebagai galat yang tidak menyebut sebabnya.
+--
+-- Indeks ini membuat `ON CONFLICT (platform_name) DO UPDATE` bisa dipakai,
+-- yang menutup lubangnya di sumbernya.
+--
+-- MIGRASI INI GAGAL kalau basis data sudah terlanjur punya baris ganda --
+-- dan itu memang disengaja. Menghapus salah satunya di sini berarti menebak
+-- baris mana yang benar, padahal `external_orders` dan `channel_listings`
+-- bisa menunjuk ke keduanya. Tebakan yang salah menghilangkan riwayat order.
+-- Kalau migrasi ini berhenti, periksa dulu:
+--
+--     SELECT platform_name, count(*) FROM platforms
+--      GROUP BY platform_name HAVING count(*) > 1;
+--
+-- lalu pindahkan rujukan ke baris yang dipertahankan sebelum menghapus
+-- sisanya.
+CREATE UNIQUE INDEX "platforms_platform_name_key"
+    ON "platforms" ("platform_name");

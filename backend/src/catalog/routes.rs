@@ -35,6 +35,7 @@ pub fn router() -> Router<AppState> {
             "/products/{id}/stock-adjustments",
             get(list_stock_adjustments).post(adjust_stock),
         )
+        .route("/batches", get(list_batches_tersedia))
         .route("/categories", get(list_categories).post(create_category))
 }
 
@@ -421,6 +422,18 @@ async fn delete_product(
 // Batch barang masuk
 // ---------------------------------------------------------------------
 
+/// Batch yang masih bersisa untuk seluruh produk yang bisa dijual.
+///
+/// Terbuka untuk semua peran yang sudah login: kasir membacanya untuk
+/// memilih batch saat checkout, dan isinya tidak menyebut harga pokok
+/// maupun angka apa pun yang tidak boleh dilihat kasir.
+async fn list_batches_tersedia(
+    State(state): State<AppState>,
+    _user: CurrentUser,
+) -> AppResult<Json<Vec<ProductBatch>>> {
+    Ok(Json(repo::list_batches_tersedia(&state.pool).await?))
+}
+
 async fn list_batches(
     State(state): State<AppState>,
     _user: CurrentUser,
@@ -511,19 +524,25 @@ async fn delete_batch(
         .await?
         .ok_or_else(|| AppError::not_found("Batch tidak ditemukan."))?;
 
-    repo::delete_batch(&mut tx, batch.id).await?;
-
+    // Ditarik dari batch ITU SENDIRI, dan dilakukan SEBELUM barisnya
+    // dihapus -- `kurangi` perlu membaca sisanya. Karena batch yang dipilih
+    // disebut tegas, pembatalan yang sebagian barangnya sudah terjual
+    // ditolak dengan menyebut batch-nya, bukan diam-diam mengambil dari
+    // kiriman lain seperti sebelum migrasi 0011.
     stock::kurangi(
         &mut tx,
         &[StockLine {
             product_id: id,
             qty: batch.quantity,
+            batch_id: Some(batch.id),
         }],
         StockReason::Restock,
         id,
         Some(user.id),
     )
     .await?;
+
+    repo::delete_batch(&mut tx, batch.id).await?;
 
     tx.commit().await?;
 
@@ -565,9 +584,13 @@ async fn adjust_stock(
         return Err(AppError::bad_request("Perubahan stok tidak boleh nol."));
     }
 
+    // Tanpa `batch_id`: koreksi ke bawah mengambil FEFO, koreksi ke atas
+    // dibuatkan batch tanpa asal oleh `stock::tambah`. Keduanya sengaja --
+    // opname tidak tahu kiriman mana yang selisih.
     let line = StockLine {
         product_id: id,
         qty: body.change_qty.abs(),
+        batch_id: None,
     };
 
     let mut tx = state.pool.begin().await?;
@@ -750,6 +773,9 @@ async fn catat_batch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     input: &NewBatch,
 ) -> AppResult<Uuid> {
+    // Batch lahir dengan sisa nol; `stock::tambah` yang menaikkannya ke
+    // `quantity`. Dengan begitu `remaining_qty` hanya punya satu penulis,
+    // dan baris ledger barang masuk menyebut batch mana yang datang.
     let id = repo::insert_batch(tx, input).await?;
 
     stock::tambah(
@@ -757,6 +783,7 @@ async fn catat_batch(
         &[StockLine {
             product_id: input.product_id,
             qty: input.quantity,
+            batch_id: Some(id),
         }],
         StockReason::Restock,
         input.product_id,

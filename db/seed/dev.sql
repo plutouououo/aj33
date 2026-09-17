@@ -65,8 +65,13 @@ VALUES
    '11111111-1111-4111-8111-111111111101')
 ON CONFLICT DO NOTHING;
 
--- Baris platform TikTok Shop. Belum terhubung -- token diisi lewat alur
--- OAuth di /api/platforms/tiktok/connect.
+-- Baris platform marketplace. Keduanya belum terhubung -- token diisi lewat
+-- alur OAuth di /api/platforms/{tiktok,shopee}/connect.
+--
+-- Barisnya harus ada sebelum order pertama masuk: `external_orders`
+-- menunjuk ke `platforms` lewat foreign key, jadi order yang tiba sementara
+-- barisnya belum ada akan ditolak database, bukan sekadar gagal dipetakan.
 INSERT INTO platforms (id, platform_name, is_connected) VALUES
-  ('44444444-4444-4444-8444-444444444401', 'tiktok', false)
+  ('44444444-4444-4444-8444-444444444401', 'tiktok', false),
+  ('44444444-4444-4444-8444-444444444402', 'shopee', false)
 ON CONFLICT DO NOTHING;

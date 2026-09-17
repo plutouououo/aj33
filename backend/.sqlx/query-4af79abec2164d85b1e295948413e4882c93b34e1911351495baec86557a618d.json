@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, product_id, batch_number, quantity, remaining_qty, expiry_date,\n               received_at AS \"received_at!\", created_by\n        FROM product_batches\n        WHERE product_id = $1\n        ORDER BY expiry_date NULLS LAST, received_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "product_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "batch_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "quantity",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "remaining_qty",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "expiry_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 6,
+        "name": "received_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "4af79abec2164d85b1e295948413e4882c93b34e1911351495baec86557a618d"
+}

@@ -4,16 +4,21 @@
 //! bentuk aslinya: adapter yang menerjemahkan payload platform menjadi
 //! `NormalizedOrder`, dan hanya bentuk itu yang masuk ke basis data.
 //!
-//! Sekarang baru ada satu adapter (TikTok Shop). Karena itu belum ada trait
-//! `PlatformAdapter` dengan dispatch dinamis seperti di proyek lama --
-//! sebuah trait dengan satu implementasi hanya menambah lapisan tanpa
-//! menambah kemampuan. Batas yang benar-benar menjaga modularitas adalah
-//! `NormalizedOrder`: platform kedua cukup menghasilkan bentuk yang sama,
-//! dan trait bisa diperkenalkan saat itu dengan dua implementasi nyata
-//! sebagai panduan bentuknya.
+//! Sekarang ada dua adapter: TikTok Shop dan Shopee. Tetap belum ada trait
+//! `PlatformAdapter` dengan dispatch dinamis seperti di proyek lama, karena
+//! yang memanggil adapter selalu tahu platform mana yang dimaksud -- route
+//! `/platforms/shopee/...` tidak pernah perlu memilih adapter saat runtime.
+//! Yang menjaga modularitas tetap `NormalizedOrder`: kedua adapter bermuara
+//! ke bentuk itu, dan hanya bentuk itu yang masuk ke modul `orders`.
+//!
+//! Yang benar-benar sama antar keduanya sudah dipisah: `crypto` untuk
+//! enkripsi token, dan `token` untuk membaca/menulisnya di tabel
+//! `platforms`.
 
 pub mod crypto;
+pub mod shopee;
 pub mod tiktok;
+pub mod token;
 
 use chrono::{DateTime, Duration, Utc};
 

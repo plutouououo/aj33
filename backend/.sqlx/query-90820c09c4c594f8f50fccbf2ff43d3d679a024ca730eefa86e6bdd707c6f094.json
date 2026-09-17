@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT c.id, c.name, c.phone, c.address, c.source,\n               c.created_at                                          AS \"created_at!\",\n               (SELECT count(*) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS \"purchase_count!\",\n               (SELECT COALESCE(SUM(t.subtotal), 0) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS \"total_spent!\",\n               (SELECT max(t.created_at) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS last_purchase_at\n        FROM customers c\n        WHERE c.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "phone",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "address",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "purchase_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "total_spent!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_purchase_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "90820c09c4c594f8f50fccbf2ff43d3d679a024ca730eefa86e6bdd707c6f094"
+}

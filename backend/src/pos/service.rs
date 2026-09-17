@@ -57,6 +57,10 @@ impl TransactionType {
 pub struct CheckoutItem {
     pub product_id: Uuid,
     pub qty: i32,
+    /// Batch yang dipilih kasir. Tidak disebut berarti FEFO -- kedaluwarsa
+    /// terdekat keluar lebih dulu.
+    #[serde(default)]
+    pub batch_id: Option<Uuid>,
 }
 
 #[derive(Debug)]
@@ -168,6 +172,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             .map(|i| StockLine {
                 product_id: i.product_id,
                 qty: i.qty,
+                batch_id: i.batch_id,
             })
             .collect::<Vec<_>>(),
     );
@@ -181,14 +186,20 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         _ => None,
     };
 
-    let bahan: Vec<(Uuid, i32)> = lines.iter().map(|l| (l.product_id, l.qty)).collect();
+    // Harga, baris struk, dan sidik jari bekerja PER PRODUK, bukan per
+    // batch. Pembeli membeli barang; dari kiriman mana barang itu diambil
+    // tidak mengubah apa yang dia bayar. Ini juga yang membuat pengiriman
+    // ulang yang sah tetap dikenali walaupun pilihan batch-nya berbeda --
+    // yang dijaga `Idempotency-Key` adalah "jangan menagih dua kali", dan
+    // itu soal isi belanja, bukan soal rak.
+    let per_produk = stock::total_per_produk(&lines);
     let sidik = sidik_jari(
         input.transaction_type,
         input.customer_id,
         input.payment_method,
         amount_paid_tersimpan,
         ongkir,
-        &bahan,
+        &per_produk,
     );
 
     // Request ulang yang sah: kembalikan transaksi yang sudah ada, tanpa
@@ -218,25 +229,25 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     let ids: Vec<Uuid> = lines.iter().map(|l| l.product_id).collect();
     let terkunci = stock::kunci_produk(&mut tx, &ids).await?;
 
-    let mut items = Vec::with_capacity(lines.len());
+    let mut items = Vec::with_capacity(per_produk.len());
     let mut subtotal = Decimal::ZERO;
 
-    for line in &lines {
+    for (product_id, qty) in per_produk.iter().copied() {
         let product = terkunci
-            .get(&line.product_id)
+            .get(&product_id)
             .ok_or_else(|| AppError::not_found("Produk tidak ditemukan."))?;
 
         // Harga diambil dari database, bukan dari request -- kalau client
         // yang menentukan harga, siapa pun yang bisa memanggil API ini bisa
         // membeli apa saja seharga nol.
         let unit_price = uang(product.price);
-        let baris_subtotal = uang(unit_price * Decimal::from(line.qty));
+        let baris_subtotal = uang(unit_price * Decimal::from(qty));
         subtotal += baris_subtotal;
 
         items.push(NewTransactionItem {
             product_id: product.id,
             product_name_snapshot: product.name.clone(),
-            qty: line.qty,
+            qty,
             unit_price,
             subtotal: baris_subtotal,
         });

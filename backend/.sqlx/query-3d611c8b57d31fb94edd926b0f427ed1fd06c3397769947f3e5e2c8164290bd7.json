@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(SUM(ti.qty * p.cost_price), 0) AS \"cogs!\",\n               COUNT(*) FILTER (WHERE p.cost_price IS NULL) AS \"tanpa_pokok!\"\n        FROM transaction_items ti\n        JOIN transactions t ON t.id = ti.transaction_id\n        LEFT JOIN products p ON p.id = ti.product_id\n        WHERE t.status = 'completed'\n          AND ($1::text IS NULL\n               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')\n                                  AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::text IS NULL OR t.payment_method = $2)\n          AND ($3::text IS NULL OR t.type = $3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cogs!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "tanpa_pokok!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "3d611c8b57d31fb94edd926b0f427ed1fd06c3397769947f3e5e2c8164290bd7"
+}
