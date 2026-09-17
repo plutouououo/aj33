@@ -16,8 +16,13 @@ use serde::Deserialize;
 
 const PATH_DAFTAR_ORDER: &str = "/api/v2/order/get_order_list";
 const PATH_DETAIL_ORDER: &str = "/api/v2/order/get_order_detail";
+// Tiga path di bawah milik bagian pengiriman, yang belum dipanggil dari
+// mana pun -- lihat catatan di bagian "Memperbarui status pengiriman".
+#[allow(dead_code)]
 const PATH_PARAMETER_KIRIM: &str = "/api/v2/logistics/get_shipping_parameter";
+#[allow(dead_code)]
 const PATH_KIRIM_ORDER: &str = "/api/v2/logistics/ship_order";
+#[allow(dead_code)]
 const PATH_NOMOR_RESI: &str = "/api/v2/logistics/get_tracking_number";
 
 /// Batas `page_size` menurut dokumentasi `get_order_list`.
@@ -271,13 +276,28 @@ pub async fn detail_order(
 // ---------------------------------------------------------------------
 // Memperbarui status pengiriman
 // ---------------------------------------------------------------------
+//
+// BELUM TERSAMBUNG. Separuh pembaca order (`daftar_order`, `detail_order`)
+// sudah dipakai; separuh pengiriman di bawah ini sudah ditulis terhadap
+// spesifikasi Shopee tapi belum dipanggil route mana pun, dan belum ada
+// tes yang menyentuhnya karena ketiganya memanggil HTTP langsung.
+//
+// Karena itu tiap itemnya diberi `#[allow(dead_code)]`: CI menjalankan
+// `cargo clippy --all-targets -- -D warnings`, jadi tanpa ini seluruh
+// bagian ini menggagalkan build. Atributnya sengaja dipasang per item,
+// BUKAN sekali untuk seluruh berkas -- begitu bagian ini dipanggil dari
+// `orders`, atribut yang tersisa langsung menunjuk apa yang masih
+// menganggur. Satu `allow` di kepala berkas akan menyembunyikannya
+// selamanya, termasuk kode mati yang benar-benar tidak sengaja.
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct ParameterKirim {
     #[serde(default)]
     info_needed: InfoDiperlukan,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default, Deserialize)]
 struct InfoDiperlukan {
     #[serde(default)]
@@ -291,6 +311,7 @@ struct InfoDiperlukan {
 /// Bukan pilihan kita: tiap kurir menentukan sendiri apakah paket dijemput
 /// atau diantar ke titik drop-off, dan mengirim bentuk yang salah ditolak.
 /// Karena itu bentuknya selalu ditanyakan dulu lewat `parameter_pengiriman`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetodeKirim {
     /// Kurir menjemput ke alamat penjual.
@@ -305,6 +326,7 @@ pub enum MetodeKirim {
 /// cara mana pun -- biasanya karena ordernya belum siap dikirim. Itu
 /// dikembalikan sebagai `None` supaya pemanggil bisa membedakannya dari
 /// order yang memang perlu dijemput.
+#[allow(dead_code)]
 pub async fn parameter_pengiriman(
     cfg: &ShopeeConfig,
     kredensial: &Kredensial,
@@ -332,6 +354,7 @@ pub async fn parameter_pengiriman(
     })
 }
 
+#[allow(dead_code)]
 fn terisi(daftar: &Option<Vec<String>>) -> bool {
     daftar.as_ref().is_some_and(|d| !d.is_empty())
 }
@@ -342,6 +365,7 @@ fn terisi(daftar: &Option<Vec<String>>) -> bool {
 /// Field `pickup`/`dropoff` tetap dikirim sebagai objek kosong walaupun
 /// isinya tidak ada: dokumentasi `ship_order` menyebut field-nya harus tetap
 /// ada, dan menghilangkannya ditolak.
+#[allow(dead_code)]
 pub async fn kirim_order(
     cfg: &ShopeeConfig,
     kredensial: &Kredensial,
@@ -365,6 +389,7 @@ pub async fn kirim_order(
     Ok(())
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct NomorResi {
     #[serde(default)]
@@ -376,6 +401,7 @@ struct NomorResi {
 /// Dipisah dari `kirim_order` karena memang terbit belakangan: sebagian
 /// kurir baru menerbitkan resi beberapa saat setelah pengiriman diatur,
 /// jadi resi yang belum ada bukan kegagalan -- itu `None`.
+#[allow(dead_code)]
 pub async fn nomor_resi(
     cfg: &ShopeeConfig,
     kredensial: &Kredensial,
