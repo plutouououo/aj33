@@ -1,16 +1,10 @@
 ---
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type Product } from '../../lib/api';
-import { berandaUntuk } from '../../lib/session';
 import { MEREK } from '../../lib/produk';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
-
-// Menambah produk adalah wewenang Owner, sama seperti di backend.
-if (user.role !== 'owner') {
-  return Astro.redirect(berandaUntuk(user.role), 302);
-}
 
 let galat: string | null = null;
 // Isian yang barusan dikirim, dipakai mengisi ulang form saat validasi gagal.

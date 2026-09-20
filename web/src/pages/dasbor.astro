@@ -6,12 +6,6 @@ import { rupiah, waktu } from '../lib/format';
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
 
-// Backend menolak peran selain owner di endpoint ini. Pemeriksaan di sini
-// hanya supaya yang salah alamat melihat halaman, bukan galat 403 mentah.
-if (user.role !== 'owner') {
-  return Astro.redirect('/', 302);
-}
-
 const data = await api<Dashboard>('/dashboard', { token });
 
 /** Nama yang ditampilkan untuk satu penjualan. */

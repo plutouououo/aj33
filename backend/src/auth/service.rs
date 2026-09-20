@@ -31,6 +31,10 @@ pub struct PublicUser {
     pub role: Role,
     pub phone: Option<String>,
     pub is_active: bool,
+    /// Selama true, frontend menahan pengguna di halaman ganti password.
+    /// Ikut ke frontend -- bukan ke dalam token -- supaya pencabutannya
+    /// berlaku seketika, bukan setelah token yang lama kedaluwarsa.
+    pub must_change_password: bool,
 }
 
 impl TryFrom<UserRow> for PublicUser {
@@ -52,6 +56,7 @@ impl TryFrom<UserRow> for PublicUser {
             role,
             phone: row.phone,
             is_active: row.is_active,
+            must_change_password: row.must_change_password,
         })
     }
 }
@@ -128,6 +133,78 @@ pub async fn get_me(pool: &PgPool, user_id: Uuid) -> AppResult<PublicUser> {
         .ok_or_else(|| AppError::unauthorized("Akun tidak ditemukan."))?;
 
     user.try_into()
+}
+
+/// Biaya bcrypt untuk password yang dibuat aplikasi ini. Sama dengan hash
+/// yang sudah ada di database, jadi waktu verifikasi login tidak berubah
+/// tergantung akun mana yang masuk.
+const BIAYA_BCRYPT: u32 = 10;
+
+/// Panjang minimum password. Angka yang sama dijaga di halaman frontend,
+/// tapi yang menegakkan adalah yang di sini.
+const PANJANG_MINIMUM: usize = 8;
+
+/// Mengganti password sendiri.
+///
+/// Password lama tetap diminta walaupun pengguna sudah membawa token yang
+/// sah: token bisa saja ikut terbawa di perangkat yang ditinggal terbuka,
+/// dan tanpa pemeriksaan ini siapa pun yang menemukannya bisa mengunci
+/// pemilik akun keluar dari akunnya sendiri.
+pub async fn change_password(
+    pool: &PgPool,
+    user_id: Uuid,
+    password_lama: &str,
+    password_baru: &str,
+) -> AppResult<PublicUser> {
+    let user = repo::find_by_id(pool, user_id)
+        .await?
+        .filter(|u| u.is_active)
+        .ok_or_else(|| AppError::unauthorized("Akun tidak ditemukan."))?;
+
+    let cocok = bcrypt::verify(password_lama, &user.password_hash).map_err(|err| {
+        tracing::error!(user_id = %user.id, error = %err, "hash password tidak bisa diverifikasi");
+        AppError::unauthorized("Password lama salah.")
+    })?;
+
+    if !cocok {
+        return Err(AppError::unauthorized("Password lama salah."));
+    }
+
+    // Dihitung dalam karakter, bukan byte: "delapan huruf" yang diminta di
+    // layar harus berarti hal yang sama untuk password yang memakai huruf
+    // beraksen.
+    if password_baru.chars().count() < PANJANG_MINIMUM {
+        return Err(AppError::bad_request(format!(
+            "Password baru minimal {PANJANG_MINIMUM} karakter."
+        )));
+    }
+
+    // bcrypt memotong masukan di 72 byte. Tanpa penolakan ini, dua password
+    // panjang yang 72 byte pertamanya sama akan sama-sama bisa masuk --
+    // diam-diam, tanpa pemiliknya pernah tahu.
+    if password_baru.len() > 72 {
+        return Err(AppError::bad_request(
+            "Password baru terlalu panjang (maksimal 72 karakter).",
+        ));
+    }
+
+    if password_baru == password_lama {
+        return Err(AppError::bad_request(
+            "Password baru harus berbeda dari password lama.",
+        ));
+    }
+
+    let hash = bcrypt::hash(password_baru, BIAYA_BCRYPT).map_err(|err| {
+        tracing::error!(user_id = %user.id, error = %err, "gagal membuat hash password");
+        AppError::internal("Gagal menyimpan password baru.")
+    })?;
+
+    repo::update_password(pool, user.id, &hash).await?;
+
+    // Dibaca ulang, bukan disusun dari `user` yang sudah basi: yang
+    // dikembalikan harus memuat `must_change_password` yang sudah mati,
+    // karena itulah yang melepas pengguna dari halaman ganti password.
+    get_me(pool, user.id).await
 }
 
 fn buat_token(secret: &str, user_id: Uuid, role: Role) -> AppResult<String> {

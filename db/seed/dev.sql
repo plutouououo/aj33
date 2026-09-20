@@ -8,6 +8,10 @@
 -- owner    / owner123
 -- kasir    / kasir123
 -- pengepak / pengepak123
+--
+-- Akun `retno` TIDAK ada di sini: ia dipasang migrasi 0012 karena memang
+-- harus ikut ke produksi. Password awalnya retno123, dan login pertamanya
+-- langsung diminta menggantinya.
 INSERT INTO users (id, name, email_or_username, password_hash, role, is_active) VALUES
   ('11111111-1111-4111-8111-111111111101', 'Owner Toko',  'owner',
    '$2b$10$0jnyG.ADvci/7Tjwhnwgl.EmrZlA0lGAqBgUQ5E6ANvcTlbcZiYEK', 'owner', true),
@@ -21,8 +25,14 @@ ON CONFLICT (email_or_username) DO NOTHING;
 -- diulang di sini. Yang di bawah cuma contoh produk supaya halaman tidak
 -- kosong saat development.
 --
--- SKU-nya sengaja ditulis sama dengan yang dirakit `catalog::sku`, supaya
--- data contoh tidak mengajarkan bentuk yang salah.
+-- SKU-nya sengaja ditulis sama dengan yang dirakit `catalog::sku` memakai
+-- kamus yang dipasang migrasi 0013, supaya data contoh tidak mengajarkan
+-- bentuk yang salah. Keempatnya 6-12 karakter:
+--
+--     CBSB-AFC-2KG  12   Ceker Bersih + Super Besar + AFCO + 2 kg
+--     HJA-AFC-1KG   11   Hati Jantung Ampela + AFCO + 1 kg
+--     AU08-AFC-2KG  12   Ayam Utuh + SP 08 (kamus: 08) + AFCO + 2 kg
+--     FDU-BEC-2KG   11   Filet Dada Utuh + BEST CHICKEN + 2 kg
 INSERT INTO products
   (id, category_id, name, seo_name, sku, product_type, variant_grade, brand_name,
    variant_size, price, cost_price, stock_qty, low_stock_threshold, created_by)
@@ -43,7 +53,7 @@ FROM (VALUES
   ('33333333-3333-4333-8333-333333333313'::uuid, 'Ayam Utuh',
    'Ayam utuh SP 08',
    'Ayam Broiler Utuh Karkas 0.8kg Frozen Halal',
-   'AUSP08-AFC-2KG', 'Ayam Utuh', 'SP 08', 'AFCO', '2 kg',
+   'AU08-AFC-2KG', 'Ayam Utuh', 'SP 08', 'AFCO', '2 kg',
    52000::numeric, 41000::numeric, 10),
   ('33333333-3333-4333-8333-333333333314'::uuid, 'Dada',
    'Filet dada utuh pack 2 kg',
@@ -54,14 +64,34 @@ FROM (VALUES
 JOIN categories c ON c.name = v.kategori
 ON CONFLICT (sku) DO NOTHING;
 
--- Dua batch untuk satu produk yang sama: inilah yang dulu dikerjakan dengan
+-- Batch untuk SETIAP produk di atas, dan jumlahnya harus sama dengan
+-- `stock_qty` produknya.
+--
+-- Sejak migrasi 0011 berlaku invarian `products.stock_qty =
+-- SUM(product_batches.remaining_qty)`, dan sejak kasir memilih batch sendiri,
+-- produk tanpa batch tidak bisa dijual sama sekali -- tidak ada yang bisa
+-- dipilih. Data contoh yang stoknya menggantung tanpa batch karena itu bukan
+-- sekadar tidak rapi: ia mengajarkan keadaan yang tidak mungkin ada.
+--
+-- `remaining_qty` = `quantity`: kiriman yang baru datang belum ada yang
+-- keluar. Kolomnya wajib diisi (NOT NULL sejak 0011) dan tidak punya default.
+--
+-- Produk ...313 sengaja punya DUA batch: itulah yang dulu dikerjakan dengan
 -- menuliskan tanggal kedaluwarsa di ekor nama produk ("... afco 25.7" dan
--- "... afco 29.6" adalah barang yang sama, bukan dua barang).
-INSERT INTO product_batches (product_id, batch_number, quantity, expiry_date, created_by)
+-- "... afco 29.6" adalah barang yang sama, bukan dua barang), sekaligus satu-
+-- satunya cara menguji penjualan yang mengambil dari dua kiriman sekaligus.
+INSERT INTO product_batches
+  (product_id, batch_number, quantity, remaining_qty, expiry_date, created_by)
 VALUES
-  ('33333333-3333-4333-8333-333333333313', 'SP08-2507', 6, '2027-07-25',
+  ('33333333-3333-4333-8333-333333333311', 'CBSB-2508', 24, 24, '2027-08-25',
    '11111111-1111-4111-8111-111111111101'),
-  ('33333333-3333-4333-8333-333333333313', 'SP08-2906', 4, '2027-06-29',
+  ('33333333-3333-4333-8333-333333333312', 'HJA-2511', 16, 16, '2027-11-30',
+   '11111111-1111-4111-8111-111111111101'),
+  ('33333333-3333-4333-8333-333333333313', 'SP08-2507', 6, 6, '2027-07-25',
+   '11111111-1111-4111-8111-111111111101'),
+  ('33333333-3333-4333-8333-333333333313', 'SP08-2906', 4, 4, '2027-06-29',
+   '11111111-1111-4111-8111-111111111101'),
+  ('33333333-3333-4333-8333-333333333314', 'FDU-2604', 6, 6, '2027-04-30',
    '11111111-1111-4111-8111-111111111101')
 ON CONFLICT DO NOTHING;
 

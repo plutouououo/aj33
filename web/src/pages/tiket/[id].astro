@@ -2,15 +2,10 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Ticket } from '../../lib/api';
 import { waktu } from '../../lib/format';
-import { berandaUntuk } from '../../lib/session';
 import { LABEL_STATUS, kelasLencana, langkahBerikutnya, masihBisaDiambil } from '../../lib/tiket';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
-
-if (user.role === 'kasir') {
-  return Astro.redirect(berandaUntuk(user.role), 302);
-}
 
 const { id } = Astro.params;
 

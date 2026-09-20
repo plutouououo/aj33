@@ -2,17 +2,10 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type ProductDetail } from '../../lib/api';
 import { rupiah, tanggal, waktu, sisaHari } from '../../lib/format';
-import { berandaUntuk } from '../../lib/session';
 import { MEREK } from '../../lib/produk';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
-
-// Halaman ini seluruhnya tentang menyunting katalog, yang hanya boleh
-// dikerjakan Owner. Peran lain dikembalikan ke berandanya masing-masing.
-if (user.role !== 'owner') {
-  return Astro.redirect(berandaUntuk(user.role), 302);
-}
 
 const { id } = Astro.params;
 

@@ -11,17 +11,27 @@ import {
   type Transaction,
 } from '../lib/api';
 import { rupiah, tanggal } from '../lib/format';
-import { berandaUntuk } from '../lib/session';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
 
-if (user.role === 'pengepak') {
-  return Astro.redirect(berandaUntuk(user.role), 302);
-}
+/**
+ * Pengepak membuka halaman ini untuk MEMBACA detail produk -- ukuran, harga,
+ * rak, dan sisa tiap batch -- bukan untuk menjual. Seluruh kendali transaksi
+ * tidak dirender untuknya.
+ *
+ * Yang benar-benar menahan penjualan bukan flag ini, melainkan backend:
+ * `POST /transactions` menolak peran pengepak. Flag ini hanya menjaga agar
+ * layarnya tidak menawarkan sesuatu yang pasti ditolak.
+ */
+const bolehTransaksi = user.role !== 'pengepak';
 
 /**
- * Satu baris keranjang.
+ * Satu baris keranjang: SATU BATCH dari satu produk.
+ *
+ * Membeli 5 butir yang fisiknya diambil dari dua kiriman berbeda menghasilkan
+ * dua baris, dan itu memang yang benar -- backend menggabungkannya per
+ * (produk, batch), lalu mencatat tiap batch yang keluar di ledger stok.
  *
  * `nama` dan `harga` ikut dibawa HANYA untuk ditampilkan di langkah 2 tanpa
  * query kedua. Server tidak pernah mempercayainya: harga ditetapkan ulang
@@ -34,8 +44,8 @@ interface BarisKeranjang {
   nama: string;
   harga: number;
   /**
-   * Batch yang dipilih kasir. String kosong berarti serahkan pada FEFO --
-   * backend akan mengeluarkan yang kedaluwarsanya paling dekat.
+   * Batch yang dipilih kasir. Wajib terisi: sejak kasir memilih sendiri,
+   * tidak ada lagi baris yang diserahkan ke FEFO.
    */
   batch_id: string;
 }
@@ -65,21 +75,24 @@ function bacaKeranjang(form: FormData): BarisKeranjang[] {
   const qty = form.getAll('qty');
   const nama = form.getAll('nama');
   const harga = form.getAll('harga');
-  // Sejajar posisi dengan yang lain: setiap kartu produk SELALU mengirim
-  // satu `batch_id`, juga produk yang cuma punya satu batch. Kalau field
-  // ini hanya muncul pada sebagian kartu, pasangan indeksnya bergeser dan
-  // batch milik produk lain yang terkirim.
   const batch = form.getAll('batch_id');
 
-  return ids
-    .map((id, i) => ({
-      product_id: String(id),
-      qty: Number(qty[i] ?? 0),
-      nama: String(nama[i] ?? ''),
-      harga: Number(harga[i] ?? 0),
-      batch_id: String(batch[i] ?? ''),
-    }))
-    .filter((b) => Number.isFinite(b.qty) && b.qty > 0);
+  return (
+    ids
+      .map((id, i) => ({
+        product_id: String(id),
+        qty: Number(qty[i] ?? 0),
+        nama: String(nama[i] ?? ''),
+        harga: Number(harga[i] ?? 0),
+        batch_id: String(batch[i] ?? ''),
+      }))
+      // Baris tanpa batch dibuang, bukan dikirim sebagai "terserah FEFO".
+      // Halaman ini selalu merender `batch_id` bersama `qty`-nya, jadi baris
+      // begitu hanya bisa datang dari request rakitan -- dan menerimanya
+      // berarti mengeluarkan barang dari kiriman yang tidak pernah dipilih
+      // siapa pun.
+      .filter((b) => Number.isFinite(b.qty) && b.qty > 0 && b.batch_id !== '')
+  );
 }
 
 /**
@@ -93,7 +106,10 @@ let kunci = '';
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const aksi = String(form.get('aksi') ?? '');
+  // Di mode lihat-saja satu-satunya POST yang mungkin adalah tombol
+  // "Terapkan" pada saringan. Apa pun yang dikirim diperlakukan sebagai itu,
+  // jadi tidak ada aksi transaksi yang bisa masuk lewat request rakitan.
+  const aksi = bolehTransaksi ? String(form.get('aksi') ?? '') : 'saring';
 
   kunci = String(form.get('idempotency_key') ?? '');
   keranjang = bacaKeranjang(form);
@@ -215,7 +231,32 @@ if (langkah === 1) {
 const barang = (produk?.data ?? []).filter((p) => p.stock_qty > 0);
 const adaYangTerpotong = produk !== null && produk.total > produk.data.length;
 
-const jumlahDipilih = new Map(keranjang.map((b) => [b.product_id, b.qty]));
+/** Jumlah per batch, untuk mengisi ulang kolom di tiap baris batch. */
+const jumlahBatch = new Map(keranjang.map((b) => [`${b.product_id}:${b.batch_id}`, b.qty]));
+
+/**
+ * Jumlah per produk. Dipakai kartu (disorot atau tidak, berapa yang sudah
+ * dipilih) dan ringkasan langkah 2 -- pembeli membeli barang, bukan kiriman,
+ * jadi di luar pemilihan batch angka yang berarti adalah angka per produk.
+ */
+const jumlahProduk = new Map<string, number>();
+/** Nama dan harga per produk, ikut dari baris mana pun milik produk itu. */
+const produkKeranjang = new Map<string, { nama: string; harga: number }>();
+for (const b of keranjang) {
+  jumlahProduk.set(b.product_id, (jumlahProduk.get(b.product_id) ?? 0) + b.qty);
+  if (!produkKeranjang.has(b.product_id)) {
+    produkKeranjang.set(b.product_id, { nama: b.nama, harga: b.harga });
+  }
+}
+
+/** Ringkasan langkah 2 dan 3: satu baris per produk, bukan per batch. */
+const ringkasan = [...jumlahProduk].map(([product_id, qty]) => ({
+  product_id,
+  qty,
+  nama: produkKeranjang.get(product_id)?.nama ?? '',
+  harga: produkKeranjang.get(product_id)?.harga ?? 0,
+}));
+
 const totalItem = keranjang.reduce((n, b) => n + b.qty, 0);
 const totalBelanja = keranjang.reduce((n, b) => n + b.harga * b.qty, 0);
 
@@ -245,7 +286,10 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
 
 <AppShell judul="Kasir" user={user}>
   {/* Penunjuk langkah. Angkanya tetap ditulis, bukan hanya warna. */}
-  <ol class="mb-5 flex items-center justify-center gap-2" aria-label="Langkah transaksi">
+  <ol
+    class:list={['mb-5 items-center justify-center gap-2', bolehTransaksi ? 'flex' : 'hidden']}
+    aria-label="Langkah transaksi"
+  >
     {
       LANGKAH.map((l, i) => (
         <li class="flex items-center gap-2">
@@ -283,7 +327,7 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
   {/* ================================================================= */}
   {
     langkah === 1 && (
-      <form method="POST" id="borang-kasir">
+      <form method="POST" id="borang-kasir" data-transaksi={bolehTransaksi ? 'ya' : 'tidak'}>
         <input type="hidden" name="idempotency_key" value={kunci} />
 
         {/* Saringan ikut di dalam form yang sama, bukan form GET terpisah:
@@ -335,9 +379,17 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
             </div>
           )}
 
-          <p class="isian-bantu tanpa-js">
-            Isi jumlah di tiap barang lalu tekan "Lanjut ke pembayaran".
-          </p>
+          {bolehTransaksi ? (
+            <p class="isian-bantu tanpa-js">
+              Isi jumlah pada batch yang barangnya benar-benar kamu ambil, lalu tekan
+              "Lanjut ke pembayaran".
+            </p>
+          ) : (
+            <p class="isian-bantu">
+              Mode lihat saja. Buka "Detail" pada tiap barang untuk melihat ukuran,
+              harga, lokasi rak, dan sisa tiap batch.
+            </p>
+          )}
         </div>
 
         {adaYangTerpotong && (
@@ -351,27 +403,17 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
             berlembar-lembar untuk daftar yang sebenarnya muat sekali lihat. */}
         <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-daftar>
           {barang.map((p) => {
-            const jumlah = jumlahDipilih.get(p.id) ?? 0;
+            const jumlah = jumlahProduk.get(p.id) ?? 0;
             const batches = batchProduk.get(p.id) ?? [];
-            // Pilihan batch hanya berarti kalau memang ada yang bisa
-            // dipilih. Produk dengan satu batch tetap MENGIRIM field-nya
-            // (lihat bacaKeranjang) tapi tidak menampilkannya -- dropdown
-            // berisi satu pilihan hanya menambah yang harus dibaca kasir.
-            const pilihBatch = batches.length > 1;
             return (
               <div
                 class={jumlah > 0 ? 'baris-produk-terpilih' : 'baris-produk'}
                 data-produk
                 data-harga={p.price}
-                data-stok={p.stock_qty}
                 data-nama={p.name.toLowerCase()}
                 data-sku={(p.sku ?? '').toLowerCase()}
                 data-kategori={p.category_id ?? ''}
               >
-                <input type="hidden" name="product_id" value={p.id} />
-                <input type="hidden" name="nama" value={p.name} />
-                <input type="hidden" name="harga" value={p.price} />
-
                 {/* Dua versi blok informasi. Yang bisa diketuk adalah tombol
                     sungguhan (bisa dicapai keyboard, tidak men-submit); yang
                     tanpa JS adalah teks biasa. Hanya satu yang terlihat.
@@ -386,13 +428,19 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
                 <button
                   type="button"
                   class="hanya-js min-w-0 basis-full text-left"
-                  data-tambah
+                  data-buka-batch
+                  aria-haspopup="dialog"
                 >
                   <span class="block truncate text-sm font-medium">{p.name}</span>
                   <span class="block text-xs text-[var(--color-teks-lembut)]">
                     {p.sku ?? '—'} · Stok: {p.stock_qty}
                   </span>
                   <span class="block text-sm font-semibold">{rupiah(p.price)}</span>
+                  {/* Diisi ulang skrip tiap kali jumlah berubah. Tanpa baris
+                      ini, kartu yang tertutup tidak memberi tahu batch mana
+                      yang barusan dipilih -- satu-satunya petunjuknya cuma
+                      warna tepi kartu. */}
+                  <span class="block text-xs text-merah-700" data-ringkas-baris />
                 </button>
 
                 <div class="tanpa-js min-w-0 basis-full">
@@ -403,68 +451,162 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
                   <span class="block text-sm font-semibold">{rupiah(p.price)}</span>
                 </div>
 
-                {/* Pilihan batch. Bakunya "otomatis" = FEFO, dan itu yang
-                    benar untuk hampir semua penjualan. Yang perlu dipilih
-                    tangan adalah perkecualian -- pembeli yang minta barang
-                    berumur panjang, atau barang yang fisiknya memang diambil
-                    dari rak lain. Apa pun pilihannya, yang keluar tercatat.
+                {/* Detail produk, untuk peran mana pun yang bisa membuka
+                    halaman ini. <details> native: terbuka tanpa JavaScript,
+                    dan <summary> bukan kendali submit, jadi aman berada di
+                    dalam form yang sedang memegang keranjang.
 
-                    Saat cuma ada satu batch, pembungkusnya `hidden`: elemen
-                    select-nya TETAP ada dan tetap terkirim, jadi urutan
-                    field antar kartu tidak pernah bergeser. */}
-                <div class={pilihBatch ? 'basis-full' : 'hidden'}>
-                  <label class="sr-only" for={`batch-${p.id}`}>
-                    Batch untuk {p.name}
-                  </label>
-                  <select class="kolom py-1.5 text-xs" id={`batch-${p.id}`} name="batch_id">
-                    <option value="">Otomatis — kedaluwarsa terdekat</option>
+                    Datanya sudah ada di halaman -- produk dari /products,
+                    batch dari /batches yang sama yang mengisi dropdown di
+                    bawah. Tidak ada permintaan tambahan per kartu, dan tidak
+                    ada daftar batch kedua yang bisa menyimpang dari yang
+                    dipakai saat menjual. */}
+                <details class="basis-full border-t border-[var(--color-garis)] pt-2">
+                  <summary class="cursor-pointer text-xs font-medium text-[var(--color-teks-lembut)] hover:text-merah-700">
+                    Detail
+                  </summary>
+
+                  <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                    <dt class="text-[var(--color-teks-lembut)]">Nama</dt>
+                    <dd class="min-w-0 break-words">{p.name}</dd>
+
+                    <dt class="text-[var(--color-teks-lembut)]">Ukuran</dt>
+                    <dd>{p.variant_size ?? '—'}</dd>
+
+                    <dt class="text-[var(--color-teks-lembut)]">Harga kasir</dt>
+                    <dd class="tabular-nums">{rupiah(p.price)}</dd>
+
+                    <dt class="text-[var(--color-teks-lembut)]">Lokasi</dt>
+                    <dd>{p.storage_location ?? '—'}</dd>
+                  </dl>
+
+                  {/* Sisa per batch, urut FEFO -- urutan yang sama dengan
+                      urutan pengeluarannya. */}
+                  <p class="mt-2 text-xs text-[var(--color-teks-lembut)]">Stok per batch</p>
+                  {batches.length > 0 ? (
+                    <ul class="mt-1 space-y-0.5 text-xs">
+                      {batches.map((b) => (
+                        <li class="flex flex-wrap justify-between gap-x-2">
+                          <span>{b.batch_number ?? 'Tanpa nomor'}</span>
+                          <span class="tabular-nums">
+                            sisa {b.remaining_qty} ·{' '}
+                            {b.expiry_date ? tanggal(b.expiry_date) : 'tanpa tanggal'}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p class="mt-1 text-xs">Tidak ada batch bersisa.</p>
+                  )}
+                </details>
+
+                {/* Pemilih batch.
+
+                    FEFO tidak lagi dipakai di kasir. Di gudang barang
+                    bercampur dan yang terambil adalah yang paling atas, jadi
+                    "kedaluwarsa terdekat keluar lebih dulu" yang diputuskan
+                    server adalah catatan yang belum tentu benar -- dan
+                    catatan stok yang salah tidak bisa diperbaiki belakangan,
+                    karena tidak ada lagi yang tahu apa yang sebenarnya
+                    diambil. Karena itu kasir yang menyebutkan, per batch.
+
+                    Satu kolom jumlah untuk TIAP batch, bukan satu pilihan:
+                    lima butir yang fisiknya diambil dari dua kiriman ditulis
+                    apa adanya sebagai dua baris. Backend menggabungkannya per
+                    (produk, batch), jadi bentuk ini tidak butuh perlakuan
+                    khusus di sana.
+
+                    `product_id`, `nama`, dan `harga` ikut DI TIAP BARIS
+                    BATCH, bukan sekali di kartu: kelimanya dibaca sebagai
+                    lima deret sejajar di `bacaKeranjang`, dan deret yang
+                    panjangnya berbeda akan memasangkan batch satu produk
+                    dengan jumlah milik produk lain.
+
+                    <dialog open> dirender server supaya tanpa JavaScript
+                    isinya jadi panel biasa di dalam kartu. Skrip halaman
+                    menutupnya saat muat lalu membukanya dengan showModal() --
+                    lihat .panel-batch di theme.css. */}
+                {bolehTransaksi && (
+                  <dialog class="panel-batch basis-full" open data-panel-batch>
+                    <p class="mb-1 text-xs font-medium">
+                      Batch yang diambil
+                      <span class="hanya-js"> — {p.name}</span>
+                    </p>
+
+                    {batches.length === 0 && (
+                      <p class="text-xs text-red-600">
+                        Tidak ada batch bersisa. Barang ini tidak bisa dijual sampai
+                        kiriman barunya dicatat.
+                      </p>
+                    )}
+
                     {batches.map((b) => (
-                      <option value={b.id}>
-                        {b.batch_number ?? 'Tanpa nomor'} ·{' '}
-                        {b.expiry_date ? tanggal(b.expiry_date) : 'tanpa tanggal'} · sisa{' '}
-                        {b.remaining_qty}
-                      </option>
+                      <div class="baris-batch" data-baris-batch>
+                        <input type="hidden" name="product_id" value={p.id} />
+                        <input type="hidden" name="nama" value={p.name} />
+                        <input type="hidden" name="harga" value={p.price} />
+                        <input type="hidden" name="batch_id" value={b.id} />
+
+                        <label class="min-w-0 flex-1 text-xs" for={`qty-${p.id}-${b.id}`}>
+                          <span class="block truncate font-medium">
+                            {b.batch_number ?? 'Tanpa nomor'}
+                          </span>
+                          <span class="block text-[var(--color-teks-lembut)]">
+                            {b.expiry_date ? tanggal(b.expiry_date) : 'tanpa tanggal'} · sisa{' '}
+                            {b.remaining_qty}
+                          </span>
+                        </label>
+
+                        <button
+                          type="button"
+                          class="tombol-bulat hanya-js"
+                          data-kurang
+                          aria-label={`Kurangi ${p.name} dari batch ${b.batch_number ?? 'tanpa nomor'}`}
+                        >
+                          −
+                        </button>
+
+                        {/* `max` = sisa BATCH INI, bukan stok produk. Dibatasi
+                            stok produk, kasir bisa mengetik 10 untuk batch
+                            yang tinggal 3 dan baru ditolak saat pembayaran --
+                            di depan pembeli yang sudah menunggu. */}
+                        <input
+                          class="kolom w-16 shrink-0 text-center tabular-nums"
+                          id={`qty-${p.id}-${b.id}`}
+                          type="number"
+                          inputmode="numeric"
+                          name="qty"
+                          min="0"
+                          max={b.remaining_qty}
+                          value={jumlahBatch.get(`${p.id}:${b.id}`) ?? 0}
+                          data-qty
+                          data-sisa={b.remaining_qty}
+                          data-batch={b.batch_number ?? 'Tanpa nomor'}
+                        />
+
+                        <button
+                          type="button"
+                          class="tombol-bulat hanya-js"
+                          data-tambah
+                          aria-label={`Tambah ${p.name} dari batch ${b.batch_number ?? 'tanpa nomor'}`}
+                        >
+                          +
+                        </button>
+                      </div>
                     ))}
-                  </select>
-                </div>
 
-                {/* Kendali jumlah dibungkus jadi satu gugus yang didorong ke
-                    kanan. Pembungkusnya yang memegang `ml-auto`, bukan tombol
-                    "−": tombol itu `.hanya-js`, jadi saat JavaScript mati ia
-                    display:none dan `ml-auto`-nya ikut hilang -- kolom angka
-                    akan terlempar ke kiri, dan letaknya berbeda antara dua
-                    keadaan yang seharusnya terlihat sama. */}
-                <div class="ml-auto flex shrink-0 items-center gap-3">
-                  <button
-                    type="button"
-                    class="tombol-bulat hanya-js"
-                    data-kurang
-                    aria-label={`Kurangi ${p.name}`}
-                  >
-                    −
-                  </button>
-
-                  <input
-                    class="kolom w-16 shrink-0 text-center tabular-nums"
-                    type="number"
-                    inputmode="numeric"
-                    name="qty"
-                    min="0"
-                    max={p.stock_qty}
-                    value={jumlah}
-                    data-qty
-                    aria-label={`Jumlah ${p.name}`}
-                  />
-
-                  <button
-                    type="button"
-                    class="tombol-bulat hanya-js"
-                    data-tambah
-                    aria-label={`Tambah ${p.name}`}
-                  >
-                    +
-                  </button>
-                </div>
+                    {/* Hanya berarti saat panel ini jadi pop up: di sana kartu
+                        beserta ringkasannya tertutup di belakang backdrop. */}
+                    <div class="hanya-js mt-3 flex items-center gap-3">
+                      <span class="text-sm text-[var(--color-teks-lembut)]">
+                        Total <span class="font-semibold tabular-nums" data-total-batch>0</span>
+                      </span>
+                      <button type="button" class="tombol-utama ml-auto" data-tutup-batch>
+                        Selesai
+                      </button>
+                    </div>
+                  </dialog>
+                )}
               </div>
             );
           })}
@@ -483,23 +625,25 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
           Tidak ada produk yang cocok dengan pencarian ini.
         </p>
 
-        <div class="bilah-bawah">
-          <span class="text-sm text-[var(--color-teks-lembut)]">
-            <span data-ringkas-item>{totalItem}</span> item ·
-            <span data-ringkas-produk> {keranjang.length}</span> produk
-          </span>
-          <span class="ml-auto text-base font-bold tabular-nums sm:ml-0" data-ringkas-total>
-            {rupiah(totalBelanja)}
-          </span>
-          <button
-            class="tombol-utama w-full sm:ml-auto sm:w-auto"
-            type="submit"
-            name="aksi"
-            value="lanjut"
-          >
-            Lanjut ke pembayaran →
-          </button>
-        </div>
+        {bolehTransaksi && (
+          <div class="bilah-bawah">
+            <span class="text-sm text-[var(--color-teks-lembut)]">
+              <span data-ringkas-item>{totalItem}</span> item ·
+              <span data-ringkas-produk> {jumlahProduk.size}</span> produk
+            </span>
+            <span class="ml-auto text-base font-bold tabular-nums sm:ml-0" data-ringkas-total>
+              {rupiah(totalBelanja)}
+            </span>
+            <button
+              class="tombol-utama w-full sm:ml-auto sm:w-auto"
+              type="submit"
+              name="aksi"
+              value="lanjut"
+            >
+              Lanjut ke pembayaran →
+            </button>
+          </div>
+        )}
       </form>
     )
   }
@@ -514,7 +658,11 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
           <h2 class="mb-3 font-semibold">Ringkasan</h2>
           <table class="w-full text-sm">
             <tbody>
-              {keranjang.map((b) => (
+              {/* Per produk, bukan per batch: yang dibayar pembeli adalah
+                  barangnya, dan struk dari backend pun satu baris per produk.
+                  Pilihan batch sudah selesai di langkah 1 dan tetap terbawa
+                  utuh di hidden field di bawah. */}
+              {ringkasan.map((b) => (
                 <tr>
                   <td class="py-1">
                     {b.nama}
@@ -831,6 +979,12 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
     var borang = document.getElementById('borang-kasir');
     if (!borang) return;
 
+    // Mode lihat-saja tidak punya kendali jumlah maupun bilah ringkasan, dan
+    // seluruh skrip di bawah menulis ke keduanya. Berhenti di sini membuat
+    // halaman itu jatuh ke jalur tanpa-JS yang memang sudah didukung penuh:
+    // saringannya dikerjakan server lewat tombol "Terapkan".
+    if (borang.dataset.transaksi !== 'ya') return;
+
     // Baris pertama: menyalakan saklar CSS supaya stepper muncul dan kolom
     // angka menghilang. Lihat .hanya-js / .tanpa-js di theme.css.
     document.documentElement.dataset.js = 'ya';
@@ -846,8 +1000,35 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
     var pil = borang.querySelector('[data-pil-kategori]');
     var pesanKosong = borang.querySelector('[data-kosong-saringan]');
 
+    // Panel batch dirender server dengan `open` supaya tetap terpakai tanpa
+    // JavaScript. Ditutup di sini, lalu dibuka lagi sebagai pop up lewat
+    // showModal(). Kolom jumlah di dalamnya tidak ikut ke mana-mana: elemen
+    // yang sama itulah yang terkirim, terbuka maupun tertutup.
+    baris.forEach(function (row) {
+      var panel = row.querySelector('[data-panel-batch]');
+      if (panel && panel.open) panel.close();
+    });
+
     function kolomQty(row) {
-      return row.querySelector('[data-qty]');
+      return Array.prototype.slice.call(row.querySelectorAll('[data-qty]'));
+    }
+
+    function jumlahBaris(row) {
+      return kolomQty(row).reduce(function (n, kolom) {
+        return n + (parseInt(kolom.value, 10) || 0);
+      }, 0);
+    }
+
+    /** Ringkasan di kartu yang tertutup: batch mana, berapa. */
+    function ringkasBatch(row) {
+      return kolomQty(row)
+        .filter(function (kolom) {
+          return (parseInt(kolom.value, 10) || 0) > 0;
+        })
+        .map(function (kolom) {
+          return kolom.dataset.batch + ' \u00d7 ' + kolom.value;
+        })
+        .join(', ');
     }
 
     function hitung() {
@@ -856,13 +1037,19 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
       var total = 0;
 
       baris.forEach(function (row) {
-        var qty = parseInt(kolomQty(row).value, 10) || 0;
+        var qty = jumlahBaris(row);
         if (qty > 0) {
           item += qty;
           produk += 1;
           total += qty * parseFloat(row.dataset.harga || '0');
         }
         row.className = qty > 0 ? 'baris-produk-terpilih' : 'baris-produk';
+
+        var ringkas = row.querySelector('[data-ringkas-baris]');
+        if (ringkas) ringkas.textContent = qty > 0 ? ringkasBatch(row) : '';
+
+        var totalPanel = row.querySelector('[data-total-batch]');
+        if (totalPanel) totalPanel.textContent = String(qty);
       });
 
       borang.querySelector('[data-ringkas-item]').textContent = String(item);
@@ -870,24 +1057,60 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
       borang.querySelector('[data-ringkas-total]').textContent = rupiah.format(total);
     }
 
-    function ubah(row, selisih) {
-      var kolom = kolomQty(row);
-      var stok = parseInt(row.dataset.stok || '0', 10);
+    // Batasnya sisa BATCH ini, bukan stok produk: dua batch produk yang sama
+    // punya jatah sendiri-sendiri, dan menjumlahkannya di sini akan
+    // menjanjikan butir yang tidak ada di kiriman yang dipilih.
+    function ubah(kolom, selisih) {
+      var sisa = parseInt(kolom.dataset.sisa || '0', 10);
       var nilai = (parseInt(kolom.value, 10) || 0) + selisih;
       if (nilai < 0) nilai = 0;
-      if (nilai > stok) nilai = stok;
+      if (nilai > sisa) nilai = sisa;
       kolom.value = String(nilai);
       hitung();
     }
 
+    function kolomDi(el) {
+      var barisBatch = el.closest('[data-baris-batch]');
+      return barisBatch ? barisBatch.querySelector('[data-qty]') : null;
+    }
+
     borang.addEventListener('click', function (e) {
-      var tambah = e.target.closest('[data-tambah]');
-      if (tambah) {
-        ubah(tambah.closest('[data-produk]'), 1);
+      var buka = e.target.closest('[data-buka-batch]');
+      if (buka) {
+        var panel = buka.closest('[data-produk]').querySelector('[data-panel-batch]');
+        if (panel) panel.showModal();
         return;
       }
+
+      var tutup = e.target.closest('[data-tutup-batch]');
+      if (tutup) {
+        tutup.closest('[data-panel-batch]').close();
+        return;
+      }
+
+      var tambah = e.target.closest('[data-tambah]');
+      if (tambah) {
+        var kolomTambah = kolomDi(tambah);
+        if (kolomTambah) ubah(kolomTambah, 1);
+        return;
+      }
+
       var kurang = e.target.closest('[data-kurang]');
-      if (kurang) ubah(kurang.closest('[data-produk]'), -1);
+      if (kurang) {
+        var kolomKurang = kolomDi(kurang);
+        if (kolomKurang) ubah(kolomKurang, -1);
+      }
+    });
+
+    // Enter di kolom jumlah men-submit form -- di langkah 1 itu berarti
+    // "Terapkan" saringan, dan pop up yang sedang dibuka lenyap bersama
+    // halamannya. Di dalam panel, Enter menutup panel saja.
+    borang.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      var panel = e.target.closest('[data-panel-batch]');
+      if (!panel || !panel.open) return;
+      e.preventDefault();
+      panel.close();
     });
 
     borang.addEventListener('input', function (e) {
@@ -921,7 +1144,7 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
         var cocokKategori = !kategori || row.dataset.kategori === kategori;
         // Barang yang sudah masuk keranjang tidak pernah disembunyikan --
         // kalau hilang dari layar, kasir tidak punya cara membatalkannya.
-        var diKeranjang = (parseInt(kolomQty(row).value, 10) || 0) > 0;
+        var diKeranjang = jumlahBaris(row) > 0;
         var tampil = diKeranjang || (cocokKata && cocokKategori);
         row.hidden = !tampil;
         if (tampil) terlihat += 1;

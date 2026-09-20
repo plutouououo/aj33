@@ -108,6 +108,12 @@ export interface User {
   role: Role;
   phone: string | null;
   is_active: boolean;
+  /**
+   * Password akun ini dipasang orang lain dan belum pernah diganti
+   * pemiliknya. Selama true, middleware menahan pengguna di
+   * `/ganti-password` -- lihat `bolehAkses` di `session.ts`.
+   */
+  must_change_password: boolean;
 }
 
 export interface Product {
@@ -190,6 +196,24 @@ export interface PaginatedProducts {
 export interface Category {
   id: string;
   name: string;
+}
+
+/** Bagian atribut yang punya kode sendiri di kamus SKU. */
+export type SkuKind = 'jenis' | 'grade' | 'merek' | 'ukuran';
+
+/**
+ * Satu entri kamus kode SKU: pemetaan nilai atribut ke kode pendek.
+ *
+ * Kode dari kamus menang atas inisial bebas. Entri baru TIDAK mengubah SKU
+ * produk yang sudah ada -- SKU beku sejak dirakit -- hanya produk yang dibuat
+ * sesudahnya.
+ */
+export interface SkuCode {
+  id: string;
+  kind: SkuKind;
+  /** Nilai atribut apa adanya, mis. "SP 08". */
+  source: string;
+  code: string;
 }
 
 export interface TransactionItem {

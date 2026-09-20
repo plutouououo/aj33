@@ -2,18 +2,10 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, type Ticket } from '../../lib/api';
 import { waktu } from '../../lib/format';
-import { berandaUntuk } from '../../lib/session';
 import { LABEL_STATUS, URUTAN_STATUS, kelasLencana } from '../../lib/tiket';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
-
-// Kasir tidak punya urusan dengan antrean packing. Backend menolaknya dengan
-// 403; mengalihkannya di sini membuat penolakan itu tidak pernah perlu
-// ditampilkan sebagai galat.
-if (user.role === 'kasir') {
-  return Astro.redirect(berandaUntuk(user.role), 302);
-}
 
 const params = Astro.url.searchParams;
 const status = params.get('status') ?? '';

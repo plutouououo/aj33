@@ -7,7 +7,14 @@
  */
 import { defineMiddleware } from 'astro:middleware';
 import { api, ApiRequestError, type User } from './lib/api';
-import { ambilToken, bolehTanpaLogin, hapusSesi } from './lib/session';
+import {
+  ambilToken,
+  berandaUntuk,
+  bolehAkses,
+  bolehTanpaLogin,
+  hapusSesi,
+  harusGantiPassword,
+} from './lib/session';
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
@@ -35,8 +42,24 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
-  if (!context.locals.user && !bolehTanpaLogin(pathname)) {
-    return context.redirect('/login', 302);
+  const user = context.locals.user;
+
+  if (!user) {
+    return bolehTanpaLogin(pathname) ? next() : context.redirect('/login', 302);
+  }
+
+  // Sebelum pemeriksaan peran: akun berpassword sementara tidak boleh
+  // mengerjakan apa pun, termasuk halaman yang perannya memang berhak.
+  if (harusGantiPassword(user, pathname)) {
+    return context.redirect('/ganti-password', 302);
+  }
+
+  // Pembatasan peran ditegakkan DI SINI, bukan di tiap halaman. Menu yang
+  // disembunyikan bukan penjaga -- sampai pemeriksaan ini ada, kasir yang
+  // mengetik /produk di bilah alamat tetap mendapatkan halamannya, karena
+  // backend membiarkan siapa pun yang sudah login membaca katalog.
+  if (!bolehAkses(user.role, pathname)) {
+    return context.redirect(berandaUntuk(user.role), 302);
   }
 
   return next();

@@ -103,6 +103,13 @@ impl AppError {
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Conflict, message)
     }
+
+    /// 500 -- kegagalan di sisi kita yang bukan berasal dari database.
+    /// Pesannya tetap harus aman dibaca pengguna; penyebab aslinya dicatat
+    /// pemanggil lewat `tracing::error!` sebelum mengembalikan ini.
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::InternalError, message)
+    }
 }
 
 impl std::fmt::Display for AppError {

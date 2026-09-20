@@ -416,6 +416,39 @@
            hover:bg-merah-50 disabled:cursor-not-allowed disabled:opacity-40;
   }
 
+  /* --- Pemilih batch di kasir ------------------------------------------- */
+
+  /* Satu <dialog> per barang, berisi kolom jumlah untuk TIAP batch barang
+     itu. Kolom-kolom itulah field yang benar-benar terkirim; tidak ada
+     salinan kedua di tempat lain.
+
+     Dirender server dengan atribut `open`, jadi tanpa JavaScript isinya
+     tampil sebagai panel biasa di dalam kartu dan kasir tetap bisa berjualan.
+     Skrip halaman menutupnya saat muat, lalu membukanya lagi dengan
+     `showModal()` -- yang berpindah hanya cara menampilkannya, bukan
+     datanya.
+
+     Aturan pertama membatalkan gaya bawaan <dialog> (absolute, border,
+     padding, latar sendiri) supaya bentuk "panel di dalam kartu" itu rapi.
+     `:modal` mengembalikannya sebagai pop up saat benar-benar dibuka. */
+  .panel-batch {
+    @apply static m-0 w-auto max-w-none border-0 bg-transparent p-0;
+    color: inherit;
+  }
+  .panel-batch:modal {
+    @apply fixed m-auto w-[min(26rem,calc(100vw-2rem))] rounded-xl border
+           border-[var(--color-garis)] bg-[var(--color-permukaan)] p-4
+           text-[var(--color-teks)] shadow-lg;
+  }
+  .panel-batch::backdrop {
+    background: rgb(0 0 0 / 0.45);
+  }
+  /* Satu batch = satu baris: keterangan di kiri, kendali jumlah di kanan. */
+  .baris-batch {
+    @apply flex items-center gap-2 border-t border-[var(--color-garis-lembut)]
+           py-1.5 first:border-t-0;
+  }
+
   /* --- Bilah bawah kasir ------------------------------------------------ */
 
   /* Sama menempelnya dengan `.bilah-aksi`, tapi isinya ringkasan keranjang

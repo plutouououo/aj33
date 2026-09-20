@@ -482,31 +482,22 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
     Ok(hasil.rows_affected() > 0)
 }
 
-/// SKU hasil rakitan yang dijamin belum dipakai produk lain.
+/// Memastikan sebuah SKU belum dipakai produk lain.
 ///
-/// Dua produk bisa saja punya merek, jenis, warna, dan ukuran yang persis
-/// sama -- toko memang kadang menjual barang serupa dari pemasok berbeda.
-/// Daripada menolak simpanan dan memaksa pengguna mengarang pembeda, SKU
-/// yang kedua diberi akhiran urut.
-pub async fn sku_unik(pool: &PgPool, basis: &str, kecuali: Option<Uuid>) -> AppResult<String> {
-    // Berbatas, supaya salah pakai (mis. impor massal dengan atribut yang
-    // sama persis) berhenti dengan galat alih-alih memutari database tanpa
-    // ujung.
-    for n in 1..=50u32 {
-        let kandidat = if n == 1 {
-            basis.to_string()
-        } else {
-            sku::dengan_akhiran(basis, n)
-        };
-
-        if !sku_dipakai(pool, &kandidat, kecuali).await? {
-            return Ok(kandidat);
-        }
+/// Tidak ada akhiran pembeda otomatis. Dua produk dengan jenis, grade,
+/// merek, dan ukuran yang sama persis memang menghasilkan SKU yang sama, dan
+/// yang kedua ditolak di sini: `CBSB-AFC-2KG-2` tidak memberi tahu siapa pun
+/// apa bedanya dari `CBSB-AFC-2KG`, selain melewati batas 12 karakter. Kalau
+/// dua barang memang berbeda, yang membedakannya harus ada di atributnya.
+pub async fn sku_harus_bebas(pool: &PgPool, sku: &str, kecuali: Option<Uuid>) -> AppResult<()> {
+    if sku_dipakai(pool, sku, kecuali).await? {
+        return Err(AppError::conflict(format!(
+            "SKU \"{sku}\" sudah dipakai produk lain. \
+             Bedakan jenis produk, grade, merek, atau ukurannya."
+        )));
     }
 
-    Err(AppError::conflict(
-        "Terlalu banyak produk dengan merek, jenis, warna, dan ukuran yang sama.",
-    ))
+    Ok(())
 }
 
 pub async fn sku_dipakai(pool: &PgPool, sku: &str, kecuali: Option<Uuid>) -> AppResult<bool> {
@@ -774,4 +765,105 @@ pub async fn list_stock_adjustments(
     .await?;
 
     Ok(rows)
+}
+
+// ---------------------------------------------------------------------
+// Kamus kode SKU
+// ---------------------------------------------------------------------
+
+/// Satu entri kamus seperti yang dilihat frontend.
+#[derive(Debug, Serialize)]
+pub struct SkuCode {
+    pub id: Uuid,
+    /// `jenis`, `grade`, `merek`, atau `ukuran`.
+    pub kind: String,
+    /// Nilai atribut apa adanya, mis. "SP 08".
+    pub source: String,
+    pub code: String,
+}
+
+/// Seluruh isi kamus, dirakit jadi bentuk yang dipakai `catalog::sku`.
+///
+/// Dibaca sekali per perakitan SKU, bukan satu query per bagian: isinya
+/// puluhan baris dan perakitan SKU cuma terjadi saat produk dibuat.
+///
+/// Baris ber-`kind` di luar daftar yang dikenal dilewati, bukan membuat
+/// seluruh perakitan gagal. CHECK constraint di database sudah menjaganya,
+/// jadi kalau sampai ada, itu bug -- dan menolak membuat produk karena satu
+/// baris kamus yang rusak menghentikan pekerjaan yang tidak ada hubungannya.
+pub async fn kamus_sku(pool: &PgPool) -> AppResult<sku::Kamus> {
+    let rows = sqlx::query!(
+        r#"SELECT kind, source, code FROM sku_codes"#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let entri = rows.into_iter().filter_map(|r| {
+        let bagian = sku::Bagian::parse(&r.kind).or_else(|| {
+            tracing::error!(kind = %r.kind, "bagian kamus SKU tidak dikenal");
+            None
+        })?;
+        Some((bagian, r.source, r.code))
+    });
+
+    Ok(sku::Kamus::baru(entri))
+}
+
+pub async fn list_sku_codes(pool: &PgPool) -> AppResult<Vec<SkuCode>> {
+    let rows = sqlx::query_as!(
+        SkuCode,
+        r#"
+        SELECT id, kind, source, code
+        FROM sku_codes
+        ORDER BY kind, source
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+/// `source_key` ditulis di sini, tidak pernah diterima dari pemanggil: ia
+/// turunan dari `source` lewat aturan yang sama dengan yang dipakai saat
+/// mencari (`sku::kunci`). Dua tempat yang menghitungnya sendiri-sendiri akan
+/// membuat entri yang tersimpan tidak pernah ditemukan.
+pub async fn insert_sku_code(
+    pool: &PgPool,
+    kind: sku::Bagian,
+    source: &str,
+    code: &str,
+    created_by: Uuid,
+) -> AppResult<SkuCode> {
+    let source_key = sku::kunci(source);
+
+    let row = sqlx::query_as!(
+        SkuCode,
+        r#"
+        INSERT INTO sku_codes (kind, source, source_key, code, created_by)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (kind, source_key) DO UPDATE
+            SET source = EXCLUDED.source,
+                code = EXCLUDED.code,
+                updated_at = CURRENT_TIMESTAMP
+        RETURNING id, kind, source, code
+        "#,
+        kind.as_str(),
+        source.trim(),
+        source_key,
+        code,
+        created_by
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn delete_sku_code(pool: &PgPool, id: Uuid) -> AppResult<bool> {
+    let hasil = sqlx::query!(r#"DELETE FROM sku_codes WHERE id = $1"#, id)
+        .execute(pool)
+        .await?;
+
+    Ok(hasil.rows_affected() > 0)
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, email_or_username, password_hash, role, phone, is_active\n        FROM users\n        WHERE email_or_username = $1\n        ",
+  "query": "\n        SELECT id, name, email_or_username, password_hash, role, phone, is_active,\n               must_change_password\n        FROM users\n        WHERE email_or_username = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "ordinal": 6,
         "name": "is_active",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "must_change_password",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -51,8 +56,9 @@
       false,
       false,
       true,
+      false,
       false
     ]
   },
-  "hash": "c9a7f5afd575ec35d86c19712ce1f35b5a03c9ee469f874461ac564ab898df10"
+  "hash": "8ff1bc1450c071b5c6d9a57650cb027e3d18a4c826a27b6f80520b679a466f44"
 }

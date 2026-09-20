@@ -37,6 +37,8 @@ pub fn router() -> Router<AppState> {
         )
         .route("/batches", get(list_batches_tersedia))
         .route("/categories", get(list_categories).post(create_category))
+        .route("/sku-codes", get(list_sku_codes).post(create_sku_code))
+        .route("/sku-codes/{id}", delete(delete_sku_code))
 }
 
 // ---------------------------------------------------------------------
@@ -193,20 +195,17 @@ async fn create_product(
     // tidak boleh varian: katalog bertingkat-tingkat tidak punya wujud yang
     // masuk akal di layar kasir maupun di marketplace.
     //
-    // Induknya ditahan, bukan dibuang setelah diperiksa: SKU varian dirakit
-    // di atas SKU induknya.
-    let induk = match body.parent_id {
-        Some(parent_id) => {
-            let induk = ambil_produk(&state, parent_id).await?;
-            if induk.parent_id.is_some() {
-                return Err(AppError::bad_request(
-                    "Varian tidak bisa punya varian lagi.",
-                ));
-            }
-            Some(induk)
+    // Hasilnya tidak ditahan: sejak SKU varian dirakit dari atribut varian
+    // itu sendiri (lihat `rakit_sku`), induknya tidak dibutuhkan lagi
+    // sesudah pemeriksaan ini.
+    if let Some(parent_id) = body.parent_id {
+        let induk = ambil_produk(&state, parent_id).await?;
+        if induk.parent_id.is_some() {
+            return Err(AppError::bad_request(
+                "Varian tidak bisa punya varian lagi.",
+            ));
         }
-        None => None,
-    };
+    }
 
     if let Some(category_id) = body.category_id {
         if !repo::category_ada(&state.pool, category_id).await? {
@@ -221,12 +220,10 @@ async fn create_product(
 
     let sku = rakit_sku(
         &state,
-        induk.as_ref(),
         &brand_name,
         &product_type,
         &variant_grade,
         &variant_size,
-        name,
     )
     .await?;
 
@@ -719,51 +716,127 @@ async fn koreksi_sku(state: &AppState, sekarang: &Product, diminta: &str) -> App
 
     // Dinormalkan lebih dulu: koreksi yang masuk apa adanya justru melahirkan
     // penyimpangan bentuk yang dihindari dengan merakit SKU otomatis.
-    let basis = sku::normalkan(diminta)
-        .ok_or_else(|| AppError::bad_request("SKU harus berisi huruf atau angka."))?;
+    // `normalkan` sekaligus menegakkan panjang 6-12 dan daftar karakter yang
+    // boleh dipakai, jadi koreksi manual tunduk pada aturan yang sama persis
+    // dengan hasil rakitan.
+    let kode = sku::normalkan(diminta).map_err(|err| AppError::bad_request(err.to_string()))?;
 
-    repo::sku_unik(&state.pool, &basis, Some(sekarang.id)).await
+    repo::sku_harus_bebas(&state.pool, &kode, Some(sekarang.id)).await?;
+    Ok(kode)
 }
 
 /// SKU untuk produk yang baru dibuat, dipastikan belum dipakai produk lain.
 /// Dipanggil sekali seumur produk: menyunting atribut tidak merakit ulang
 /// SKU-nya (lihat dokumentasi modul `sku`).
 ///
-/// Varian dirakit di atas SKU induknya supaya seluruh varian satu produk
-/// berbagi satu awalan -- mencari "CB-AFC" menemukan `CB-AFC-2KG` dan
-/// `CB-AFC-5KG` sekaligus. Produk tanpa induk merakit kode penuh dari
-/// atributnya sendiri.
+/// Varian dirakit dengan aturan yang sama persis dengan induknya, bukan
+/// ditempelkan di belakang SKU induk. Bentuk `[JENIS][GRADE]-[MEREK]-[UKURAN]`
+/// hanya punya tiga bagian, dan menambahkan bagian keempat akan melewati 12
+/// karakter hampir selalu. Sifat "satu pencarian menemukan seluruh ukuran"
+/// tetap terjaga tanpa aturan khusus: ukuran adalah bagian TERAKHIR, jadi
+/// varian yang cuma beda ukuran otomatis berbagi awalan -- `CBSB-AFC-2KG`
+/// dan `CBSB-AFC-5KG` sama-sama diawali `CBSB-AFC`.
+///
+/// `name` tidak lagi dipakai sebagai cadangan. SKU dari nama produk akan
+/// berubah artinya tiap kali namanya diperbaiki, dan nama bebas hampir tidak
+/// pernah menghasilkan kode 6-12 karakter yang masuk akal. Produk tanpa
+/// atribut yang cukup ditolak, dengan pesan yang menyebut apa yang kurang.
 async fn rakit_sku(
     state: &AppState,
-    induk: Option<&Product>,
     brand_name: &Option<String>,
     product_type: &Option<String>,
     variant_grade: &Option<String>,
     variant_size: &Option<String>,
-    name: &str,
 ) -> AppResult<String> {
-    let basis = match induk.and_then(|induk| induk.sku.as_deref()) {
-        // Varian tanpa grade maupun ukuran tidak punya pembeda untuk
-        // ditulis; kode induknya dipakai apa adanya sebagai basis, dan
-        // `sku_unik` yang memasang akhiran urut -- induknya sendiri sudah
-        // memakai kode itu, jadi varian pertama pasti dapat akhiran.
-        Some(induk_sku) => match sku::varian(variant_grade.as_deref(), variant_size.as_deref()) {
-            Some(pembeda) => format!("{induk_sku}-{pembeda}"),
-            None => induk_sku.to_string(),
-        },
-        None => sku::rakit(
-            product_type.as_deref(),
-            variant_grade.as_deref(),
-            brand_name.as_deref(),
-            variant_size.as_deref(),
-        )
-        // Produk yang belum punya satu pun atribut jatuh ke inisial namanya,
-        // supaya tidak ada produk yang lahir tanpa SKU.
-        .or_else(|| sku::rakit(Some(name), None, None, None))
-        .ok_or_else(|| AppError::bad_request("Nama produk wajib diisi."))?,
-    };
+    let kamus = repo::kamus_sku(&state.pool).await?;
 
-    repo::sku_unik(&state.pool, &basis, None).await
+    let kode = sku::rakit(
+        &kamus,
+        product_type.as_deref(),
+        variant_grade.as_deref(),
+        brand_name.as_deref(),
+        variant_size.as_deref(),
+    )
+    .map_err(|err| AppError::bad_request(err.to_string()))?;
+
+    repo::sku_harus_bebas(&state.pool, &kode, None).await?;
+    Ok(kode)
+}
+
+// ---------------------------------------------------------------------
+// Kamus kode SKU
+// ---------------------------------------------------------------------
+
+/// Kamus dibaca siapa pun yang sudah login -- halaman produk memakainya
+/// untuk menjelaskan kenapa sebuah SKU ditolak. Yang mengubahnya hanya
+/// Owner, sama seperti seluruh penataan katalog.
+async fn list_sku_codes(
+    State(state): State<AppState>,
+    _user: CurrentUser,
+) -> AppResult<Json<Vec<repo::SkuCode>>> {
+    Ok(Json(repo::list_sku_codes(&state.pool).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct SkuCodeRequest {
+    /// `jenis`, `grade`, `merek`, atau `ukuran`.
+    kind: String,
+    /// Nilai atribut apa adanya, mis. "SP 08".
+    source: String,
+    code: String,
+}
+
+async fn create_sku_code(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<SkuCodeRequest>,
+) -> AppResult<(axum::http::StatusCode, Json<repo::SkuCode>)> {
+    user.require(&[Role::Owner])?;
+
+    let kind = sku::Bagian::parse(body.kind.trim()).ok_or_else(|| {
+        AppError::bad_request("Bagian harus salah satu dari: jenis, grade, merek, ukuran.")
+    })?;
+
+    let source = body.source.trim();
+    if source.is_empty() {
+        return Err(AppError::bad_request("Nilai atributnya wajib diisi."));
+    }
+    // Nilai yang tidak menyisakan satu pun huruf atau angka tidak punya kunci
+    // pencarian, jadi entrinya tidak akan pernah ditemukan saat merakit.
+    if sku::kunci(source).is_empty() {
+        return Err(AppError::bad_request(
+            "Nilai atribut harus berisi huruf atau angka.",
+        ));
+    }
+
+    // HANYA huruf besar-kecil yang dinormalkan, bukan tanda bacanya.
+    // "s08" yang diketik pemiliknya jelas maksudnya dan tidak pantas ditolak
+    // -- huruf besar memang aturan sistem ini, bukan ujian mengetik. Tapi
+    // "S-08" bukan salah ketik huruf: pemisah di dalam kode satu bagian akan
+    // melahirkan SKU berbagian lebih dari tiga, dan membuangnya diam-diam
+    // menyimpan kode yang BERBEDA dari yang diketik tanpa memberi tahu.
+    let code = body.code.trim().to_uppercase();
+    sku::periksa_kode_kamus(&code).map_err(|err| AppError::bad_request(err.to_string()))?;
+
+    let entri = repo::insert_sku_code(&state.pool, kind, source, &code, user.id).await?;
+    Ok((axum::http::StatusCode::CREATED, Json(entri)))
+}
+
+/// Menghapus entri kamus TIDAK mengubah SKU produk yang sudah terlanjur
+/// dirakit dengannya -- SKU beku sejak dibuat. Yang berubah cuma produk yang
+/// dibuat sesudah ini.
+async fn delete_sku_code(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<axum::http::StatusCode> {
+    user.require(&[Role::Owner])?;
+
+    if !repo::delete_sku_code(&state.pool, id).await? {
+        return Err(AppError::not_found("Entri kamus tidak ditemukan."));
+    }
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 /// Menulis satu batch sekaligus menambah stoknya lewat ledger. Keduanya

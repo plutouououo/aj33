@@ -20,6 +20,7 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
+        .route("/auth/password", post(change_password))
 }
 
 impl CurrentUser {
@@ -104,4 +105,29 @@ async fn logout(_user: CurrentUser) -> AppResult<axum::http::StatusCode> {
 async fn me(State(state): State<AppState>, user: CurrentUser) -> AppResult<Json<PublicUser>> {
     let me = service::get_me(&state.pool, user.id).await?;
     Ok(Json(me))
+}
+
+#[derive(Debug, Deserialize)]
+struct ChangePasswordRequest {
+    current_password: String,
+    new_password: String,
+}
+
+/// Ganti password sendiri. Tidak ada peran yang dikecualikan: akun dengan
+/// password sementara justru TIDAK BISA mengerjakan apa pun sebelum lewat
+/// sini, jadi membatasinya per peran hanya akan mengunci orang keluar.
+async fn change_password(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<ChangePasswordRequest>,
+) -> AppResult<Json<PublicUser>> {
+    let updated = service::change_password(
+        &state.pool,
+        user.id,
+        &body.current_password,
+        &body.new_password,
+    )
+    .await?;
+
+    Ok(Json(updated))
 }

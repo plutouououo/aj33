@@ -1,0 +1,160 @@
+---
+/**
+ * Kamus kode SKU.
+ *
+ * Bentuk SKU `[JENIS][GRADE]-[MEREK]-[UKURAN]` dibatasi 12 karakter. Dengan
+ * merek selalu 3 huruf dan dua pemisah, sisanya cuma 7 -- dan grade berangka
+ * seperti "SP 08" sendirian sudah menghabiskan 4. Begitu sebuah kombinasi
+ * tidak muat, backend menolak membuat produknya dan menyuruh mendaftarkan
+ * kode pendek. Halaman inilah tempat mendaftarkannya.
+ *
+ * Tanpa halaman ini penolakan itu jadi jalan buntu: pemilik toko tahu apa
+ * yang salah tapi tidak punya cara memperbaikinya.
+ */
+import AppShell from '../../layouts/AppShell.astro';
+import { api, ApiRequestError, type SkuCode, type SkuKind } from '../../lib/api';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const BAGIAN: { nilai: SkuKind; label: string; contoh: string }[] = [
+  { nilai: 'jenis', label: 'Jenis produk', contoh: 'Ceker Bersih' },
+  { nilai: 'grade', label: 'Grade', contoh: 'SP 08' },
+  { nilai: 'merek', label: 'Merek', contoh: 'BEST CHICKEN' },
+  { nilai: 'ukuran', label: 'Ukuran', contoh: '2 kg' },
+];
+
+let galat: string | null = null;
+let sukses: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = String(form.get('aksi') ?? '');
+
+  try {
+    if (aksi === 'hapus') {
+      await api(`/sku-codes/${String(form.get('id') ?? '')}`, { method: 'DELETE', token });
+      sukses = 'Entri dihapus. SKU produk yang sudah ada tidak berubah.';
+    } else if (aksi === 'simpan') {
+      const entri = await api<SkuCode>('/sku-codes', {
+        method: 'POST',
+        token,
+        body: {
+          kind: String(form.get('kind') ?? ''),
+          source: String(form.get('source') ?? ''),
+          code: String(form.get('code') ?? ''),
+        },
+      });
+      sukses = `"${entri.source}" sekarang berkode ${entri.code}.`;
+    }
+  } catch (err) {
+    galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan entri kamus.';
+  }
+}
+
+const daftar = await api<SkuCode[]>('/sku-codes', { token });
+const perBagian = BAGIAN.map((b) => ({
+  ...b,
+  entri: daftar.filter((e) => e.kind === b.nilai),
+}));
+---
+
+<AppShell judul="Kamus Kode SKU" user={user}>
+  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
+    SKU dirakit otomatis dengan bentuk <code>[JENIS][GRADE]-[MEREK]-[UKURAN]</code>, panjang
+    6–12 karakter. Bagian yang belum terdaftar di sini memakai inisialnya sendiri
+    (<code>Ceker Bersih</code> → <code>CB</code>). Daftarkan kode pendek hanya kalau sebuah
+    kombinasi tidak muat di 12 karakter — backend akan menyebutkan bagian mana yang perlu.
+  </p>
+
+  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
+    Menambah atau menghapus entri <strong>tidak mengubah SKU produk yang sudah ada</strong>.
+    SKU dibekukan sejak produk dibuat, supaya label yang sudah tercetak dan listing
+    marketplace tidak ikut berubah artinya.
+  </p>
+
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+
+  <form method="POST" class="kartu borang-tegak mb-6">
+    <h2 class="font-semibold">Tambah atau ubah entri</h2>
+    <input type="hidden" name="aksi" value="simpan" />
+
+    <div class="isian">
+      <label class="label" for="kind">Bagian</label>
+      <select class="kolom" id="kind" name="kind" required>
+        {BAGIAN.map((b) => <option value={b.nilai}>{b.label}</option>)}
+      </select>
+    </div>
+
+    <div class="isian">
+      <label class="label" for="source">Nilai atribut</label>
+      <input
+        class="kolom"
+        id="source"
+        name="source"
+        placeholder="SP 08"
+        required
+      />
+      <p class="isian-bantu">
+        Ditulis apa adanya seperti di produk. Spasi, tanda baca, dan besar-kecil huruf
+        diabaikan saat dicocokkan — "SP 08", "sp08", dan "Sp-08" dianggap sama.
+      </p>
+    </div>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="code">Kode pendek</label>
+      <input
+        class="kolom uppercase"
+        id="code"
+        name="code"
+        placeholder="S08"
+        maxlength="10"
+        required
+      />
+      <p class="isian-bantu">Huruf dan angka saja, tanpa tanda "-".</p>
+    </div>
+
+    <button class="tombol-utama" type="submit">Simpan entri</button>
+  </form>
+
+  {
+    perBagian.map((b) => (
+      <section class="kartu mb-4">
+        <h2 class="mb-3 font-semibold">{b.label}</h2>
+
+        {b.entri.length === 0 ? (
+          <p class="text-sm text-[var(--color-teks-lembut)]">
+            Belum ada entri. {b.label.toLowerCase()} memakai inisialnya sendiri, mis.
+            <span class="whitespace-nowrap"> "{b.contoh}"</span>.
+          </p>
+        ) : (
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-[var(--color-teks-lembut)]">
+                <th class="py-1 font-medium">Nilai atribut</th>
+                <th class="py-1 font-medium">Kode</th>
+                <th class="py-1" />
+              </tr>
+            </thead>
+            <tbody>
+              {b.entri.map((e) => (
+                <tr class="border-t border-[var(--color-garis)]">
+                  <td class="py-2">{e.source}</td>
+                  <td class="py-2 font-mono font-semibold">{e.code}</td>
+                  <td class="py-2 text-right">
+                    <form method="POST">
+                      <input type="hidden" name="aksi" value="hapus" />
+                      <input type="hidden" name="id" value={e.id} />
+                      <button class="aksi-baris">Hapus</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    ))
+  }
+</AppShell>

@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO sku_codes (kind, source, source_key, code, created_by)\n        VALUES ($1, $2, $3, $4, $5)\n        ON CONFLICT (kind, source_key) DO UPDATE\n            SET source = EXCLUDED.source,\n                code = EXCLUDED.code,\n                updated_at = CURRENT_TIMESTAMP\n        RETURNING id, kind, source, code\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "source",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "code",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6099ef23bad23dcbea36c7899e8fab149662b15e862afb80c0f390365d219123"
+}
