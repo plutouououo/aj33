@@ -792,11 +792,9 @@ pub struct SkuCode {
 /// jadi kalau sampai ada, itu bug -- dan menolak membuat produk karena satu
 /// baris kamus yang rusak menghentikan pekerjaan yang tidak ada hubungannya.
 pub async fn kamus_sku(pool: &PgPool) -> AppResult<sku::Kamus> {
-    let rows = sqlx::query!(
-        r#"SELECT kind, source, code FROM sku_codes"#
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows = sqlx::query!(r#"SELECT kind, source, code FROM sku_codes"#)
+        .fetch_all(pool)
+        .await?;
 
     let entri = rows.into_iter().filter_map(|r| {
         let bagian = sku::Bagian::parse(&r.kind).or_else(|| {

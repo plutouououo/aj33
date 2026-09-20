@@ -626,10 +626,34 @@ mod tests {
     #[test]
     fn setiap_hasil_rakitan_lolos_aturan_bentuknya_sendiri() {
         for sku in [
-            rakit(&kosong(), Some("Ceker Bersih"), Some("Super Besar"), Some("AFCO"), Some("2 kg")),
-            rakit(&kosong(), Some("Hati Jantung Ampela"), None, Some("AFCO"), None),
-            rakit(&kamus_toko(), Some("Dada"), Some("SP 08"), Some("Best Chicken"), Some("1 kg")),
-            rakit(&kamus_toko(), Some("Ayam Utuh"), Some("SP 08"), Some("AFCO"), Some("2 kg")),
+            rakit(
+                &kosong(),
+                Some("Ceker Bersih"),
+                Some("Super Besar"),
+                Some("AFCO"),
+                Some("2 kg"),
+            ),
+            rakit(
+                &kosong(),
+                Some("Hati Jantung Ampela"),
+                None,
+                Some("AFCO"),
+                None,
+            ),
+            rakit(
+                &kamus_toko(),
+                Some("Dada"),
+                Some("SP 08"),
+                Some("Best Chicken"),
+                Some("1 kg"),
+            ),
+            rakit(
+                &kamus_toko(),
+                Some("Ayam Utuh"),
+                Some("SP 08"),
+                Some("AFCO"),
+                Some("2 kg"),
+            ),
         ] {
             let sku = sku.unwrap();
             assert!(periksa(&sku).is_ok(), "{sku} tidak lolos periksa()");
@@ -703,8 +727,20 @@ mod tests {
 
     #[test]
     fn huruf_besar_semua_apa_pun_cara_mengetiknya() {
-        let a = rakit(&kosong(), Some("ceker bersih"), Some("super besar"), Some("afco"), None);
-        let b = rakit(&kosong(), Some("  Ceker  Bersih"), Some("SUPER BESAR "), Some(" AFCO"), None);
+        let a = rakit(
+            &kosong(),
+            Some("ceker bersih"),
+            Some("super besar"),
+            Some("afco"),
+            None,
+        );
+        let b = rakit(
+            &kosong(),
+            Some("  Ceker  Bersih"),
+            Some("SUPER BESAR "),
+            Some(" AFCO"),
+            None,
+        );
         assert_eq!(a, b);
         assert_eq!(a, Ok("CBSB-AFC".to_string()));
     }
@@ -717,7 +753,13 @@ mod tests {
     fn bagian_kosong_dilewati_bukan_menyisakan_pemisah_ganda() {
         // Bukan "HJA--AFC-".
         assert_eq!(
-            rakit(&kosong(), Some("Hati Jantung Ampela"), Some("   "), Some("afco"), Some("")),
+            rakit(
+                &kosong(),
+                Some("Hati Jantung Ampela"),
+                Some("   "),
+                Some("afco"),
+                Some("")
+            ),
             Ok("HJA-AFC".to_string())
         );
     }
@@ -755,7 +797,13 @@ mod tests {
             (Bagian::Merek, "AFCO".to_string(), "AF".to_string()),
         ]);
         assert_eq!(
-            rakit(&kamus, Some("Ceker Bersih"), Some("Super Besar"), Some("AFCO"), Some("2 kg")),
+            rakit(
+                &kamus,
+                Some("Ceker Bersih"),
+                Some("Super Besar"),
+                Some("AFCO"),
+                Some("2 kg")
+            ),
             Ok("CKSB-AF-2KG".to_string())
         );
     }
@@ -766,7 +814,13 @@ mod tests {
         // Tiga cara mengetik grade yang sama harus menemukan entri yang sama.
         for ejaan in ["SP 08", "sp08", "Sp-08"] {
             assert_eq!(
-                rakit(&kamus, Some("Dada"), Some(ejaan), Some("Best Chicken"), Some("1 kg")),
+                rakit(
+                    &kamus,
+                    Some("Dada"),
+                    Some(ejaan),
+                    Some("Best Chicken"),
+                    Some("1 kg")
+                ),
                 Ok("DS08-BEC-1KG".to_string()),
                 "{ejaan}"
             );
@@ -873,7 +927,11 @@ mod tests {
         // kalau tidak koreksi manual justru melahirkan penyimpangan yang
         // dihindari dengan merakit otomatis.
         for ketikan in ["cbsb afc 2kg", "CBSB-AFC-2KG", "  cbsb / afc__2kg  "] {
-            assert_eq!(normalkan(ketikan), Ok("CBSB-AFC-2KG".to_string()), "{ketikan}");
+            assert_eq!(
+                normalkan(ketikan),
+                Ok("CBSB-AFC-2KG".to_string()),
+                "{ketikan}"
+            );
         }
     }
 
@@ -909,10 +967,16 @@ mod tests {
         // adalah karakter yang tersisa setelah pembersihan dan tetap tidak
         // boleh ada di SKU -- huruf beraksen, misalnya.
         assert_eq!(normalkan("CBSB@AFC"), Ok("CBSB-AFC".to_string()));
-        assert_eq!(normalkan("CBSB / AFC . 2KG"), Ok("CBSB-AFC-2KG".to_string()));
+        assert_eq!(
+            normalkan("CBSB / AFC . 2KG"),
+            Ok("CBSB-AFC-2KG".to_string())
+        );
         assert!(matches!(
             normalkan("CBSB-AFÉ"),
-            Err(GalatSku::KarakterIlegal { karakter: '\u{c9}', .. })
+            Err(GalatSku::KarakterIlegal {
+                karakter: '\u{c9}',
+                ..
+            })
         ));
     }
 
@@ -921,7 +985,10 @@ mod tests {
         // Tanpa ini, menghitung panjang dalam byte membuat SKU berkarakter
         // multi-byte ditolak/diterima berdasarkan angka yang salah.
         let galat = normalkan(&"é".repeat(7)).unwrap_err();
-        assert!(matches!(galat, GalatSku::KarakterIlegal { .. }), "{galat:?}");
+        assert!(
+            matches!(galat, GalatSku::KarakterIlegal { .. }),
+            "{galat:?}"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -933,8 +1000,22 @@ mod tests {
         // Inilah yang membuat satu pencarian "CBSB-AFC" menemukan seluruh
         // ukurannya. Tidak butuh aturan khusus: ukuran memang bagian
         // terakhir, jadi awalannya otomatis sama.
-        let dua = rakit(&kosong(), Some("Ceker Bersih"), Some("Super Besar"), Some("AFCO"), Some("2 kg")).unwrap();
-        let lima = rakit(&kosong(), Some("Ceker Bersih"), Some("Super Besar"), Some("AFCO"), Some("5 kg")).unwrap();
+        let dua = rakit(
+            &kosong(),
+            Some("Ceker Bersih"),
+            Some("Super Besar"),
+            Some("AFCO"),
+            Some("2 kg"),
+        )
+        .unwrap();
+        let lima = rakit(
+            &kosong(),
+            Some("Ceker Bersih"),
+            Some("Super Besar"),
+            Some("AFCO"),
+            Some("5 kg"),
+        )
+        .unwrap();
 
         assert_eq!(dua, "CBSB-AFC-2KG");
         assert_eq!(lima, "CBSB-AFC-5KG");
@@ -946,8 +1027,20 @@ mod tests {
         // Yang menolak duplikatnya adalah database (indeks unik) lewat
         // `repo::sku_dipakai`; modul ini cuma harus konsisten, supaya dua
         // barang yang sama tidak pernah lolos sebagai dua SKU berbeda.
-        let a = rakit(&kosong(), Some("Ceker Bersih"), Some("Super Besar"), Some("AFCO"), Some("2 kg"));
-        let b = rakit(&kosong(), Some("Ceker Bersih"), Some("Super Besar"), Some("AFCO"), Some("2 kg"));
+        let a = rakit(
+            &kosong(),
+            Some("Ceker Bersih"),
+            Some("Super Besar"),
+            Some("AFCO"),
+            Some("2 kg"),
+        );
+        let b = rakit(
+            &kosong(),
+            Some("Ceker Bersih"),
+            Some("Super Besar"),
+            Some("AFCO"),
+            Some("2 kg"),
+        );
         assert_eq!(a, b);
     }
 }
