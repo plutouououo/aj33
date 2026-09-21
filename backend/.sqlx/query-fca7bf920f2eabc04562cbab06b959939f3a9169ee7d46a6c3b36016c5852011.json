@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO product_batches\n            (product_id, batch_number, quantity, remaining_qty, expiry_date, created_by)\n        VALUES ($1, $2, $3, 0, $4, $5)\n        RETURNING id\n        ",
+  "query": "\n        INSERT INTO product_batches\n            (product_id, batch_number, purchase_price, quantity, remaining_qty, expiry_date, created_by)\n        VALUES ($1, $2, $3, $4, 0, $5, $6)\n        RETURNING id\n        ",
   "describe": {
     "columns": [
       {
@@ -13,6 +13,7 @@
       "Left": [
         "Uuid",
         "Varchar",
+        "Numeric",
         "Int4",
         "Date",
         "Uuid"
@@ -22,5 +23,5 @@
       false
     ]
   },
-  "hash": "234cbcf857e431249209e400403bba34cb8a1fe47cba03c51360b7c6dbea4809"
+  "hash": "fca7bf920f2eabc04562cbab06b959939f3a9169ee7d46a6c3b36016c5852011"
 }

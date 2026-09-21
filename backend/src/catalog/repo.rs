@@ -103,6 +103,8 @@ pub struct ProductBatch {
     pub id: Uuid,
     pub product_id: Uuid,
     pub batch_number: Option<String>,
+    /// Harga beli per batch. Dipakai untuk menghitung laba barang terjual.
+    pub purchase_price: Option<Decimal>,
     /// Isi kiriman saat datang. Tidak pernah berubah.
     pub quantity: i32,
     /// Sisa yang belum keluar. Inilah yang dikurangi penjualan.
@@ -181,7 +183,11 @@ pub async fn list_products(
                OR ($5 = 'induk' AND p.parent_id IS NULL)
                OR ($5 = 'terjual'
                    AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))
-        ORDER BY p.name
+        -- `p.id` bukan hiasan: nama produk boleh kembar, dan tanpa pemutus
+        -- yang pasti urutan dua baris bernama sama bisa bertukar antar kueri.
+        -- Di daftar berhalaman itu berarti satu produk muncul dua kali dan
+        -- produk lain tidak pernah muncul sama sekali.
+        ORDER BY p.name, p.id
         LIMIT $6 OFFSET $7
         "#,
         filter.search.as_deref(),
@@ -589,8 +595,8 @@ pub async fn list_batches(pool: &PgPool, product_id: Uuid) -> AppResult<Vec<Prod
     let rows = sqlx::query_as!(
         ProductBatch,
         r#"
-        SELECT id, product_id, batch_number, quantity, remaining_qty, expiry_date,
-               received_at AS "received_at!", created_by
+        SELECT id, product_id, batch_number, purchase_price, quantity, remaining_qty,
+               expiry_date, received_at AS "received_at!", created_by
         FROM product_batches
         WHERE product_id = $1
         ORDER BY expiry_date NULLS LAST, received_at DESC
@@ -606,6 +612,7 @@ pub async fn list_batches(pool: &PgPool, product_id: Uuid) -> AppResult<Vec<Prod
 pub struct NewBatch {
     pub product_id: Uuid,
     pub batch_number: Option<String>,
+    pub purchase_price: Option<Decimal>,
     pub quantity: i32,
     pub expiry_date: Option<NaiveDate>,
     pub created_by: Uuid,
@@ -623,12 +630,13 @@ pub async fn insert_batch(tx: &mut Transaction<'_, Postgres>, input: &NewBatch) 
     let id = sqlx::query_scalar!(
         r#"
         INSERT INTO product_batches
-            (product_id, batch_number, quantity, remaining_qty, expiry_date, created_by)
-        VALUES ($1, $2, $3, 0, $4, $5)
+            (product_id, batch_number, purchase_price, quantity, remaining_qty, expiry_date, created_by)
+        VALUES ($1, $2, $3, $4, 0, $5, $6)
         RETURNING id
         "#,
         input.product_id,
         input.batch_number,
+        input.purchase_price,
         input.quantity,
         input.expiry_date,
         input.created_by
@@ -651,7 +659,7 @@ pub async fn list_batches_tersedia(pool: &PgPool) -> AppResult<Vec<ProductBatch>
     let rows = sqlx::query_as!(
         ProductBatch,
         r#"
-        SELECT b.id, b.product_id, b.batch_number, b.quantity, b.remaining_qty,
+        SELECT b.id, b.product_id, b.batch_number, b.purchase_price, b.quantity, b.remaining_qty,
                b.expiry_date, b.received_at AS "received_at!", b.created_by
         FROM product_batches b
         JOIN products p ON p.id = b.product_id
@@ -677,8 +685,8 @@ pub async fn find_batch(
     let row = sqlx::query_as!(
         ProductBatch,
         r#"
-        SELECT id, product_id, batch_number, quantity, remaining_qty, expiry_date,
-               received_at AS "received_at!", created_by
+        SELECT id, product_id, batch_number, purchase_price, quantity, remaining_qty,
+               expiry_date, received_at AS "received_at!", created_by
         FROM product_batches
         WHERE id = $1 AND product_id = $2
         "#,
@@ -689,6 +697,28 @@ pub async fn find_batch(
     .await?;
 
     Ok(row)
+}
+
+/// Mengubah harga beli sebuah batch. Batch yang sudah ada sejak sebelum
+/// migrasi 0014 tidak punya harga beli sama sekali, dan tanpa jalan ini
+/// laporan laba akan selamanya menghitungnya nol. `None` mengosongkan
+/// kembali -- artinya "belum diketahui", dan laporan tetap memperingatkan.
+pub async fn update_batch_purchase_price(
+    pool: &PgPool,
+    product_id: Uuid,
+    id: Uuid,
+    purchase_price: Option<Decimal>,
+) -> AppResult<bool> {
+    let hasil = sqlx::query!(
+        "UPDATE product_batches SET purchase_price = $3 WHERE id = $1 AND product_id = $2",
+        id,
+        product_id,
+        purchase_price
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(hasil.rows_affected() > 0)
 }
 
 pub async fn delete_batch(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> AppResult<()> {

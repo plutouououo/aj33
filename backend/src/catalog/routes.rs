@@ -10,7 +10,7 @@ use crate::error::{AppError, AppResult};
 use crate::stock::{self, StockLine, StockReason};
 use crate::AppState;
 use axum::extract::{Path, Query, State};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, patch};
 use axum::{Json, Router};
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -30,7 +30,10 @@ pub fn router() -> Router<AppState> {
             "/products/{id}/batches",
             get(list_batches).post(create_batch),
         )
-        .route("/products/{id}/batches/{batch_id}", delete(delete_batch))
+        .route(
+            "/products/{id}/batches/{batch_id}",
+            patch(update_batch).delete(delete_batch),
+        )
         .route(
             "/products/{id}/stock-adjustments",
             get(list_stock_adjustments).post(adjust_stock),
@@ -163,7 +166,8 @@ struct ProductCreateRequest {
     price_shopee: Option<Decimal>,
     /// Mencakup Tokopedia -- satu kanal dengan TikTok Shop.
     price_tiktok: Option<Decimal>,
-    cost_price: Option<Decimal>,
+    /// Harga beli per batch, bukan harga modal default produk.
+    purchase_price: Option<Decimal>,
     /// Stok awal. Selalu masuk sebagai batch, jadi asalnya tercatat.
     #[serde(default)]
     stock_qty: i32,
@@ -249,7 +253,7 @@ async fn create_product(
             price: body.price,
             price_shopee: body.price_shopee,
             price_tiktok: body.price_tiktok,
-            cost_price: body.cost_price,
+            cost_price: None,
             low_stock_threshold: body.low_stock_threshold.unwrap_or(5),
             image_url: bersihkan(body.image_url),
             storage_location: bersihkan(body.storage_location),
@@ -264,6 +268,7 @@ async fn create_product(
             &NewBatch {
                 product_id: id,
                 batch_number,
+                purchase_price: body.purchase_price,
                 quantity: body.stock_qty,
                 expiry_date: body.expiry_date,
                 created_by: user.id,
@@ -442,6 +447,7 @@ async fn list_batches(
 #[derive(Debug, Deserialize)]
 struct BatchCreateRequest {
     batch_number: Option<String>,
+    purchase_price: Option<Decimal>,
     quantity: i32,
     /// Boleh kosong untuk barang yang memang tidak punya kedaluwarsa.
     expiry_date: Option<NaiveDate>,
@@ -487,6 +493,7 @@ async fn create_batch(
         &NewBatch {
             product_id: id,
             batch_number,
+            purchase_price: body.purchase_price,
             quantity: body.quantity,
             expiry_date: body.expiry_date,
             created_by: user.id,
@@ -502,6 +509,38 @@ async fn create_batch(
         .ok_or_else(|| AppError::not_found("Batch tidak ditemukan."))?;
 
     Ok((axum::http::StatusCode::CREATED, Json(batch)))
+}
+
+#[derive(Debug, Deserialize)]
+struct BatchPatchRequest {
+    /// Kosong berarti "harga belinya belum diketahui", bukan "jangan diubah":
+    /// hanya satu kolom yang bisa disunting di sini, jadi tidak ada gunanya
+    /// membedakan keduanya -- dan owner harus bisa membatalkan angka yang
+    /// salah ketik.
+    purchase_price: Option<Decimal>,
+}
+
+/// Mengoreksi harga beli batch. Jumlah dan kedaluwarsanya tidak ikut bisa
+/// diubah: keduanya menentukan stok dan urutan FEFO, dan mengubahnya lewat
+/// jalan ini akan melewati ledger. Yang salah catat dibatalkan lalu dicatat
+/// ulang.
+async fn update_batch(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path((id, batch_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<BatchPatchRequest>,
+) -> AppResult<axum::http::StatusCode> {
+    user.require(&[Role::Owner])?;
+
+    if body.purchase_price.is_some_and(|h| h.is_sign_negative()) {
+        return Err(AppError::bad_request("Harga beli tidak boleh negatif."));
+    }
+
+    if !repo::update_batch_purchase_price(&state.pool, id, batch_id, body.purchase_price).await? {
+        return Err(AppError::not_found("Batch tidak ditemukan."));
+    }
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 /// Membatalkan pencatatan batch: barisnya dihapus dan stok yang dulu

@@ -2,18 +2,44 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type ProductDetail } from '../../lib/api';
 import { rupiah, tanggal, waktu, sisaHari } from '../../lib/format';
-import { MEREK } from '../../lib/produk';
+import { MEREK, kembaliKeDaftar } from '../../lib/produk';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
 
 const { id } = Astro.params;
 
+// Daftar produk menitipkan saringannya lewat `?dari=`. Semua jalan keluar
+// halaman ini -- remah roti, tombol Kembali, dan pengalihan sesudah menghapus
+// -- memakai satu tautan ini, jadi tidak ada di antaranya yang membuang
+// saringan yang tadi dipakai pengguna.
+const kembali = kembaliKeDaftar(Astro.url.searchParams.get('dari'));
+
+/**
+ * Kabar keberhasilan tiap aksi. Dibaca dari URL, bukan dari keadaan POST yang
+ * barusan jalan: setiap aksi di halaman ini berakhir dengan pengalihan, jadi
+ * riwayat browser tidak pernah menyimpan hasil POST. Tanpa itu, tombol kembali
+ * menawarkan kirim ulang -- dan menerimanya akan mencatat batch atau varian
+ * kembar yang tidak pernah diminta.
+ */
+const PESAN: Record<string, string> = {
+  dibuat: 'Produk ditambahkan. Tambahkan varian atau batch berikutnya di bawah.',
+  simpan: 'Perubahan disimpan.',
+  varian: 'Varian ditambahkan.',
+  batch: 'Batch dicatat dan stok bertambah.',
+  'harga-batch': 'Harga beli batch disimpan.',
+  'hapus-batch': 'Batch dibatalkan dan stoknya ditarik kembali.',
+  koreksi: 'Stok dikoreksi.',
+};
+
 let galat: string | null = null;
-// Halaman /produk/baru mendarat di sini setelah berhasil menyimpan.
-let sukses: string | null = Astro.url.searchParams.get('dibuat')
-  ? 'Produk ditambahkan. Tambahkan varian atau batch berikutnya di bawah.'
-  : null;
+// `dibuat` adalah jalan masuk dari /produk/baru, yang mendarat di sini
+// sesudah produknya tersimpan.
+const kodePesan =
+  Astro.url.searchParams.get('pesan') ?? (Astro.url.searchParams.get('dibuat') ? 'dibuat' : '');
+// Kodenya datang dari URL, jadi hanya kunci milik `PESAN` sendiri yang
+// dianggap -- `constructor` dan kerabatnya bukan kabar.
+let sukses: string | null = Object.hasOwn(PESAN, kodePesan) ? PESAN[kodePesan] : null;
 
 /** Nilai teks dari form. Kosong berarti "kosongkan kolomnya", bukan "abaikan". */
 function teks(form: FormData, kolom: string): string | null {
@@ -35,6 +61,8 @@ function angka(form: FormData, kolom: string): number | null {
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const aksi = String(form.get('aksi') ?? '');
+  // Kode kabar yang akan dititipkan ke URL kalau aksinya berhasil.
+  let berhasil: string | null = null;
 
   try {
     if (aksi === 'simpan') {
@@ -61,16 +89,15 @@ if (Astro.request.method === 'POST') {
           price: angka(form, 'price') ?? 0,
           price_shopee: angka(form, 'price_shopee'),
           price_tiktok: angka(form, 'price_tiktok'),
-          cost_price: angka(form, 'cost_price'),
           low_stock_threshold: angka(form, 'low_stock_threshold') ?? 5,
           storage_location: teks(form, 'storage_location'),
           is_active: form.get('is_active') === '1',
         },
       });
-      sukses = 'Perubahan disimpan.';
+      berhasil = 'simpan';
     } else if (aksi === 'hapus') {
       await api(`/products/${id}`, { method: 'DELETE', token });
-      return Astro.redirect('/produk', 303);
+      return Astro.redirect(kembali, 303);
     } else if (aksi === 'varian') {
       await api('/products', {
         method: 'POST',
@@ -87,38 +114,55 @@ if (Astro.request.method === 'POST') {
           price: angka(form, 'price') ?? 0,
           price_shopee: angka(form, 'price_shopee'),
           price_tiktok: angka(form, 'price_tiktok'),
+          purchase_price: angka(form, 'purchase_price'),
           stock_qty: angka(form, 'stock_qty') ?? 0,
           batch_number: teks(form, 'batch_number'),
           expiry_date: teks(form, 'expiry_date'),
           storage_location: teks(form, 'storage_location'),
         },
       });
-      sukses = 'Varian ditambahkan.';
+      berhasil = 'varian';
     } else if (aksi === 'batch') {
       await api(`/products/${id}/batches`, {
         method: 'POST',
         token,
         body: {
           batch_number: teks(form, 'batch_number'),
+          purchase_price: angka(form, 'purchase_price'),
           quantity: angka(form, 'quantity') ?? 0,
           expiry_date: teks(form, 'expiry_date'),
         },
       });
-      sukses = 'Batch dicatat dan stok bertambah.';
+      berhasil = 'batch';
+    } else if (aksi === 'harga-batch') {
+      await api(`/products/${id}/batches/${form.get('batch_id')}`, {
+        method: 'PATCH',
+        token,
+        body: { purchase_price: angka(form, 'purchase_price') },
+      });
+      berhasil = 'harga-batch';
     } else if (aksi === 'hapus-batch') {
       await api(`/products/${id}/batches/${form.get('batch_id')}`, { method: 'DELETE', token });
-      sukses = 'Batch dibatalkan dan stoknya ditarik kembali.';
+      berhasil = 'hapus-batch';
     } else if (aksi === 'koreksi') {
       await api(`/products/${id}/stock-adjustments`, {
         method: 'POST',
         token,
         body: { change_qty: angka(form, 'change_qty') ?? 0 },
       });
-      sukses = 'Stok dikoreksi.';
+      berhasil = 'koreksi';
     }
   } catch (err) {
     galat = err instanceof ApiRequestError ? err.message : 'Aksi gagal dijalankan.';
     sukses = null;
+  }
+
+  if (berhasil) {
+    const tujuan = new URL(Astro.url);
+    // `dibuat` hanya berlaku sekali, saat mendarat dari /produk/baru.
+    tujuan.searchParams.delete('dibuat');
+    tujuan.searchParams.set('pesan', berhasil);
+    return Astro.redirect(tujuan.pathname + tujuan.search, 303);
   }
 }
 
@@ -157,7 +201,7 @@ const DEKAT_KEDALUWARSA = 30;
 
 <AppShell judul={produk ? produk.name : 'Produk'} user={user}>
   <nav class="remah" aria-label="Remah roti">
-    <a href="/produk">Produk</a>
+    <a href={kembali}>Produk</a>
     <span aria-hidden="true">›</span>
     {
       induk && (
@@ -339,19 +383,6 @@ const DEKAT_KEDALUWARSA = 30;
                 />
               </div>
 
-              <div class="isian isian-pendek">
-                <label class="label" for="cost_price">Harga modal (Rp)</label>
-                <input
-                  class="kolom"
-                  id="cost_price"
-                  name="cost_price"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={produk.cost_price ?? ''}
-                />
-              </div>
-
               {punyaVarian && (
                 <p class="isian isian-bantu">
                   Produk ini punya varian, jadi harga yang benar-benar dipakai adalah harga tiap
@@ -519,6 +550,19 @@ const DEKAT_KEDALUWARSA = 30;
                   </div>
 
                   <div class="isian isian-pendek">
+                    <label class="label" for="v_beli">Harga beli per batch (Rp)</label>
+                    <input
+                      class="kolom"
+                      id="v_beli"
+                      name="purchase_price"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="opsional"
+                    />
+                  </div>
+
+                  <div class="isian isian-pendek">
                     <label class="label" for="v_batch">No. batch</label>
                     <input class="kolom" id="v_batch" name="batch_number" placeholder="opsional" />
                   </div>
@@ -554,6 +598,7 @@ const DEKAT_KEDALUWARSA = 30;
                     <thead>
                       <tr>
                         <th>No. Batch</th>
+                        <th class="text-right">Harga beli</th>
                         <th class="text-right">Masuk</th>
                         <th class="text-right">Sisa</th>
                         <th>Kedaluwarsa</th>
@@ -572,6 +617,30 @@ const DEKAT_KEDALUWARSA = 30;
                         return (
                           <tr>
                             <td class="font-mono text-xs">{b.batch_number ?? '—'}</td>
+                            {/* Harga beli disunting di tempat. Batch yang
+                                sudah ada sebelum kolom ini lahir tidak punya
+                                harga sama sekali, dan tanpa jalan ini laporan
+                                laba akan selamanya menghitungnya nol. */}
+                            <td class="text-right">
+                              <form method="POST" class="flex items-center justify-end gap-1">
+                                <input type="hidden" name="aksi" value="harga-batch" />
+                                <input type="hidden" name="batch_id" value={b.id} />
+                                <label class="sr-only" for={`hb_${b.id}`}>
+                                  Harga beli batch {b.batch_number ?? ''}
+                                </label>
+                                <input
+                                  class="kolom w-28 text-right"
+                                  id={`hb_${b.id}`}
+                                  name="purchase_price"
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={b.purchase_price ?? ''}
+                                  placeholder="—"
+                                />
+                                <button class="aksi-baris" type="submit">Simpan</button>
+                              </form>
+                            </td>
                             <td class="sel-angka text-[var(--color-teks-lembut)]">{b.quantity}</td>
                             {/* Sisa nol berarti batch ini sudah habis keluar.
                                 Barisnya tetap ditampilkan -- ia riwayat
@@ -609,7 +678,7 @@ const DEKAT_KEDALUWARSA = 30;
                       })}
                       {produk.batches.length === 0 && (
                         <tr>
-                          <td colspan="6" class="py-8 text-center text-[var(--color-teks-lembut)]">
+                          <td colspan="7" class="py-8 text-center text-[var(--color-teks-lembut)]">
                             Belum ada batch yang dicatat.
                           </td>
                         </tr>
@@ -631,6 +700,19 @@ const DEKAT_KEDALUWARSA = 30;
                   <div class="isian isian-pendek">
                     <label class="label" for="b_nomor">No. batch</label>
                     <input class="kolom" id="b_nomor" name="batch_number" placeholder="opsional" />
+                  </div>
+
+                  <div class="isian isian-pendek">
+                    <label class="label" for="b_harga">Harga beli per batch (Rp)</label>
+                    <input
+                      class="kolom"
+                      id="b_harga"
+                      name="purchase_price"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="opsional"
+                    />
                   </div>
 
                   <div class="isian isian-pendek">
@@ -694,7 +776,7 @@ const DEKAT_KEDALUWARSA = 30;
             atribut form=. Labelnya menyebut "produk" supaya orang yang sedang
             di bagian Batch tidak mengira tombol ini menyimpan batch. */}
         <div class="bilah-aksi">
-          <a class="tombol-halus flex-1 text-center sm:flex-none" href="/produk">Kembali</a>
+          <a class="tombol-halus flex-1 text-center sm:flex-none" href={kembali}>Kembali</a>
           <button
             class="tombol-utama flex-1 sm:flex-none"
             type="submit"

@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(\n                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)),\n                   0\n               ) AS \"cogs!\",\n               COUNT(*) FILTER (\n                   WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL\n               ) AS \"tanpa_pokok!\"\n        FROM stock_adjustments sa\n        JOIN transactions t ON t.id = sa.reference_id\n        LEFT JOIN product_batches pb ON pb.id = sa.batch_id\n        LEFT JOIN products p ON p.id = sa.product_id\n        WHERE sa.reason = 'sale'\n          AND sa.change_qty < 0\n          AND sa.reference_type = 'transaction'\n          AND t.status = 'completed'\n          AND ($1::text IS NULL\n               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')\n                                  AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::text IS NULL OR t.payment_method = $2)\n          AND ($3::text IS NULL OR t.type = $3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cogs!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "tanpa_pokok!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "2154d0b1662fd7fec74dc8fef6918f7212239909fd11e6f4dc4d3d72cb198a49"
+}

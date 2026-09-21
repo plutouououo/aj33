@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT b.id, b.product_id, b.batch_number, b.quantity, b.remaining_qty,\n               b.expiry_date, b.received_at AS \"received_at!\", b.created_by\n        FROM product_batches b\n        JOIN products p ON p.id = b.product_id\n        WHERE b.remaining_qty > 0\n          AND p.is_active\n          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)\n        ORDER BY b.product_id, b.expiry_date NULLS LAST, b.received_at, b.id\n        ",
+  "query": "\n        SELECT id, product_id, batch_number, purchase_price, quantity, remaining_qty,\n               expiry_date, received_at AS \"received_at!\", created_by\n        FROM product_batches\n        WHERE id = $1 AND product_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -20,36 +20,45 @@
       },
       {
         "ordinal": 3,
+        "name": "purchase_price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
         "name": "quantity",
         "type_info": "Int4"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "remaining_qty",
         "type_info": "Int4"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "expiry_date",
         "type_info": "Date"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "received_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_by",
         "type_info": "Uuid"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
       false,
+      true,
       true,
       false,
       false,
@@ -58,5 +67,5 @@
       true
     ]
   },
-  "hash": "b0cef57efe21c57b08c636f469222f7a687a5be1648f5d03b14185964e45c3cb"
+  "hash": "f0b98f7c5ca857d6f4901fca41970e1215809e5ecb44c81964be465b0e536bb5"
 }

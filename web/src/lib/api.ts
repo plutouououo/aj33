@@ -172,6 +172,8 @@ export interface ProductBatch {
   id: string;
   product_id: string;
   batch_number: string | null;
+  /** Harga beli per batch, dipakai untuk menghitung laba. */
+  purchase_price: number | null;
   /** Isi kiriman saat datang. Tidak pernah berubah. */
   quantity: number;
   /** Sisa yang belum keluar. Inilah yang dikurangi penjualan. */

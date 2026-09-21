@@ -53,14 +53,16 @@ pub struct SalesSummary {
     /// Ongkir yang ditagihkan ke pembeli. Diperlihatkan terpisah supaya
     /// jelas bahwa uang ini bukan hasil penjualan barang.
     pub shipping: Decimal,
-    /// Harga pokok barang terjual. Produk yang `cost_price`-nya belum diisi
-    /// dihitung nol -- lihat `cogs_coverage`.
+    /// Harga pokok barang terjual, diambil dari harga beli batch yang benar-
+    /// benar keluar. Batch tanpa harga beli jatuh ke `products.cost_price`
+    /// peninggalan data lama, dan kalau keduanya kosong dihitung nol --
+    /// lihat `items_without_cost`.
     pub cogs: Decimal,
     pub expenses: Decimal,
     /// `revenue - cogs - expenses`.
     pub profit: Decimal,
     pub transaction_count: i64,
-    /// Banyaknya baris item yang harga pokoknya belum diisi. Selama angka
+    /// Banyaknya baris keluaran stok yang harga pokoknya belum diisi. Selama angka
     /// ini bukan nol, `cogs` dan `profit` adalah batas atas, bukan nilai
     /// sebenarnya -- dan halaman laporan mengatakannya.
     pub items_without_cost: i64,
@@ -89,12 +91,21 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
 
     let pokok = sqlx::query!(
         r#"
-        SELECT COALESCE(SUM(ti.qty * p.cost_price), 0) AS "cogs!",
-               COUNT(*) FILTER (WHERE p.cost_price IS NULL) AS "tanpa_pokok!"
-        FROM transaction_items ti
-        JOIN transactions t ON t.id = ti.transaction_id
-        LEFT JOIN products p ON p.id = ti.product_id
-        WHERE t.status = 'completed'
+        SELECT COALESCE(
+                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)),
+                   0
+               ) AS "cogs!",
+               COUNT(*) FILTER (
+                   WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL
+               ) AS "tanpa_pokok!"
+        FROM stock_adjustments sa
+        JOIN transactions t ON t.id = sa.reference_id
+        LEFT JOIN product_batches pb ON pb.id = sa.batch_id
+        LEFT JOIN products p ON p.id = sa.product_id
+        WHERE sa.reason = 'sale'
+          AND sa.change_qty < 0
+          AND sa.reference_type = 'transaction'
+          AND t.status = 'completed'
           AND ($1::text IS NULL
                OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
                                   AT TIME ZONE 'Asia/Jakarta')

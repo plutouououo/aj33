@@ -1,10 +1,15 @@
 ---
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type Product } from '../../lib/api';
-import { MEREK } from '../../lib/produk';
+import { MEREK, kembaliKeDaftar } from '../../lib/produk';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
+
+// Saringan daftar yang dititipkan lewat `?dari=`, diteruskan sampai halaman
+// rincian supaya tombol Kembali di sana tetap mendarat di daftar yang sama.
+const dari = Astro.url.searchParams.get('dari');
+const kembali = kembaliKeDaftar(dari);
 
 let galat: string | null = null;
 // Isian yang barusan dikirim, dipakai mengisi ulang form saat validasi gagal.
@@ -32,6 +37,7 @@ if (Astro.request.method === 'POST') {
   };
   const hargaShopee = angkaOpsional('price_shopee');
   const hargaTiktok = angkaOpsional('price_tiktok');
+  const hargaBeliBatch = angkaOpsional('purchase_price');
 
   if (!nama) {
     galat = 'Nama produk wajib diisi.';
@@ -55,7 +61,7 @@ if (Astro.request.method === 'POST') {
           price: harga,
           price_shopee: hargaShopee,
           price_tiktok: hargaTiktok,
-          cost_price: angkaOpsional('cost_price'),
+          purchase_price: hargaBeliBatch,
           stock_qty: Number.isFinite(stok) ? stok : 0,
           batch_number: teks('batch_number'),
           expiry_date: teks('expiry_date'),
@@ -67,7 +73,9 @@ if (Astro.request.method === 'POST') {
       // POST/redirect/GET. Dua sebabnya: me-refresh halaman hasil tidak bisa
       // membuat produk kedua, dan pengguna mendarat tepat di tempat ia bisa
       // langsung menambah varian dan batch berikutnya.
-      return Astro.redirect(`/produk/${dibuat.id}?dibuat=1`, 303);
+      const tujuan = new URLSearchParams({ dibuat: '1' });
+      if (dari) tujuan.set('dari', dari);
+      return Astro.redirect(`/produk/${dibuat.id}?${tujuan}`, 303);
     } catch (err) {
       galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan produk.';
     }
@@ -96,7 +104,7 @@ const BAGIAN = [
 
 <AppShell judul="Tambah Produk Baru" user={user}>
   <nav class="remah" aria-label="Remah roti">
-    <a href="/produk">Produk</a>
+    <a href={kembali}>Produk</a>
     <span aria-hidden="true">›</span>
     <span aria-current="page">Tambah Produk Baru</span>
   </nav>
@@ -234,19 +242,6 @@ const BAGIAN = [
           />
         </div>
 
-        <div class="isian isian-pendek">
-          <label class="label" for="cost_price">Harga modal (Rp)</label>
-          <input
-            class="kolom"
-            id="cost_price"
-            name="cost_price"
-            type="number"
-            min="0"
-            step="1"
-            value={isi('cost_price')}
-          />
-        </div>
-
         <p class="isian isian-bantu">
           Harga marketplace boleh dikosongkan — artinya belum diatur dan mengikuti harga dasar.
           Mengisi 0 berarti digratiskan. Kalau produk ini nanti punya varian, harga yang berlaku
@@ -260,6 +255,20 @@ const BAGIAN = [
 
       <div class="borang-tegak">
         <p class="label">Batch pertama</p>
+
+        <div class="isian isian-pendek">
+          <label class="label" for="purchase_price">Harga beli per batch (Rp)</label>
+          <input
+            class="kolom"
+            id="purchase_price"
+            name="purchase_price"
+            type="number"
+            min="0"
+            step="1"
+            value={isi('purchase_price')}
+            placeholder="opsional"
+          />
+        </div>
 
         <div class="isian isian-pendek">
           <label class="label" for="stock_qty">Stok awal</label>
@@ -328,7 +337,7 @@ const BAGIAN = [
 
     {/* Di dalam <form>, jadi tombolnya tidak perlu atribut form=. */}
     <div class="bilah-aksi">
-      <a class="tombol-halus flex-1 text-center sm:flex-none" href="/produk">Kembali</a>
+      <a class="tombol-halus flex-1 text-center sm:flex-none" href={kembali}>Kembali</a>
       <button class="tombol-utama flex-1 sm:flex-none" type="submit">Simpan produk</button>
     </div>
   </form>

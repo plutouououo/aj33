@@ -7,10 +7,9 @@ const user = Astro.locals.user!;
 const token = Astro.locals.token!;
 
 let galat: string | null = null;
-let sukses: string | null = null;
 
 // Owner mengubah produk lewat form biasa. Tidak ada JavaScript yang terlibat:
-// browser mengirim POST, server merender ulang halaman dengan hasilnya.
+// browser mengirim POST, server menjawab dengan pengalihan.
 if (Astro.request.method === 'POST') {
   if (user.role !== 'owner') {
     galat = 'Kamu tidak punya akses ke fitur ini.';
@@ -29,7 +28,13 @@ if (Astro.request.method === 'POST') {
           token,
           body: { is_active: jadikanAktif },
         });
-        sukses = jadikanAktif ? 'Produk diaktifkan.' : 'Produk dinonaktifkan.';
+        // POST-redirect-GET. Tanpa ini riwayat browser menyimpan hasil POST:
+        // tombol kembali menawarkan kirim ulang, dan menerimanya membalik
+        // status produk sekali lagi tanpa diminta. Saringan ikut terbawa
+        // karena form ini mengirim ke URL yang sedang dibuka.
+        const tujuan = new URL(Astro.url);
+        tujuan.searchParams.set('pesan', jadikanAktif ? 'aktif' : 'nonaktif');
+        return Astro.redirect(tujuan.pathname + tujuan.search, 303);
       } catch (err) {
         galat = err instanceof ApiRequestError ? err.message : 'Gagal mengubah status produk.';
       }
@@ -52,6 +57,34 @@ const PER_HALAMAN = [10, 25, 50, 100];
 const limit = PER_HALAMAN.includes(Number(params.get('per'))) ? Number(params.get('per')) : 25;
 const halaman = Math.max(1, Number(params.get('halaman')) || 1);
 
+// Kabar keberhasilan datang lewat URL, bukan dari keadaan POST yang barusan
+// dijalankan -- lihat pengalihan di atas.
+const pesan = params.get('pesan');
+const sukses =
+  pesan === 'aktif' ? 'Produk diaktifkan.' : pesan === 'nonaktif' ? 'Produk dinonaktifkan.' : null;
+
+/**
+ * Seluruh saringan yang sedang aktif sebagai query string. Satu sumber untuk
+ * tautan halaman, titipan ke halaman rincian, dan pengalihan -- supaya tidak
+ * ada satu pun di antaranya yang diam-diam kehilangan sebuah saringan.
+ */
+function saringan(ke: number): string {
+  const p = new URLSearchParams();
+  if (cari) p.set('cari', cari);
+  if (kategoriDipilih) p.set('kategori', kategoriDipilih);
+  if (status === 'semua') p.set('status', 'semua');
+  if (tampil === 'semua') p.set('tampil', 'semua');
+  if (limit !== 25) p.set('per', String(limit));
+  if (ke !== 1) p.set('halaman', String(ke));
+  return p.toString();
+}
+
+/** Tautan halaman lain dengan seluruh saringan yang sedang aktif tetap terbawa. */
+function tautanHalaman(ke: number): string {
+  const q = saringan(ke);
+  return q ? `/produk?${q}` : '/produk';
+}
+
 const kueri = new URLSearchParams({ limit: String(limit), page: String(halaman) });
 if (cari) kueri.set('search', cari);
 if (kategoriDipilih) kueri.set('category_id', kategoriDipilih);
@@ -64,21 +97,24 @@ const [daftar, kategori] = await Promise.all([
 ]);
 
 const halamanTerakhir = Math.max(1, Math.ceil(daftar.total / daftar.limit));
+
+// Halaman di luar jangkauan terjadi setiap kali daftar menyusut sesudah
+// URL-nya dibuat -- saringan dipersempit, atau produk terakhir di halaman itu
+// dinonaktifkan. Dibawa ke halaman terakhir yang benar-benar ada, bukan
+// memperlihatkan tabel kosong dengan rentang "101-30 dari 30".
+if (halaman > halamanTerakhir) {
+  return Astro.redirect(tautanHalaman(halamanTerakhir), 302);
+}
+
 const dari = daftar.total === 0 ? 0 : (daftar.page - 1) * daftar.limit + 1;
 const sampai = Math.min(daftar.page * daftar.limit, daftar.total);
 
-/** Tautan halaman lain dengan seluruh saringan yang sedang aktif tetap terbawa. */
-function tautanHalaman(ke: number): string {
-  const p = new URLSearchParams();
-  if (cari) p.set('cari', cari);
-  if (kategoriDipilih) p.set('kategori', kategoriDipilih);
-  if (status === 'semua') p.set('status', 'semua');
-  if (tampil === 'semua') p.set('tampil', 'semua');
-  if (limit !== 25) p.set('per', String(limit));
-  if (ke !== 1) p.set('halaman', String(ke));
-  const q = p.toString();
-  return q ? `/produk?${q}` : '/produk';
-}
+/**
+ * Titipan "dari mana" untuk halaman rincian dan halaman tambah, supaya tombol
+ * "Kembali" di sana mendarat pada daftar yang sama persis.
+ */
+const titipan = saringan(daftar.page);
+const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
 /** Ambang "sudah dekat" untuk kedaluwarsa, dalam hari. */
 const DEKAT_KEDALUWARSA = 30;
@@ -88,7 +124,7 @@ const DEKAT_KEDALUWARSA = 30;
   {
     user.role === 'owner' && (
       <p class="mb-5">
-        <a class="tombol-utama" href="/produk/baru">+ Tambah Produk</a>
+        <a class="tombol-utama" href={`/produk/baru${bawaSaringan}`}>+ Tambah Produk</a>
       </p>
     )
   }
@@ -190,7 +226,7 @@ const DEKAT_KEDALUWARSA = 30;
                   {p.sku ?? '—'}
                 </td>
                 <td>
-                  <a class="font-medium hover:underline" href={`/produk/${p.id}`}>
+                  <a class="font-medium hover:underline" href={`/produk/${p.id}${bawaSaringan}`}>
                     {p.name}
                   </a>
                   {p.seo_name && (
@@ -243,7 +279,7 @@ const DEKAT_KEDALUWARSA = 30;
                 </td>
                 {user.role === 'owner' && (
                   <td class="whitespace-nowrap text-right">
-                    <a class="aksi-baris" href={`/produk/${p.id}`}>Kelola</a>
+                    <a class="aksi-baris" href={`/produk/${p.id}${bawaSaringan}`}>Kelola</a>
                     <form method="POST" class="inline">
                       <input type="hidden" name="aksi" value="aktif" />
                       <input type="hidden" name="id" value={p.id} />
@@ -261,7 +297,7 @@ const DEKAT_KEDALUWARSA = 30;
         {
           daftar.data.length === 0 && (
             <tr>
-              <td colspan="8" class="py-12 text-center text-[var(--color-teks-lembut)]">
+              <td colspan={user.role === 'owner' ? 8 : 7} class="py-12 text-center text-[var(--color-teks-lembut)]">
                 {cari ? `Tidak ada produk yang cocok dengan "${cari}".` : 'Belum ada produk.'}
               </td>
             </tr>
