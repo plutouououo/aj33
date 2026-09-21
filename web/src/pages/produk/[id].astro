@@ -10,10 +10,11 @@ const token = Astro.locals.token!;
 const { id } = Astro.params;
 
 // Daftar produk menitipkan saringannya lewat `?dari=`. Semua jalan keluar
-// halaman ini -- remah roti, tombol Kembali, dan pengalihan sesudah menghapus
-// -- memakai satu tautan ini, jadi tidak ada di antaranya yang membuang
-// saringan yang tadi dipakai pengguna.
-const kembali = kembaliKeDaftar(Astro.url.searchParams.get('dari'));
+// halaman ini -- remah roti, tombol Kembali, dan pengalihan sesudah menyimpan
+// atau menghapus -- dirakit dari `dari` yang sama, jadi tidak ada di antaranya
+// yang membuang saringan yang tadi dipakai pengguna.
+const dari = Astro.url.searchParams.get('dari');
+const kembali = kembaliKeDaftar(dari);
 
 /**
  * Kabar keberhasilan tiap aksi. Dibaca dari URL, bukan dari keadaan POST yang
@@ -23,8 +24,6 @@ const kembali = kembaliKeDaftar(Astro.url.searchParams.get('dari'));
  * kembar yang tidak pernah diminta.
  */
 const PESAN: Record<string, string> = {
-  dibuat: 'Produk ditambahkan. Tambahkan varian atau batch berikutnya di bawah.',
-  simpan: 'Perubahan disimpan.',
   varian: 'Varian ditambahkan.',
   batch: 'Batch dicatat dan stok bertambah.',
   'harga-batch': 'Harga beli batch disimpan.',
@@ -33,10 +32,7 @@ const PESAN: Record<string, string> = {
 };
 
 let galat: string | null = null;
-// `dibuat` adalah jalan masuk dari /produk/baru, yang mendarat di sini
-// sesudah produknya tersimpan.
-const kodePesan =
-  Astro.url.searchParams.get('pesan') ?? (Astro.url.searchParams.get('dibuat') ? 'dibuat' : '');
+const kodePesan = Astro.url.searchParams.get('pesan') ?? '';
 // Kodenya datang dari URL, jadi hanya kunci milik `PESAN` sendiri yang
 // dianggap -- `constructor` dan kerabatnya bukan kabar.
 let sukses: string | null = Object.hasOwn(PESAN, kodePesan) ? PESAN[kodePesan] : null;
@@ -94,7 +90,11 @@ if (Astro.request.method === 'POST') {
           is_active: form.get('is_active') === '1',
         },
       });
-      berhasil = 'simpan';
+      // Menyimpan data produk mengakhiri pekerjaan di halaman ini, jadi
+      // jalan keluarnya sama dengan tombol Kembali: daftar produk, saringan
+      // utuh. Aksi lain di halaman ini (varian, batch, koreksi stok) tetap
+      // tinggal di sini -- pengguna biasanya menjalankan beberapa berurutan.
+      return Astro.redirect(kembaliKeDaftar(dari, 'simpan'), 303);
     } else if (aksi === 'hapus') {
       await api(`/products/${id}`, { method: 'DELETE', token });
       return Astro.redirect(kembali, 303);
@@ -159,8 +159,6 @@ if (Astro.request.method === 'POST') {
 
   if (berhasil) {
     const tujuan = new URL(Astro.url);
-    // `dibuat` hanya berlaku sekali, saat mendarat dari /produk/baru.
-    tujuan.searchParams.delete('dibuat');
     tujuan.searchParams.set('pesan', berhasil);
     return Astro.redirect(tujuan.pathname + tujuan.search, 303);
   }

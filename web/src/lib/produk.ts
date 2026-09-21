@@ -22,14 +22,20 @@ const SARINGAN_DAFTAR = ['cari', 'kategori', 'status', 'tampil', 'per', 'halaman
  * seperti saat pengguna berangkat. Tanpa ini tombol "Kembali" selalu
  * mendarat di halaman satu tanpa saringan, dan pekerjaan menyunting banyak
  * produk berarti menyetel ulang saringan setiap kali.
+ *
+ * `pesan` adalah kode kabar yang dititipkan ke daftar -- dipakai halaman
+ * tambah dan sunting yang berakhir dengan pengalihan ke sini, supaya
+ * kabar berhasilnya muncul di tempat pengguna mendarat, bukan di halaman
+ * yang barusan ia tinggalkan.
  */
-export function kembaliKeDaftar(dari: string | null | undefined): string {
+export function kembaliKeDaftar(dari: string | null | undefined, pesan?: string): string {
   const asal = new URLSearchParams(dari ?? '');
   const p = new URLSearchParams();
   for (const kunci of SARINGAN_DAFTAR) {
     const nilai = asal.get(kunci);
     if (nilai) p.set(kunci, nilai);
   }
+  if (pesan) p.set('pesan', pesan);
   const q = p.toString();
   return q ? `/produk?${q}` : '/produk';
 }

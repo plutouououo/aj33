@@ -57,11 +57,21 @@ const PER_HALAMAN = [10, 25, 50, 100];
 const limit = PER_HALAMAN.includes(Number(params.get('per'))) ? Number(params.get('per')) : 25;
 const halaman = Math.max(1, Number(params.get('halaman')) || 1);
 
-// Kabar keberhasilan datang lewat URL, bukan dari keadaan POST yang barusan
-// dijalankan -- lihat pengalihan di atas.
-const pesan = params.get('pesan');
-const sukses =
-  pesan === 'aktif' ? 'Produk diaktifkan.' : pesan === 'nonaktif' ? 'Produk dinonaktifkan.' : null;
+/**
+ * Kabar keberhasilan tiap aksi. Datang lewat URL, bukan dari keadaan POST yang
+ * barusan dijalankan -- lihat pengalihan di atas. Halaman tambah dan sunting
+ * produk juga mendarat di sini dengan kode kabarnya sendiri.
+ */
+const PESAN: Record<string, string> = {
+  aktif: 'Produk diaktifkan.',
+  nonaktif: 'Produk dinonaktifkan.',
+  dibuat: 'Produk ditambahkan.',
+  simpan: 'Perubahan produk disimpan.',
+};
+// Kodenya datang dari URL, jadi hanya kunci milik `PESAN` sendiri yang
+// dianggap -- `constructor` dan kerabatnya bukan kabar.
+const pesan = params.get('pesan') ?? '';
+const sukses = Object.hasOwn(PESAN, pesan) ? PESAN[pesan] : null;
 
 /**
  * Seluruh saringan yang sedang aktif sebagai query string. Satu sumber untuk

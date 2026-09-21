@@ -47,7 +47,7 @@ if (Astro.request.method === 'POST') {
     galat = 'Harga marketplace tidak boleh negatif.';
   } else {
     try {
-      const dibuat = await api<Product>('/products', {
+      await api<Product>('/products', {
         method: 'POST',
         token,
         body: {
@@ -70,12 +70,11 @@ if (Astro.request.method === 'POST') {
         },
       });
 
-      // POST/redirect/GET. Dua sebabnya: me-refresh halaman hasil tidak bisa
-      // membuat produk kedua, dan pengguna mendarat tepat di tempat ia bisa
-      // langsung menambah varian dan batch berikutnya.
-      const tujuan = new URLSearchParams({ dibuat: '1' });
-      if (dari) tujuan.set('dari', dari);
-      return Astro.redirect(`/produk/${dibuat.id}?${tujuan}`, 303);
+      // POST/redirect/GET ke daftar produk. Dua sebabnya: me-refresh halaman
+      // hasil tidak bisa membuat produk kedua, dan pengguna mendarat kembali
+      // di daftar -- dengan saringan yang sama seperti saat ia berangkat --
+      // tempat produk barunya langsung terlihat di antara yang lain.
+      return Astro.redirect(kembaliKeDaftar(dari, 'dibuat'), 303);
     } catch (err) {
       galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan produk.';
     }
