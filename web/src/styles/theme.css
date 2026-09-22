@@ -349,37 +349,6 @@
     @apply mt-1.5 text-xs text-[var(--color-teks-lembut)];
   }
 
-  /* --- Penunjuk langkah ------------------------------------------------ */
-
-  /* Kasir berjalan tiga langkah. Tanpa penunjuk, kasir yang terpotong di
-     tengah transaksi tidak tahu posisinya dan mengulang dari awal. Angkanya
-     tetap ditulis, bukan cuma warna -- status tidak pernah disampaikan lewat
-     warna saja. */
-  .langkah {
-    @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border-2
-           border-[var(--color-garis)] bg-white text-sm font-bold
-           text-[var(--color-teks-samar)];
-  }
-  .langkah-aktif {
-    @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border-2
-           border-merah-600 bg-merah-600 text-sm font-bold text-white;
-  }
-  /* Hijau yang sama dengan `.lencana-selesai`, supaya "sudah beres" berarti
-     hal yang sama di seluruh aplikasi. */
-  .langkah-selesai {
-    @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border-2
-           border-emerald-600 bg-emerald-600 text-sm font-bold text-white;
-  }
-  /* Menyempit di ponsel: tiga bulatan plus labelnya ("Pilih produk",
-     "Pembayaran", "Selesai") sudah hampir memenuhi layar 360px, dan
-     penghubung selebar 2rem membuatnya meluber. */
-  .langkah-penghubung {
-    @apply h-0.5 w-4 shrink-0 bg-[var(--color-garis)] sm:w-8;
-  }
-  .langkah-penghubung-lewat {
-    @apply h-0.5 w-4 shrink-0 bg-emerald-600 sm:w-8;
-  }
-
   /* --- Pil saringan ---------------------------------------------------- */
 
   /* Kategori di kasir dipilih dengan satu ketukan, bukan lewat <select>:
@@ -394,26 +363,64 @@
     @apply pil border-merah-600 bg-merah-600 text-white;
   }
 
-  /* --- Baris produk kasir ---------------------------------------------- */
+  /* --- Kartu produk kasir ---------------------------------------------- */
 
-  /* Satu baris = satu barang yang bisa dijual. Seluruh blok informasinya
-     adalah target ketuk "tambah satu", jadi paddingnya longgar. */
-  .baris-produk {
-    @apply flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border
-           border-[var(--color-garis)] bg-[var(--color-permukaan)] p-3
+  /* Satu kartu = satu barang yang bisa dijual. Seluruh blok informasinya
+     adalah target ketuk "pilih batch", jadi tidak ada aksi lain di dalamnya
+     selain <details> dan panel batchnya sendiri. */
+  .kartu-produk {
+    @apply flex flex-col overflow-hidden rounded-xl border
+           border-[var(--color-garis)] bg-[var(--color-permukaan)] shadow-sm
            transition-colors;
   }
-  .baris-produk-terpilih {
-    @apply flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border-2
-           border-merah-600 bg-merah-50 p-3 transition-colors;
+  .kartu-produk-terpilih {
+    @apply flex flex-col overflow-hidden rounded-xl border-2 border-merah-600
+           bg-merah-50 shadow-sm transition-colors;
   }
-  /* Tombol bulat -/+ . 36px adalah target sentuh terkecil yang masih bisa
-     dikenai jempol tanpa perlu melihat. */
-  .tombol-bulat {
-    @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border
-           border-[var(--color-garis)] bg-white text-lg leading-none
-           text-stone-700 transition-colors hover:border-merah-300
-           hover:bg-merah-50 disabled:cursor-not-allowed disabled:opacity-40;
+
+  /* Jendela foto. Tanpa `image_url` yang tampil adalah garis miring samar --
+     bentuk kartunya tetap sama tinggi, jadi barisan kartu tidak bergerigi
+     hanya karena sebagian barang belum difoto. */
+  .foto-produk {
+    @apply relative block h-24 border-b border-[var(--color-garis-lembut)];
+    background-image: repeating-linear-gradient(
+      135deg,
+      var(--color-stone-100) 0 8px,
+      var(--color-stone-50) 8px 16px
+    );
+  }
+  .foto-sku {
+    @apply absolute bottom-1.5 left-2 font-mono text-[10px]
+           text-[var(--color-teks-lembut)];
+  }
+  /* Berapa pack barang ini yang sudah masuk keranjang. Ditempel di fotonya
+     supaya terbaca saat memindai barisan kartu, bukan hanya saat membaca
+     satu kartu. */
+  .lencana-jumlah {
+    @apply absolute right-1.5 top-1.5 grid h-6 min-w-6 place-items-center
+           rounded-full bg-merah-600 px-1.5 text-xs font-bold tabular-nums
+           text-white;
+  }
+
+  /* --- Panel keranjang kasir --------------------------------------------- */
+
+  /* Keranjang, pembayaran, dan struk hidup di satu kolom yang menempel di
+     samping katalog. Di bawah `lg` kolomnya turun ke bawah katalog dan
+     `.bilah-bawah` yang menjadi jalan ke sana. */
+  .panel-kasir {
+    @apply flex w-full flex-col gap-3 lg:sticky lg:top-4 lg:w-96 lg:shrink-0
+           lg:self-start;
+  }
+  .kepala-panel {
+    @apply flex items-center justify-between gap-2 bg-merah-600 px-4 py-2.5
+           text-xs font-bold uppercase tracking-wider text-white;
+  }
+  /* Satu baris = satu (produk, batch), sama dengan satu baris yang dikirim ke
+     `POST /transactions`. Nama dan batch mengambil satu baris penuh; jumlah,
+     kendali, dan subtotalnya turun ke baris kedua. */
+  .baris-keranjang {
+    @apply grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 border-b
+           border-[var(--color-garis-lembut)] px-4 py-2.5;
   }
 
   /* --- Pemilih batch di kasir ------------------------------------------- */
@@ -432,7 +439,8 @@
      padding, latar sendiri) supaya bentuk "panel di dalam kartu" itu rapi.
      `:modal` mengembalikannya sebagai pop up saat benar-benar dibuka. */
   .panel-batch {
-    @apply static m-0 w-auto max-w-none border-0 bg-transparent p-0;
+    @apply static m-0 w-auto max-w-none border-0 border-t
+           border-[var(--color-garis-lembut)] bg-transparent px-3 pb-3 pt-2;
     color: inherit;
   }
   .panel-batch:modal {
@@ -487,6 +495,13 @@
   }
   .kotak-kembalian-angka {
     @apply text-2xl font-bold tabular-nums;
+  }
+
+  /* Bentuk yang sama persis dengan `.kotak-kembalian`, warnanya saja yang
+     berganti jadi merah bahaya. Keduanya menempati kotak yang sama di panel
+     pembayaran: "uangnya cukup?" satu pertanyaan, jadi satu tempat jawaban. */
+  .kotak-kurang {
+    @apply rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-800;
   }
 }
 

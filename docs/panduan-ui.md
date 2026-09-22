@@ -201,7 +201,7 @@ dengan JS.**
 | Kelas | Kapan |
 | --- | --- |
 | `.bilah-aksi` | Tombol simpan formulir panjang, rata kanan, menempel di dasar layar |
-| `.bilah-bawah` | Ringkasan + aksi di kasir; tidak rata kanan dan berbayang karena isinya harus terbaca sekilas |
+| `.bilah-bawah` | Ringkasan + jalan ke panel keranjang di kasir, hanya di bawah `lg`; tidak rata kanan dan berbayang karena isinya harus terbaca sekilas |
 
 Keduanya membatalkan padding `<main>` di `AppShell` dengan margin negatif —
 `-mx-4 -mb-4` di ponsel, `md:-mx-6 md:-mb-6` di layar lebar. **Angkanya harus
@@ -216,33 +216,55 @@ form mana yang disimpan.
 
 ### Komponen kasir
 
+`/kasir` adalah SATU layar, bukan tiga langkah: katalog di kiri, panel
+keranjang + pembayaran menempel di kanan, struk muncul di panel yang sama
+setelah penjualan berhasil. Sebelumnya halaman ini berjalan tiga langkah, dan
+tiap perpindahan berarti satu muat ulang untuk mengetahui total — padahal
+angka itulah yang sedang ditunggu pembeli di depan meja.
+
 | Kelas | Untuk |
 | --- | --- |
-| `.langkah` / `.langkah-aktif` / `.langkah-selesai` | Bulatan penunjuk langkah. Angka tetap ditulis, bukan hanya warna |
-| `.langkah-penghubung` / `-lewat` | Garis antar bulatan |
 | `pil` (@utility) + `.pil-diam` / `.pil-aktif` | Saringan yang ditekan satu ketukan. Berbeda dari `.lencana` yang hanya menampilkan status dan tidak bisa diklik |
-| `.baris-produk` / `.baris-produk-terpilih` | Satu barang yang bisa dijual; seluruh blok informasinya target ketuk |
+| `.kartu-produk` / `.kartu-produk-terpilih` | Satu barang yang bisa dijual; seluruh blok informasinya target ketuk "pilih batch" |
+| `.foto-produk` + `.foto-sku` | Jendela foto kartu. Tanpa `image_url` yang tampil garis miring samar, jadi tinggi kartu tetap sama |
+| `.lencana-jumlah` | Berapa pack barang itu yang sudah masuk keranjang, ditempel di fotonya |
+| `.panel-batch` + `.baris-batch` | Pemilih batch per barang; satu kolom jumlah untuk tiap batch |
+| `.panel-kasir` + `.kepala-panel` | Kolom keranjang/pembayaran/struk yang menempel di samping katalog |
+| `.baris-keranjang` | Satu (produk, batch) di panel keranjang — bentuk yang sama dengan satu baris `POST /transactions` |
 | `.tombol-bulat` | Tombol −/+, 36px — target sentuh terkecil yang masih bisa dikenai jempol tanpa melihat |
-| `.kotak-total` + `-angka` | Total yang ditagih di langkah 2, tepat di bawah kolom ongkir dan uang diterima |
+| `.kotak-total` + `-angka` | Total yang ditagih, tepat di bawah kolom ongkir dan uang diterima |
 | `.kotak-kembalian` + `-angka` | Angka yang dibacakan ke pembeli, sengaja besar |
+| `.kotak-kurang` | Bentuk yang sama, warna merah bahaya: uang yang diterima masih kurang |
 | `.hanya-js` / `.tanpa-js` | Saklar progressive enhancement |
 
 `.kotak-total` dan `.kotak-kembalian` sengaja seukuran (`text-2xl`) dan
 dibedakan hanya oleh warnanya — netral untuk yang ditagih, hijau untuk yang
 dikembalikan. Keduanya angka yang diucapkan ke pembeli; membuat salah satunya
 lebih kecil membuat yang itu terbaca belakangan, dan urutan baca yang salah di
-meja kasir berarti salah sebut nominal.
+meja kasir berarti salah sebut nominal. `.kotak-kurang` menempati KOTAK YANG
+SAMA dengan `.kotak-kembalian`, bukan kotak kedua di bawahnya: keduanya jawaban
+atas satu pertanyaan ("uangnya cukup?"), dan dua kotak yang bergantian muncul
+membuat tinggi panel melompat tepat saat kasir sedang membaca angkanya.
 
-Di langkah 1, nama barang mendapat satu baris penuh untuk dirinya sendiri dan
-kendali jumlah turun ke baris kedua. Sebaris bertiga, nama hanya kebagian sisa
-~130px di sel grid selebar 300px. Kendali jumlah dibungkus satu `<div
-class="ml-auto">` — `ml-auto` tidak boleh menempel di tombol `−` karena tombol
-itu `.hanya-js` dan menghilang saat JavaScript mati, membawa serta perataannya.
+Panel keranjang merender satu `.baris-keranjang` untuk **setiap** (produk,
+batch) yang ada di katalog, lalu menyembunyikan yang jumlahnya masih nol.
+Barisnya sengaja tidak dibuat saat dibutuhkan: kalau begitu, skrip halaman
+harus bisa merakit baris keranjang sendiri — jalur render kedua yang bisa
+menyimpang dari yang dirender server, tepat di tempat yang menampilkan angka
+tagihan. Kendali −/+ di panel menulis ke kolom jumlah milik katalog, bukan ke
+salinan; yang ada di panel hanyalah angka yang ditampilkan.
+
+Barang yang sudah masuk keranjang lalu tersaring keluar oleh pencarian tetap
+merender isian keranjangnya sendiri di panel. Tanpa itu, menyaring tanpa
+JavaScript (yang berarti satu perjalanan ke server) akan menghapus diam-diam
+barang yang sudah dipilih.
 
 `.hanya-js` dan `.tanpa-js` bekerja lewat `data-js` di `:root`, yang dipasang
 skrip halaman sebagai baris pertamanya. **Kedua versi selalu ada di HTML dan
 selalu ikut terkirim** — yang berubah cuma yang terlihat. Itulah yang membuat
-server menerima data yang sama apakah JS hidup atau mati.
+server menerima data yang sama apakah JS hidup atau mati. Tanpa JavaScript,
+panel keranjang diperbarui lewat tombol "Perbarui keranjang" (satu POST ke
+halaman yang sama), bukan seketika.
 
 ### Tabel
 

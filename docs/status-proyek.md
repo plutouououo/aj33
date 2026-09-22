@@ -143,16 +143,21 @@ POST/redirect/GET ke halaman produk yang baru dibuat, dan galat validasi tidak
 lagi menghapus isian yang sudah diketik. `/produk/[id]` mengikuti pola yang
 sama.
 
-**Kasir tiga langkah** (`/kasir`) — pilih produk → pembayaran → konfirmasi,
-dengan penunjuk langkah, pencarian, filter kategori berbentuk pil, dan bilah
-ringkasan lengket. Mengikuti alur kasir di repo `flock-stock-track`.
-**Progressive enhancement**, satu-satunya pengecualian yang disetujui atas
-prinsip "HTML dulu": tanpa JavaScript halaman tetap berfungsi penuh (isi
-jumlah lalu kirim), dengan JavaScript jadi tap-to-add, tombol −/+, dan total
-seketika. Skripnya hanya menulis ke isian yang sudah ada, jadi server menerima
-data yang sama persis di kedua keadaan. Keranjang dibawa antar-langkah lewat
-hidden field; kunci idempotensi dibuat sekali saat halaman dibuka dan dibaca
-ulang tiap langkah.
+**Kasir satu layar** (`/kasir`) — katalog kartu di kiri, panel keranjang dan
+pembayaran menempel di kanan, struk muncul di panel yang sama begitu penjualan
+berhasil. Menggantikan alur tiga langkah: tiap perpindahan langkah dulu berarti
+satu muat ulang untuk mengetahui total, padahal angka itulah yang ditunggu
+pembeli di depan meja. Pencarian, filter kategori berbentuk pil, detail per
+barang (ukuran, grade, merek, lokasi rak, sisa tiap batch, peringatan
+kedaluwarsa ≤30 hari), dan pemilih batch per produk. **Progressive
+enhancement**, satu-satunya pengecualian yang disetujui atas prinsip "HTML
+dulu": tanpa JavaScript halaman tetap berfungsi penuh (isi jumlah, "Perbarui
+keranjang", lalu "Selesaikan"), dengan JavaScript panel keranjang dan seluruh
+angkanya berubah seketika. Skripnya hanya menulis ke isian yang sudah ada, jadi
+server menerima data yang sama persis di kedua keadaan. Keranjang hidup di
+isian form yang sama dari awal sampai bayar — tidak ada lagi salinan hidden
+field antar-langkah. Kunci idempotensi dibuat saat halaman dibuka, dibaca ulang
+tiap POST, dan hanya diganti setelah penjualan berhasil.
 
 **Pelanggan dan ongkos kirim** (migrasi `0007`) — endpoint `/customers` baru
 (daftar + buat; nomor telepon yang sudah ada tidak digandakan), dan kolom
