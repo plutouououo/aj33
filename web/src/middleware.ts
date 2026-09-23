@@ -20,7 +20,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
 
   // Aset statis dan service worker tidak lewat pemeriksaan sesi.
-  if (pathname.startsWith('/_') || pathname.includes('.')) {
+  //
+  // Foto produk dikecualikan dari pengecualian itu: namanya berakhiran .jpg
+  // sehingga terlihat seperti aset, padahal ia diambil dari Azure Blob dan
+  // hanya boleh dibaca pengguna yang sudah masuk.
+  const foto = pathname.startsWith('/foto/');
+  if (!foto && (pathname.startsWith('/_') || pathname.includes('.'))) {
     return next();
   }
 

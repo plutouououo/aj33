@@ -59,8 +59,12 @@ export function berandaUntuk(role: Role): string {
  * dipantulkan dari `/login` oleh penjaga peran -- halaman itu sendiri yang
  * mengarahkannya ke beranda, dan pesan "kamu sudah masuk" lebih berguna
  * daripada lompatan diam-diam.
+ *
+ * `/foto` ikut karena foto produk tampil di layar kasir, yang ketiga peran
+ * boleh membukanya. Menguncinya ke owner saja akan membuat kartu produk
+ * kasir kosong -- bukan ditolak, sekadar gambar rusak tanpa penjelasan.
  */
-const HALAMAN_UMUM = ['/', '/logout', '/ganti-password', ...HALAMAN_PUBLIK];
+const HALAMAN_UMUM = ['/', '/logout', '/ganti-password', '/foto', ...HALAMAN_PUBLIK];
 
 /**
  * Halaman yang boleh dibuka tiap peran, sebagai awalan path.

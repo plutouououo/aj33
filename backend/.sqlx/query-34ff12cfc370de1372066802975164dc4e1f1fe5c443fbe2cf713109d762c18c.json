@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id                 AS \"id!\",\n               t.created_at         AS \"created_at!\",\n               t.payment_method     AS \"payment_method!\",\n               t.subtotal           AS \"revenue!\",\n               t.shipping_cost      AS \"shipping!\",\n               t.total_amount       AS \"total_amount!\",\n               (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)\n                                    AS \"item_count!\"\n        FROM transactions t\n        WHERE t.customer_id = $1 AND t.status = 'completed'\n        ORDER BY t.created_at DESC\n        LIMIT $2\n        ",
+  "query": "\n        SELECT t.id                 AS \"id!\",\n               t.created_at         AS \"created_at!\",\n               t.payment_method     AS \"payment_method!\",\n               t.subtotal - t.discount_amount AS \"revenue!\",\n               t.shipping_cost      AS \"shipping!\",\n               t.total_amount       AS \"total_amount!\",\n               (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)\n                                    AS \"item_count!\"\n        FROM transactions t\n        WHERE t.customer_id = $1 AND t.status = 'completed'\n        ORDER BY t.created_at DESC\n        LIMIT $2\n        ",
   "describe": {
     "columns": [
       {
@@ -49,11 +49,11 @@
       false,
       false,
       false,
-      false,
+      null,
       false,
       false,
       null
     ]
   },
-  "hash": "decfce5e3561a01e6808a58288827c6fe0f6910d4761b65f350d4018e9956028"
+  "hash": "34ff12cfc370de1372066802975164dc4e1f1fe5c443fbe2cf713109d762c18c"
 }

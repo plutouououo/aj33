@@ -13,13 +13,17 @@ pub struct TicketItem {
     pub product_name_snapshot: String,
     pub qty: i32,
     pub is_packed: bool,
-    /// Rak tempat barang diambil, dibaca LANGSUNG dari produk -- bukan
-    /// disalin ke `ticket_items` seperti namanya.
+    /// Rak tempat barang diambil, dibaca LANGSUNG dari batch yang masih
+    /// bersisa -- bukan disalin ke `ticket_items` seperti namanya.
     ///
     /// Nama disalin karena nota lama harus tetap menyebut barang sebagaimana
     /// saat dipesan. Lokasi kebalikannya: pengepak butuh rak tempat barang
     /// berada SEKARANG. Salinan lama justru menyuruhnya ke rak yang salah
     /// begitu barang dipindah.
+    ///
+    /// Sejak migrasi 0016 lokasi milik batch, jadi satu produk bisa tersebar
+    /// di beberapa rak. Semuanya disebut, dalam urutan FEFO -- rak paling
+    /// depan adalah rak yang barangnya memang harus keluar lebih dulu.
     pub storage_location: Option<String>,
 }
 
@@ -65,14 +69,35 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
         TicketItem,
         r#"
         SELECT ti.id, ti.product_id, ti.product_name_snapshot, ti.qty,
-               ti.is_packed, p.storage_location
+               ti.is_packed,
+               (
+                   -- Rak-rak tempat barang ini masih ada, tanpa pengulangan
+                   -- dan urut FEFO. Batch yang sudah habis tidak ikut: rak
+                   -- yang kosong bukan petunjuk, ia perjalanan sia-sia.
+                   --
+                   -- Dikelompokkan per rak lebih dulu, bukan `string_agg
+                   -- DISTINCT`: dengan DISTINCT, urutan yang dipilih agregat
+                   -- tidak dijamin mengikuti ORDER BY subkueri, dan urutan
+                   -- itulah satu-satunya alasan daftar ini berguna.
+                   SELECT string_agg(rak.storage_location, ', '
+                                     ORDER BY rak.exp NULLS LAST, rak.masuk)
+                   FROM (
+                       SELECT b.storage_location    AS storage_location,
+                              min(b.expiry_date)    AS exp,
+                              min(b.received_at)    AS masuk
+                       FROM product_batches b
+                       WHERE b.product_id = ti.product_id
+                         AND b.remaining_qty > 0
+                         AND b.storage_location IS NOT NULL
+                       GROUP BY b.storage_location
+                   ) rak
+               ) AS storage_location
         FROM ticket_items ti
-        LEFT JOIN products p ON p.id = ti.product_id
         WHERE ti.ticket_id = $1
         -- Diurutkan per rak, bukan per nama: pengepak menyusuri gudang
         -- sekali jalan alih-alih bolak-balik. Barang tanpa lokasi jatuh ke
         -- bawah, supaya yang bisa dipandu tetap berurutan.
-        ORDER BY p.storage_location ASC NULLS LAST, ti.product_name_snapshot, ti.id
+        ORDER BY 6 ASC NULLS LAST, ti.product_name_snapshot, ti.id
         "#,
         head.id
     )

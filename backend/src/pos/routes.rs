@@ -1,7 +1,9 @@
 //! Endpoint transaksi POS.
 
 use super::repo::{self, Transaction};
-use super::service::{self, CheckoutInput, CheckoutItem, PaymentMethod, TransactionType};
+use super::service::{
+    self, CheckoutInput, CheckoutItem, PaymentMethod, SalesChannel, TransactionType,
+};
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
@@ -25,14 +27,25 @@ struct CheckoutRequest {
     transaction_type: TransactionType,
     customer_id: Option<Uuid>,
     payment_method: PaymentMethod,
+    /// Daftar harga yang dipakai. Kosong berarti harga toko -- itulah yang
+    /// benar untuk pembeli yang berdiri di depan meja, dan itu pula satu-
+    /// satunya kanal yang ada sebelum migrasi 0015.
+    #[serde(default = "default_channel")]
+    sales_channel: SalesChannel,
     amount_paid: Option<Decimal>,
     /// Ongkos kirim. Kosong berarti nol, bukan "tidak diketahui".
     shipping_cost: Option<Decimal>,
+    /// Potongan atas seluruh belanja. Kosong berarti nol.
+    discount_amount: Option<Decimal>,
     items: Vec<CheckoutItem>,
 }
 
 fn default_type() -> TransactionType {
     TransactionType::WalkIn
+}
+
+fn default_channel() -> SalesChannel {
+    SalesChannel::Toko
 }
 
 async fn checkout(
@@ -66,8 +79,10 @@ async fn checkout(
             transaction_type: body.transaction_type,
             customer_id: body.customer_id,
             payment_method: body.payment_method,
+            sales_channel: body.sales_channel,
             amount_paid: body.amount_paid,
             shipping_cost: body.shipping_cost,
+            discount_amount: body.discount_amount,
             items: body.items,
             cashier_user_id: user.id,
         },

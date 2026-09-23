@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT c.id, c.name, c.phone, c.address, c.source,\n               c.created_at                       AS \"created_at!\",\n               COALESCE(b.jumlah, 0)              AS \"purchase_count!\",\n               COALESCE(b.total, 0)               AS \"total_spent!\",\n               b.terakhir                         AS last_purchase_at\n        FROM customers c\n        LEFT JOIN (\n            SELECT t.customer_id,\n                   count(*)          AS jumlah,\n                   SUM(t.subtotal - t.discount_amount) AS total,\n                   max(t.created_at) AS terakhir\n            FROM transactions t\n            WHERE t.status = 'completed' AND t.customer_id IS NOT NULL\n            GROUP BY t.customer_id\n        ) b ON b.customer_id = c.id\n        WHERE ($1::text IS NULL OR c.name ILIKE '%' || $1 || '%' OR c.phone ILIKE '%' || $1 || '%')\n          AND ($2::text IS NULL\n               OR ($2 = 'belanja' AND b.customer_id IS NOT NULL)\n               OR c.source = $2)\n        ORDER BY\n            CASE WHEN $3 = 'belanja' THEN COALESCE(b.total, 0) END DESC NULLS LAST,\n            CASE WHEN $3 = 'terbaru' THEN c.created_at END DESC NULLS LAST,\n            CASE WHEN $3 = 'nama' THEN c.name END ASC NULLS LAST,\n            c.created_at DESC\n        LIMIT $4 OFFSET $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "phone",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "address",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "purchase_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "total_spent!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_purchase_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "861ee9b22cad5230b9ea262349c5cff889b8438d80957f68eec3d7764fa80e34"
+}

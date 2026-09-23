@@ -2,6 +2,7 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type Product } from '../../lib/api';
 import { MEREK, kembaliKeDaftar } from '../../lib/produk';
+import { GagalUnggah, unggahFoto } from '../../lib/blob';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -39,6 +40,11 @@ if (Astro.request.method === 'POST') {
   const hargaTiktok = angkaOpsional('price_tiktok');
   const hargaBeliBatch = angkaOpsional('purchase_price');
 
+  // Kosong kalau tidak ada foto yang dipilih; peramban tetap mengirim bagian
+  // file-nya, hanya dengan nol byte.
+  const foto = form.get('foto');
+  const adaFoto = foto instanceof File && foto.size > 0;
+
   if (!nama) {
     galat = 'Nama produk wajib diisi.';
   } else if (!Number.isFinite(harga) || harga < 0) {
@@ -47,6 +53,13 @@ if (Astro.request.method === 'POST') {
     galat = 'Harga marketplace tidak boleh negatif.';
   } else {
     try {
+      // Foto diunggah sesudah seluruh isian lolos, bukan sebelumnya: isian
+      // <input type="file"> tidak bisa diisi ulang dari server, jadi satu
+      // galat validasi selalu berarti pengguna memilih fotonya lagi -- dan
+      // yang terlanjur naik ke Azure akan jadi blob yatim yang tidak pernah
+      // dirujuk baris mana pun.
+      const image_url = adaFoto ? await unggahFoto(foto) : undefined;
+
       await api<Product>('/products', {
         method: 'POST',
         token,
@@ -58,6 +71,7 @@ if (Astro.request.method === 'POST') {
           variant_grade: teks('variant_grade'),
           variant_size: teks('variant_size'),
           category_id: teks('category_id'),
+          image_url,
           price: harga,
           price_shopee: hargaShopee,
           price_tiktok: hargaTiktok,
@@ -76,7 +90,10 @@ if (Astro.request.method === 'POST') {
       // tempat produk barunya langsung terlihat di antara yang lain.
       return Astro.redirect(kembaliKeDaftar(dari, 'dibuat'), 303);
     } catch (err) {
-      galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan produk.';
+      galat =
+        err instanceof ApiRequestError || err instanceof GagalUnggah
+          ? err.message
+          : 'Gagal menyimpan produk.';
     }
   }
 }
@@ -120,7 +137,9 @@ const BAGIAN = [
     ))}
   </nav>
 
-  <form method="POST" class="flex flex-col gap-5">
+  {/* `multipart/form-data` wajib begitu ada isian berkas: dengan enctype
+      bawaan, yang sampai ke server hanya nama berkasnya, bukan isinya. */}
+  <form method="POST" enctype="multipart/form-data" class="flex flex-col gap-5">
     <section id="informasi" class="kartu sasaran-bagian" aria-labelledby="j-informasi">
       <h2 id="j-informasi" class="mb-4 font-semibold">Informasi Produk</h2>
 
@@ -151,6 +170,21 @@ const BAGIAN = [
               </option>
             ))}
           </select>
+        </div>
+
+        <div class="isian">
+          <label class="label" for="foto">Foto produk</label>
+          <input
+            class="kolom"
+            id="foto"
+            name="foto"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/avif"
+          />
+          <p class="isian-bantu">
+            Opsional, maksimal 5 MB. Tampil di kartu produk layar kasir. Kalau formulir ini
+            sempat ditolak, fotonya perlu dipilih lagi.
+          </p>
         </div>
       </div>
     </section>
@@ -303,9 +337,25 @@ const BAGIAN = [
           />
         </div>
 
+        <div class="isian">
+          <label class="label" for="storage_location">Lokasi penyimpanan batch</label>
+          <input
+            class="kolom"
+            id="storage_location"
+            name="storage_location"
+            value={isi('storage_location')}
+            placeholder="mis. Rak A3"
+          />
+          <p class="isian-bantu">
+            Rak tempat kiriman ini ditaruh — ditampilkan ke pengepak di tiket packing. Lokasi
+            milik batch, bukan produk: kiriman berikutnya boleh ditaruh di rak yang lain.
+          </p>
+        </div>
+
         <p class="isian isian-bantu">
           Stok awal dicatat sebagai batch pertama produk ini. Batch berikutnya ditambahkan dari
-          halaman produk. Isi 0 kalau barangnya belum datang.
+          halaman produk. Isi 0 kalau barangnya belum datang — beserta harga beli, kedaluwarsa,
+          dan lokasinya, karena ketiganya keterangan tentang kiriman yang belum ada.
         </p>
 
         <div class="isian isian-pendek">
@@ -320,17 +370,6 @@ const BAGIAN = [
           />
         </div>
 
-        <div class="isian">
-          <label class="label" for="storage_location">Lokasi penyimpanan</label>
-          <input
-            class="kolom"
-            id="storage_location"
-            name="storage_location"
-            value={isi('storage_location')}
-            placeholder="mis. Rak A3"
-          />
-          <p class="isian-bantu">Ditampilkan ke pengepak di tiket packing.</p>
-        </div>
       </div>
     </section>
 

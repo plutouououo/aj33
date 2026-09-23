@@ -116,6 +116,14 @@ pub struct LockedProduct {
     pub id: Uuid,
     pub name: String,
     pub price: Decimal,
+    /// Harga kanal, ikut terbaca di sini supaya penetapan harga saat
+    /// checkout memakai baris yang SAMA yang sedang terkunci. Membacanya
+    /// lewat query kedua berarti harga bisa berubah di antara dua bacaan,
+    /// dan yang tercetak di struk bukan yang dipakai memeriksa stok.
+    /// `None` berarti kanalnya belum diatur -- jatuh ke `price`.
+    pub price_shopee: Option<Decimal>,
+    /// Mencakup Tokopedia; satu kanal dengan TikTok Shop.
+    pub price_tiktok: Option<Decimal>,
     pub stock_qty: i32,
 }
 
@@ -204,7 +212,7 @@ pub async fn kunci_produk(
     let rows = sqlx::query_as!(
         LockedProduct,
         r#"
-        SELECT id, name, price, stock_qty
+        SELECT id, name, price, price_shopee, price_tiktok, stock_qty
         FROM products
         WHERE id = ANY($1)
         ORDER BY id

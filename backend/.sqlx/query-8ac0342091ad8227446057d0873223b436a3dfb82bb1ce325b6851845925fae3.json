@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE product_batches SET\n            purchase_price   = CASE WHEN $3::bool THEN $4::numeric ELSE purchase_price END,\n            expiry_date      = CASE WHEN $5::bool THEN $6::date    ELSE expiry_date END,\n            storage_location = CASE WHEN $7::bool THEN $8::varchar ELSE storage_location END\n        WHERE id = $1 AND product_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Numeric",
+        "Bool",
+        "Date",
+        "Bool",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8ac0342091ad8227446057d0873223b436a3dfb82bb1ce325b6851845925fae3"
+}

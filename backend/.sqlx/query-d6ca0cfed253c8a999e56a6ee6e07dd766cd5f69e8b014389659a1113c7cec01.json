@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, product_id, batch_number, purchase_price, quantity, remaining_qty,\n               expiry_date, received_at AS \"received_at!\", created_by\n        FROM product_batches\n        WHERE id = $1 AND product_id = $2\n        ",
+  "query": "\n        SELECT b.id, b.product_id, b.batch_number, b.purchase_price, b.quantity, b.remaining_qty,\n               b.expiry_date, b.storage_location, b.received_at AS \"received_at!\", b.created_by\n        FROM product_batches b\n        JOIN products p ON p.id = b.product_id\n        WHERE b.remaining_qty > 0\n          AND p.is_active\n          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)\n        ORDER BY b.product_id, b.expiry_date NULLS LAST, b.received_at, b.id\n        ",
   "describe": {
     "columns": [
       {
@@ -40,20 +40,22 @@
       },
       {
         "ordinal": 7,
+        "name": "storage_location",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
         "name": "received_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "created_by",
         "type_info": "Uuid"
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid",
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -63,9 +65,10 @@
       false,
       false,
       true,
+      true,
       false,
       true
     ]
   },
-  "hash": "f0b98f7c5ca857d6f4901fca41970e1215809e5ecb44c81964be465b0e536bb5"
+  "hash": "d6ca0cfed253c8a999e56a6ee6e07dd766cd5f69e8b014389659a1113c7cec01"
 }

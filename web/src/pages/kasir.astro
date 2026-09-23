@@ -13,6 +13,39 @@ import {
 } from '../lib/api';
 import { rupiah, sisaHari, tanggal } from '../lib/format';
 
+/**
+ * Kanal tempat penjualan dicatat, dan karena itu daftar harga yang berlaku.
+ *
+ * Shopee dan Tokopedia belum tersambung ke sistem ini, jadi pesanan dari sana
+ * dicatat manual lewat layar ini. Tanpa pilihan kanal, semuanya tercatat
+ * seharga toko -- dan selisih harga marketplace muncul di laporan sebagai laba
+ * yang tidak pernah ada.
+ *
+ * Yang benar-benar menetapkan harga tetap backend: ia membaca harga kanal dari
+ * baris produk yang dikunci saat checkout. Daftar ini hanya menentukan angka
+ * yang diperlihatkan ke kasir sebelum itu.
+ */
+const KANAL = [
+  { nilai: 'toko', label: 'Toko', kolom: null },
+  { nilai: 'shopee', label: 'Shopee', kolom: 'price_shopee' },
+  { nilai: 'tiktok', label: 'Tokopedia / TikTok', kolom: 'price_tiktok' },
+] as const;
+
+type Kanal = (typeof KANAL)[number]['nilai'];
+
+/**
+ * Harga sebuah produk di satu kanal.
+ *
+ * Harga kanal yang belum diatur (`null`) JATUH KE HARGA DASAR, bukan ke nol --
+ * sama persis dengan aturan di backend (`SalesChannel::harga`). Kalau kedua
+ * tempat ini berbeda, angka di layar kasir tidak sama dengan angka di struk.
+ */
+function hargaDi(p: Product, kanal: Kanal): number {
+  if (kanal === 'shopee') return p.price_shopee ?? p.price;
+  if (kanal === 'tiktok') return p.price_tiktok ?? p.price;
+  return p.price;
+}
+
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
 
@@ -60,7 +93,9 @@ let keranjang: BarisKeranjang[] = [];
 // mengetik ulang saat pembayaran ditolak.
 let pelangganDipilih = '';
 let metode = 'cash';
+let kanalIsi: Kanal = 'toko';
 let ongkirIsi = '';
+let diskonIsi = '';
 let dibayarIsi = '';
 let cariIsi = '';
 let kategoriIsi = '';
@@ -122,7 +157,13 @@ if (Astro.request.method === 'POST') {
   kategoriIsi = String(form.get('kategori') ?? '');
   pelangganDipilih = String(form.get('customer_id') ?? '');
   metode = String(form.get('payment_method') ?? 'cash');
+  // Kanal asing diperlakukan sebagai toko, bukan diteruskan apa adanya:
+  // nilainya menentukan harga, dan backend menolaknya dengan galat yang tidak
+  // berarti apa-apa bagi kasir.
+  const kanalDikirim = String(form.get('sales_channel') ?? '');
+  kanalIsi = (KANAL.find((k) => k.nilai === kanalDikirim)?.nilai ?? 'toko') as Kanal;
   ongkirIsi = String(form.get('shipping_cost') ?? '').trim();
+  diskonIsi = String(form.get('discount_amount') ?? '').trim();
   dibayarIsi = String(form.get('amount_paid') ?? '').trim();
 
   const angka = (kolom: string): number | undefined => {
@@ -134,6 +175,7 @@ if (Astro.request.method === 'POST') {
 
   if (aksi === 'kosongkan') {
     keranjang = [];
+    diskonIsi = '';
     dibayarIsi = '';
   } else if (aksi === 'pelanggan-baru') {
     const nama = String(form.get('pelanggan_nama') ?? '').trim();
@@ -166,8 +208,10 @@ if (Astro.request.method === 'POST') {
           body: {
             customer_id: pelangganDipilih || undefined,
             payment_method: metode,
+            sales_channel: kanalIsi,
             amount_paid: metode === 'cash' ? angka('amount_paid') : undefined,
             shipping_cost: angka('shipping_cost'),
+            discount_amount: angka('discount_amount'),
             items: keranjang.map((b) => ({
               product_id: b.product_id,
               qty: b.qty,
@@ -183,8 +227,13 @@ if (Astro.request.method === 'POST') {
         keranjang = [];
         pelangganDipilih = '';
         ongkirIsi = '';
+        diskonIsi = '';
         dibayarIsi = '';
         kunci = '';
+        // Kanal TIDAK ikut direset. Pesanan marketplace biasanya dicatat
+        // berurutan, dan kanal yang diam-diam kembali ke "Toko" setiap kali
+        // satu pesanan selesai akan mencatat pesanan berikutnya seharga toko
+        // tanpa ada yang menyadarinya.
       } catch (err) {
         galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan transaksi.';
       }
@@ -223,6 +272,23 @@ for (const b of semuaBatch) {
 const barang = produk.data.filter((p) => p.stock_qty > 0);
 const adaYangTerpotong = produk.total > produk.data.length;
 
+/**
+ * Harga keranjang ditetapkan ulang dari katalog, bukan dipercaya dari form.
+ *
+ * `harga` yang ikut di tiap baris hanyalah angka yang dirender halaman
+ * SEBELUMNYA, dan setelah kanal diganti angka itu milik daftar harga yang
+ * lama. Tanpa penetapan ulang ini, mengganti kanal tanpa JavaScript akan
+ * menampilkan total dengan harga kanal sebelumnya -- angka yang nanti tidak
+ * cocok dengan struk, karena backend menghitung dari harga kanal yang benar.
+ *
+ * Baris yang produknya tersaring keluar dari katalog tidak bisa ditetapkan
+ * ulang di sini: barisnya memang tidak ikut terbaca dari `/products`. Ia
+ * memakai harga yang dibawanya sampai produknya terlihat lagi; yang menagih
+ * tetap backend.
+ */
+const hargaKatalog = new Map(produk.data.map((p) => [p.id, hargaDi(p, kanalIsi)]));
+keranjang = keranjang.map((b) => ({ ...b, harga: hargaKatalog.get(b.product_id) ?? b.harga }));
+
 /** Jumlah per batch, untuk mengisi ulang kolom di tiap baris batch. */
 const jumlahBatch = new Map(keranjang.map((b) => [`${b.product_id}:${b.batch_id}`, b.qty]));
 
@@ -235,7 +301,11 @@ for (const b of keranjang) {
 const totalItem = keranjang.reduce((n, b) => n + b.qty, 0);
 const totalBelanja = keranjang.reduce((n, b) => n + b.harga * b.qty, 0);
 const ongkirAngka = Math.max(0, Number(ongkirIsi) || 0);
-const totalTagihan = totalBelanja + ongkirAngka;
+// Diskon dipotong sampai setinggi-tingginya subtotal. Backend menolak yang
+// melebihi -- di sini angkanya cuma tidak dibiarkan membuat total negatif di
+// layar sebelum penolakan itu datang.
+const diskonAngka = Math.min(totalBelanja, Math.max(0, Number(diskonIsi) || 0));
+const totalTagihan = totalBelanja - diskonAngka + ongkirAngka;
 const tunai = metode === 'cash';
 const dibayarAngka = Number(dibayarIsi);
 const adaDibayar = tunai && dibayarIsi !== '' && Number.isFinite(dibayarAngka);
@@ -260,6 +330,17 @@ interface BarisPanel {
   product_id: string;
   nama: string;
   harga: number;
+  /**
+   * Harga baris ini di tiap kanal, supaya skrip halaman bisa menghitung ulang
+   * total saat kanal diganti tanpa perjalanan ke server.
+   *
+   * `null` untuk baris yang produknya sedang tersaring keluar dari katalog:
+   * yang dibawa baris itu hanyalah harga saat ia dimasukkan ke keranjang, dan
+   * mengarang dua harga lain dari satu angka akan menampilkan angka yang tidak
+   * pernah dipakai siapa pun. Barisnya tetap memakai harga yang dibawanya
+   * sampai produknya kembali terlihat; yang menagih tetap backend.
+   */
+  hargaKanal: Record<Kanal, number> | null;
   batchLabel: string;
   qty: number;
   sisa: number;
@@ -272,6 +353,13 @@ const barisPanel: BarisPanel[] = [];
 const labelBatch = (b: ProductBatch): string =>
   `Batch ${b.batch_number ?? 'tanpa nomor'} · ${b.expiry_date ? tanggal(b.expiry_date) : 'tanpa tanggal'}`;
 
+/** Harga sebuah produk di seluruh kanal sekaligus, untuk atribut data-. */
+const hargaSemuaKanal = (p: Product): Record<Kanal, number> => ({
+  toko: hargaDi(p, 'toko'),
+  shopee: hargaDi(p, 'shopee'),
+  tiktok: hargaDi(p, 'tiktok'),
+});
+
 for (const p of barang) {
   for (const b of batchProduk.get(p.id) ?? []) {
     const kunciBaris = `${p.id}:${b.id}`;
@@ -280,7 +368,8 @@ for (const p of barang) {
       kunci: kunciBaris,
       product_id: p.id,
       nama: p.name,
-      harga: p.price,
+      harga: hargaDi(p, kanalIsi),
+      hargaKanal: hargaSemuaKanal(p),
       batchLabel: labelBatch(b),
       qty: jumlahBatch.get(kunciBaris) ?? 0,
       sisa: b.remaining_qty,
@@ -298,6 +387,7 @@ for (const b of keranjang) {
     product_id: b.product_id,
     nama: b.nama,
     harga: b.harga,
+    hargaKanal: null,
     batchLabel: batch ? labelBatch(batch) : 'Batch di luar hasil saringan',
     qty: b.qty,
     // Tanpa batch-nya di tangan, batas satu-satunya yang pasti benar adalah
@@ -345,6 +435,18 @@ function sisaBatch(b: ProductBatch): { label: string; mepet: boolean } {
     label: `sisa ${b.remaining_qty} · ${tanggal(b.expiry_date)}${hari <= 30 ? ` · ${hari} hari lagi` : ''}`,
     mepet: hari <= 30,
   };
+}
+
+/**
+ * Rak tempat barang sebuah produk masih ada, urut FEFO dan tanpa pengulangan.
+ *
+ * Sejak migrasi 0016 lokasi milik batch: satu produk bisa tersebar di beberapa
+ * rak, dan satu label tunggal seperti dulu akan menyuruh pengepak ke rak yang
+ * salah untuk sebagian barangnya. `daftar` sudah urut FEFO dari `/batches`.
+ */
+function lokasiProduk(daftar: ProductBatch[]): string {
+  const rak = daftar.map((b) => b.storage_location).filter((l): l is string => !!l);
+  return [...new Set(rak)].join(', ');
 }
 
 /** Ringkasan batch yang sudah dipilih, untuk kartu yang panelnya tertutup. */
@@ -447,7 +549,10 @@ function ringkasBatch(p: Product): string {
             <div
               class={jumlah > 0 ? 'kartu-produk-terpilih' : 'kartu-produk'}
               data-produk
-              data-harga={p.price}
+              data-harga={hargaDi(p, kanalIsi)}
+              data-harga-toko={hargaDi(p, 'toko')}
+              data-harga-shopee={hargaDi(p, 'shopee')}
+              data-harga-tiktok={hargaDi(p, 'tiktok')}
               data-nama={p.name.toLowerCase()}
               data-sku={(p.sku ?? '').toLowerCase()}
               data-kategori={p.category_id ?? ''}
@@ -464,8 +569,12 @@ function ringkasBatch(p: Product): string {
                 aria-label={`Pilih batch untuk ${p.name}`}
               >
                 <span class="foto-produk">
+                  {/* `loading="lazy"`: seluruh katalog dirender sekaligus --
+                      penyaringannya terjadi di browser -- jadi tanpa ini
+                      membuka kasir berarti menarik foto setiap produk,
+                      termasuk yang tidak pernah tergulir ke layar. */}
                   {p.image_url && (
-                    <img src={p.image_url} alt="" class="h-full w-full object-cover" />
+                    <img src={p.image_url} alt="" loading="lazy" class="h-full w-full object-cover" />
                   )}
                   <span class="foto-sku">{p.sku ?? '—'}</span>
                   <span class="lencana-jumlah" data-lencana hidden={jumlah === 0}>
@@ -477,7 +586,9 @@ function ringkasBatch(p: Product): string {
                   <span class="block text-xs text-[var(--color-teks-lembut)] tabular-nums">
                     {p.sku ?? '—'} · stok {p.stock_qty}
                   </span>
-                  <span class="block text-sm font-semibold tabular-nums">{rupiah(p.price)}</span>
+                  <span class="block text-sm font-semibold tabular-nums" data-harga-tampil>
+                    {rupiah(hargaDi(p, kanalIsi))}
+                  </span>
                   <span
                     class:list={[
                       'block text-xs font-medium tabular-nums',
@@ -500,7 +611,9 @@ function ringkasBatch(p: Product): string {
                 <span class="block text-xs text-[var(--color-teks-lembut)] tabular-nums">
                   {p.sku ?? '—'} · stok {p.stock_qty}
                 </span>
-                <span class="block text-sm font-semibold tabular-nums">{rupiah(p.price)}</span>
+                <span class="block text-sm font-semibold tabular-nums" data-harga-tampil>
+                  {rupiah(hargaDi(p, kanalIsi))}
+                </span>
                 <span
                   class:list={[
                     'block text-xs font-medium tabular-nums',
@@ -536,7 +649,7 @@ function ringkasBatch(p: Product): string {
                   <dd>{p.brand_name ?? '—'}</dd>
 
                   <dt class="text-[var(--color-teks-lembut)]">Lokasi</dt>
-                  <dd>{p.storage_location ?? '—'}</dd>
+                  <dd>{lokasiProduk(batches) || '—'}</dd>
 
                   <dt class="text-[var(--color-teks-lembut)]">Stok</dt>
                   <dd class="tabular-nums">
@@ -551,7 +664,14 @@ function ringkasBatch(p: Product): string {
                       const sisa = sisaBatch(b);
                       return (
                         <li class="flex flex-wrap justify-between gap-x-2">
-                          <span>{b.batch_number ?? 'Tanpa nomor'}</span>
+                          <span>
+                            {b.batch_number ?? 'Tanpa nomor'}
+                            {b.storage_location && (
+                              <span class="text-[var(--color-teks-lembut)]">
+                                {' '}· {b.storage_location}
+                              </span>
+                            )}
+                          </span>
                           <span
                             class:list={[
                               'tabular-nums',
@@ -608,7 +728,7 @@ function ringkasBatch(p: Product): string {
                       <div class="baris-batch" data-baris-batch>
                         <input type="hidden" name="product_id" value={p.id} />
                         <input type="hidden" name="nama" value={p.name} />
-                        <input type="hidden" name="harga" value={p.price} />
+                        <input type="hidden" name="harga" value={hargaDi(p, kanalIsi)} data-harga-kolom />
                         <input type="hidden" name="batch_id" value={b.id} />
 
                         <label class="min-w-0 flex-1 text-xs" for={`qty-${p.id}-${b.id}`}>
@@ -768,12 +888,15 @@ function ringkasBatch(p: Product): string {
                 data-kolom={`qty-${r.kunci.replace(':', '-')}`}
                 data-pid={r.product_id}
                 data-harga={r.harga}
+                data-harga-toko={r.hargaKanal?.toko}
+                data-harga-shopee={r.hargaKanal?.shopee}
+                data-harga-tiktok={r.hargaKanal?.tiktok}
                 hidden={r.qty === 0}
               >
                 <span class="col-span-2 text-sm font-medium">{r.nama}</span>
                 <span class="col-span-2 text-xs font-medium text-merah-700">{r.batchLabel}</span>
                 <span class="self-center text-xs tabular-nums text-[var(--color-teks-lembut)]">
-                  <span data-qty-teks>{r.qty}</span> × {rupiah(r.harga)}
+                  <span data-qty-teks>{r.qty}</span> × <span data-harga-satuan>{rupiah(r.harga)}</span>
                 </span>
                 <div class="flex flex-wrap items-center justify-end gap-2">
                   {/* Baris yang produknya tersaring keluar dari katalog membawa
@@ -837,6 +960,33 @@ function ringkasBatch(p: Product): string {
         </div>
 
         <div class="kartu flex flex-col gap-4 p-4">
+          {/* Kanal ditaruh PALING ATAS di panel pembayaran, sebelum apa pun
+              yang menyebut angka: ia menentukan seluruh harga di bawahnya,
+              dan kasir yang menyadarinya belakangan harus mengulang dari
+              awal. */}
+          <div>
+            <p class="label">Kanal penjualan</p>
+            <div class="flex flex-wrap gap-2">
+              {KANAL.map((k) => (
+                <label class="pil-diam cursor-pointer has-[:checked]:border-merah-600 has-[:checked]:bg-merah-600 has-[:checked]:text-white">
+                  <input
+                    class="sr-only"
+                    type="radio"
+                    name="sales_channel"
+                    value={k.nilai}
+                    checked={kanalIsi === k.nilai}
+                    data-kanal
+                  />
+                  {k.label}
+                </label>
+              ))}
+            </div>
+            <p class="isian-bantu">
+              Shopee dan Tokopedia belum tersambung, jadi pesanannya dicatat di sini dengan harga
+              kanalnya. Produk yang harga kanalnya belum diatur memakai harga dasar.
+            </p>
+          </div>
+
           <div>
             <p class="label">Metode pembayaran</p>
             <div class="flex flex-wrap gap-2">
@@ -870,6 +1020,22 @@ function ringkasBatch(p: Product): string {
                 placeholder="0"
                 data-ongkir
               />
+            </div>
+
+            <div>
+              <label class="label" for="discount_amount">Diskon (Rp)</label>
+              <input
+                class="kolom tabular-nums"
+                id="discount_amount"
+                name="discount_amount"
+                type="number"
+                min="0"
+                step="1"
+                value={diskonIsi}
+                placeholder="0"
+                data-diskon
+              />
+              <p class="isian-bantu">Potongan atas seluruh belanja, di luar ongkir.</p>
             </div>
 
             <div>
@@ -908,6 +1074,21 @@ function ringkasBatch(p: Product): string {
               <span>Subtotal barang</span>
               <span class="tabular-nums text-[var(--color-teks)]" data-subtotal>
                 {rupiah(totalBelanja)}
+              </span>
+            </div>
+            {/* Selalu dirender, disembunyikan selama nol: baris yang baru
+                lahir saat diisi menggeser angka Total tepat ketika kasir
+                sedang membacanya. */}
+            <div
+              class:list={[
+                'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
+                diskonAngka > 0 ? '' : 'hidden',
+              ]}
+              data-baris-diskon
+            >
+              <span>Diskon</span>
+              <span class="tabular-nums text-merah-700" data-diskon-tampil>
+                -{rupiah(diskonAngka)}
               </span>
             </div>
             <div class="flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]">
@@ -967,6 +1148,13 @@ function ringkasBatch(p: Product): string {
               <span class="font-mono text-xs text-emerald-800">#{struk.id.slice(0, 8)}</span>
             </div>
 
+            {/* Kanal disebut di struk, bukan cuma dipakai diam-diam: harga
+                yang tercetak di bawah hanya masuk akal kalau daftar harga
+                mana yang dipakai ikut terbaca. */}
+            <p class="mt-1 text-xs text-emerald-800">
+              Kanal {KANAL.find((k) => k.nilai === struk.sales_channel)?.label ?? struk.sales_channel}
+            </p>
+
             {struk.change_amount !== null && (
               <div class="mt-3 flex items-baseline justify-between gap-3 text-emerald-900">
                 <span class="text-sm font-medium">Kembalian</span>
@@ -989,6 +1177,14 @@ function ringkasBatch(p: Product): string {
                   <td class="py-0.5">Subtotal barang</td>
                   <td class="py-0.5 text-right tabular-nums">{rupiah(struk.subtotal)}</td>
                 </tr>
+                {struk.discount_amount > 0 && (
+                  <tr>
+                    <td class="py-0.5">Diskon</td>
+                    <td class="py-0.5 text-right tabular-nums">
+                      -{rupiah(struk.discount_amount)}
+                    </td>
+                  </tr>
+                )}
                 {struk.shipping_cost > 0 && (
                   <tr>
                     <td class="py-0.5">Ongkos kirim</td>
@@ -1083,8 +1279,11 @@ function ringkasBatch(p: Product): string {
     var pesanKeranjangKosong = borang.querySelector('[data-keranjang-kosong]');
 
     var ongkir = borang.querySelector('[data-ongkir]');
+    var diskon = borang.querySelector('[data-diskon]');
     var dibayar = borang.querySelector('[data-dibayar]');
     var selSubtotal = borang.querySelector('[data-subtotal]');
+    var barisDiskon = borang.querySelector('[data-baris-diskon]');
+    var selDiskon = borang.querySelector('[data-diskon-tampil]');
     var selOngkir = borang.querySelector('[data-ongkir-tampil]');
     var selTotal = borang.querySelector('[data-total]');
     var kotakKembalian = borang.querySelector('[data-kotak-kembalian]');
@@ -1128,6 +1327,54 @@ function ringkasBatch(p: Product): string {
           return kolom.dataset.batch + ' × ' + kolom.value;
         })
         .join(', ');
+    }
+
+    /** Kanal yang sedang dipilih. Tidak ada pilihan sama dengan kanal toko. */
+    function kanal() {
+      var k = borang.querySelector('[data-kanal]:checked');
+      return k ? k.value : 'toko';
+    }
+
+    /**
+     * Menulis ulang seluruh harga di layar mengikuti kanal yang dipilih.
+     *
+     * Angkanya TIDAK dihitung di sini -- ketiga harga tiap produk sudah
+     * dirender server sebagai atribut data-, dan yang dikerjakan fungsi ini
+     * cuma memilih salah satunya. Menghitung sendiri berarti aturan "harga
+     * kanal kosong jatuh ke harga dasar" hidup di tiga tempat (SQL, Astro,
+     * dan skrip ini), dan cepat atau lambat ketiganya berbeda.
+     *
+     * Baris keranjang yang produknya sedang tersaring keluar dari katalog
+     * tidak punya atribut itu; harganya dibiarkan apa adanya sampai
+     * produknya terlihat lagi. Yang menagih tetap backend, yang membaca
+     * harga kanal dari baris produk saat checkout.
+     */
+    function terapkanKanal() {
+      // `data-harga-toko` dibaca sebagai `dataset.hargaToko`, dan seterusnya.
+      var pilihan = kanal();
+      var kunciHarga = 'harga' + pilihan.charAt(0).toUpperCase() + pilihan.slice(1);
+
+      baris.forEach(function (row) {
+        var harga = row.dataset[kunciHarga];
+        if (harga === undefined) return;
+        row.dataset.harga = harga;
+
+        Array.prototype.forEach.call(row.querySelectorAll('[data-harga-tampil]'), function (el) {
+          el.textContent = rupiah.format(parseFloat(harga));
+        });
+        Array.prototype.forEach.call(row.querySelectorAll('[data-harga-kolom]'), function (el) {
+          el.value = harga;
+        });
+      });
+
+      barisKeranjang.forEach(function (row) {
+        var harga = row.dataset[kunciHarga];
+        if (harga === undefined) return;
+        row.dataset.harga = harga;
+
+        var satuan = row.querySelector('[data-harga-satuan]');
+        if (satuan) satuan.textContent = rupiah.format(parseFloat(harga));
+      });
     }
 
     function tunai() {
@@ -1192,10 +1439,16 @@ function ringkasBatch(p: Product): string {
 
       // --- Pembayaran ---------------------------------------------------
       var biaya = Math.max(0, parseFloat(ongkir.value) || 0);
-      var total = subtotal + biaya;
+      // Dipotong sampai setinggi-tingginya subtotal, sama seperti yang
+      // dihitung server. Backend menolak yang melebihi; di sini angkanya
+      // cuma tidak dibiarkan membuat total negatif di layar.
+      var potongan = Math.min(subtotal, Math.max(0, parseFloat(diskon.value) || 0));
+      var total = subtotal - potongan + biaya;
       var adaTunai = tunai();
 
       selSubtotal.textContent = rupiah.format(subtotal);
+      barisDiskon.classList.toggle('hidden', potongan <= 0);
+      selDiskon.textContent = '-' + rupiah.format(potongan);
       selOngkir.textContent = rupiah.format(biaya);
       selTotal.textContent = rupiah.format(total);
 
@@ -1318,7 +1571,8 @@ function ringkasBatch(p: Product): string {
         var qty = nilai(document.getElementById(row.dataset.kolom));
         return n + qty * parseFloat(row.dataset.harga || '0');
       }, 0);
-      return subtotal + Math.max(0, parseFloat(ongkir.value) || 0);
+      var potongan = Math.min(subtotal, Math.max(0, parseFloat(diskon.value) || 0));
+      return subtotal - potongan + Math.max(0, parseFloat(ongkir.value) || 0);
     }
 
     // Enter di dalam panel batch men-submit form, dan pop up yang sedang
@@ -1346,7 +1600,8 @@ function ringkasBatch(p: Product): string {
     });
 
     borang.addEventListener('input', function (e) {
-      if (e.target.matches('[data-qty], [data-qty-luar], [data-ongkir], [data-dibayar]')) hitung();
+      if (e.target.matches('[data-qty], [data-qty-luar], [data-ongkir], [data-diskon], [data-dibayar]'))
+        hitung();
       if (e.target === kotakCari) saring();
     });
 
@@ -1364,6 +1619,12 @@ function ringkasBatch(p: Product): string {
 
     borang.addEventListener('change', function (e) {
       if (e.target.matches('[data-metode]')) hitung();
+      // Ganti kanal berarti seluruh harga di layar berganti, jadi harganya
+      // ditulis ulang dulu -- `hitung` menjumlahkan dari angka itu.
+      if (e.target.matches('[data-kanal]')) {
+        terapkanKanal();
+        hitung();
+      }
     });
 
     function saring() {

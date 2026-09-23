@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// di satu query jauh lebih murah daripada menarik seluruh transaksi ke
 /// frontend lalu menjumlahkannya di sana.
 ///
-/// OMZET ADALAH `subtotal`, BUKAN `total_amount` -- sama seperti di modul
+/// OMZET ADALAH `subtotal - discount_amount`, BUKAN `total_amount` -- sama seperti di modul
 /// laporan. Ongkir bukan belanja pelanggan atas barang.
 #[derive(Debug, Serialize)]
 pub struct Customer {
@@ -95,7 +95,7 @@ pub async fn list_customers(
         LEFT JOIN (
             SELECT t.customer_id,
                    count(*)          AS jumlah,
-                   SUM(t.subtotal)   AS total,
+                   SUM(t.subtotal - t.discount_amount) AS total,
                    max(t.created_at) AS terakhir
             FROM transactions t
             WHERE t.status = 'completed' AND t.customer_id IS NOT NULL
@@ -149,7 +149,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Customer>> 
                c.created_at                                          AS "created_at!",
                (SELECT count(*) FROM transactions t
                 WHERE t.customer_id = c.id AND t.status = 'completed') AS "purchase_count!",
-               (SELECT COALESCE(SUM(t.subtotal), 0) FROM transactions t
+               (SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) FROM transactions t
                 WHERE t.customer_id = c.id AND t.status = 'completed') AS "total_spent!",
                (SELECT max(t.created_at) FROM transactions t
                 WHERE t.customer_id = c.id AND t.status = 'completed') AS last_purchase_at
@@ -370,7 +370,7 @@ pub async fn purchases(
         SELECT t.id                 AS "id!",
                t.created_at         AS "created_at!",
                t.payment_method     AS "payment_method!",
-               t.subtotal           AS "revenue!",
+               t.subtotal - t.discount_amount AS "revenue!",
                t.shipping_cost      AS "shipping!",
                t.total_amount       AS "total_amount!",
                (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)

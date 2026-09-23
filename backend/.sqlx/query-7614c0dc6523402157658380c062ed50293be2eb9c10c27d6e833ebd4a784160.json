@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS \"revenue!\",\n               COALESCE(SUM(t.shipping_cost), 0) AS \"shipping!\",\n               COUNT(*)                          AS \"count!\"\n        FROM transactions t\n        WHERE t.status = 'completed'\n          AND ($1::text IS NULL\n               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')\n                                  AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::text IS NULL OR t.payment_method = $2)\n          AND ($3::text IS NULL OR t.type = $3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "shipping!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 2,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "7614c0dc6523402157658380c062ed50293be2eb9c10c27d6e833ebd4a784160"
+}

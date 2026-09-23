@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT ti.id, ti.product_id, ti.product_name_snapshot, ti.qty,\n               ti.is_packed,\n               (\n                   -- Rak-rak tempat barang ini masih ada, tanpa pengulangan\n                   -- dan urut FEFO. Batch yang sudah habis tidak ikut: rak\n                   -- yang kosong bukan petunjuk, ia perjalanan sia-sia.\n                   --\n                   -- Dikelompokkan per rak lebih dulu, bukan `string_agg\n                   -- DISTINCT`: dengan DISTINCT, urutan yang dipilih agregat\n                   -- tidak dijamin mengikuti ORDER BY subkueri, dan urutan\n                   -- itulah satu-satunya alasan daftar ini berguna.\n                   SELECT string_agg(rak.storage_location, ', '\n                                     ORDER BY rak.exp NULLS LAST, rak.masuk)\n                   FROM (\n                       SELECT b.storage_location    AS storage_location,\n                              min(b.expiry_date)    AS exp,\n                              min(b.received_at)    AS masuk\n                       FROM product_batches b\n                       WHERE b.product_id = ti.product_id\n                         AND b.remaining_qty > 0\n                         AND b.storage_location IS NOT NULL\n                       GROUP BY b.storage_location\n                   ) rak\n               ) AS storage_location\n        FROM ticket_items ti\n        WHERE ti.ticket_id = $1\n        -- Diurutkan per rak, bukan per nama: pengepak menyusuri gudang\n        -- sekali jalan alih-alih bolak-balik. Barang tanpa lokasi jatuh ke\n        -- bawah, supaya yang bisa dipandu tetap berurutan.\n        ORDER BY 6 ASC NULLS LAST, ti.product_name_snapshot, ti.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "product_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "product_name_snapshot",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "qty",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_packed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "storage_location",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "320c65fd50d5de2694c15fa7fcb18e5a39e4097995c51a5a9d61ad9795baaab5"
+}

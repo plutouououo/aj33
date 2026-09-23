@@ -10,10 +10,13 @@
 //! yang dibeli adalah kolom salah ketik yang ketahuan saat `cargo build`,
 //! bukan saat pemilik toko membuka laporan.
 //!
-//! OMZET ADALAH `subtotal`, BUKAN `total_amount`. Sejak migrasi 0007 ongkir
-//! punya kolom sendiri dan ikut tertambah di `total_amount`; ongkir bukan
-//! barang dan tidak punya margin, jadi memasukkannya ke omzet membuat setiap
-//! perhitungan laba salah.
+//! OMZET ADALAH `subtotal - discount_amount`, BUKAN `total_amount`. Sejak
+//! migrasi 0007 ongkir punya kolom sendiri dan ikut tertambah di
+//! `total_amount`; ongkir bukan barang dan tidak punya margin, jadi
+//! memasukkannya ke omzet membuat setiap perhitungan laba salah. Sejak
+//! migrasi 0015 diskon juga punya kolom sendiri, dan ia kebalikannya: uang
+//! yang TIDAK pernah diterima, jadi mengabaikannya membuat omzet terlalu
+//! besar dan laba yang dilaporkan tidak pernah tercapai.
 
 use crate::error::AppResult;
 use chrono::{DateTime, Utc};
@@ -48,7 +51,7 @@ impl SalesFilter {
 /// laba bisa dihitung tanpa pemanggil perlu merangkainya sendiri.
 #[derive(Debug, Serialize)]
 pub struct SalesSummary {
-    /// Omzet barang: jumlah `subtotal`, tanpa ongkir.
+    /// Omzet barang: jumlah `subtotal` sesudah diskon, tanpa ongkir.
     pub revenue: Decimal,
     /// Ongkir yang ditagihkan ke pembeli. Diperlihatkan terpisah supaya
     /// jelas bahwa uang ini bukan hasil penjualan barang.
@@ -71,7 +74,7 @@ pub struct SalesSummary {
 pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<SalesSummary> {
     let penjualan = sqlx::query!(
         r#"
-        SELECT COALESCE(SUM(t.subtotal), 0)      AS "revenue!",
+        SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS "revenue!",
                COALESCE(SUM(t.shipping_cost), 0) AS "shipping!",
                COUNT(*)                          AS "count!"
         FROM transactions t
@@ -157,10 +160,10 @@ pub struct TodayAndMonth {
 pub async fn today_and_month(pool: &PgPool) -> AppResult<TodayAndMonth> {
     let row = sqlx::query!(
         r#"
-        SELECT COALESCE(SUM(t.subtotal) FILTER (
+        SELECT COALESCE(SUM(t.subtotal - t.discount_amount) FILTER (
                    WHERE t.created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta')
                                          AT TIME ZONE 'Asia/Jakarta'), 0) AS "today!",
-               COALESCE(SUM(t.subtotal), 0)                               AS "month!",
+               COALESCE(SUM(t.subtotal - t.discount_amount), 0)           AS "month!",
                COUNT(*) FILTER (
                    WHERE t.created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta')
                                          AT TIME ZONE 'Asia/Jakarta')     AS "today_count!"
@@ -210,7 +213,7 @@ pub async fn monthly_trend(pool: &PgPool, filter: &SalesFilter) -> AppResult<Vec
         )
         SELECT to_char(b.awal, 'YYYY-MM') AS "month!",
                COALESCE((
-                   SELECT SUM(t.subtotal)
+                   SELECT SUM(t.subtotal - t.discount_amount)
                    FROM transactions t
                    WHERE t.status = 'completed'
                      AND t.created_at AT TIME ZONE 'Asia/Jakarta' >= b.awal
@@ -279,6 +282,13 @@ pub async fn expense_breakdown(
 }
 
 /// Satu baris tabel produk terlaris.
+///
+/// `revenue` di sini harga barangnya SEBELUM diskon. Diskon melekat pada
+/// transaksi, bukan pada barang tertentu, jadi membagikannya ke tiap baris
+/// berarti mengarang angka yang tidak pernah ada di struk mana pun. Yang
+/// dijawab tabel ini adalah "barang mana yang paling laku", dan untuk
+/// pertanyaan itu harga jualnya yang relevan -- bukan potongan yang diberikan
+/// kepada pembelinya.
 #[derive(Debug, Serialize)]
 pub struct TopProduct {
     pub product_id: Uuid,
@@ -364,7 +374,7 @@ pub async fn recent_sales(
                c.name                  AS customer_name,
                t.type                  AS "transaction_type!",
                t.payment_method        AS "payment_method!",
-               t.subtotal              AS "revenue!",
+               t.subtotal - t.discount_amount AS "revenue!",
                t.shipping_cost         AS "shipping!",
                t.total_amount          AS "total_amount!",
                (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)

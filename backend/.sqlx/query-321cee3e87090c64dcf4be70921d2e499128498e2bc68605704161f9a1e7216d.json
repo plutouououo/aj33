@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id                    AS \"id!\",\n               t.created_at            AS \"created_at!\",\n               c.name                  AS customer_name,\n               t.type                  AS \"transaction_type!\",\n               t.payment_method        AS \"payment_method!\",\n               t.subtotal              AS \"revenue!\",\n               t.shipping_cost         AS \"shipping!\",\n               t.total_amount          AS \"total_amount!\",\n               (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)\n                                       AS \"item_count!\"\n        FROM transactions t\n        LEFT JOIN customers c ON c.id = t.customer_id\n        WHERE t.status = 'completed'\n          AND ($1::text IS NULL\n               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')\n                                  AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::text IS NULL OR t.payment_method = $2)\n          AND ($3::text IS NULL OR t.type = $3)\n        ORDER BY t.created_at DESC\n        LIMIT $4\n        ",
+  "query": "\n        SELECT t.id                    AS \"id!\",\n               t.created_at            AS \"created_at!\",\n               c.name                  AS customer_name,\n               t.type                  AS \"transaction_type!\",\n               t.payment_method        AS \"payment_method!\",\n               t.subtotal - t.discount_amount AS \"revenue!\",\n               t.shipping_cost         AS \"shipping!\",\n               t.total_amount          AS \"total_amount!\",\n               (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)\n                                       AS \"item_count!\"\n        FROM transactions t\n        LEFT JOIN customers c ON c.id = t.customer_id\n        WHERE t.status = 'completed'\n          AND ($1::text IS NULL\n               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')\n                                  AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::text IS NULL OR t.payment_method = $2)\n          AND ($3::text IS NULL OR t.type = $3)\n        ORDER BY t.created_at DESC\n        LIMIT $4\n        ",
   "describe": {
     "columns": [
       {
@@ -63,11 +63,11 @@
       true,
       false,
       false,
-      false,
+      null,
       false,
       false,
       null
     ]
   },
-  "hash": "d1e2194678d4be221a54b057a349202f81445455d3e81f092d4e87976d53ee7d"
+  "hash": "321cee3e87090c64dcf4be70921d2e499128498e2bc68605704161f9a1e7216d"
 }

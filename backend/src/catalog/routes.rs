@@ -1,8 +1,8 @@
 //! Endpoint produk, varian, batch, kategori, dan riwayat ledger stok.
 
 use super::repo::{
-    self, Category, NewBatch, NewProduct, Product, ProductBatch, ProductFilter, ProductPatch,
-    Scope, StockAdjustment, Ubah,
+    self, BatchPatch, Category, NewBatch, NewProduct, Product, ProductBatch, ProductFilter,
+    ProductPatch, Scope, StockAdjustment, Ubah,
 };
 use super::sku;
 use crate::auth::{CurrentUser, Role};
@@ -175,7 +175,8 @@ struct ProductCreateRequest {
     expiry_date: Option<NaiveDate>,
     low_stock_threshold: Option<i32>,
     image_url: Option<String>,
-    /// Label rak internal yang dibaca pengepak.
+    /// Rak tempat batch pertama ditaruh. Milik batch, bukan produk -- lihat
+    /// migrasi 0016. Ikut terbuang bersama batch-nya kalau stok awalnya nol.
     storage_location: Option<String>,
 }
 
@@ -256,7 +257,6 @@ async fn create_product(
             cost_price: None,
             low_stock_threshold: body.low_stock_threshold.unwrap_or(5),
             image_url: bersihkan(body.image_url),
-            storage_location: bersihkan(body.storage_location),
             created_by: user.id,
         },
     )
@@ -271,6 +271,7 @@ async fn create_product(
                 purchase_price: body.purchase_price,
                 quantity: body.stock_qty,
                 expiry_date: body.expiry_date,
+                storage_location: bersihkan(body.storage_location),
                 created_by: user.id,
             },
         )
@@ -318,8 +319,6 @@ struct ProductUpdateRequest {
     low_stock_threshold: Option<i32>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     image_url: Ubah<String>,
-    #[serde(default, deserialize_with = "repo::ubah_terkirim")]
-    storage_location: Ubah<String>,
     is_active: Option<bool>,
 }
 
@@ -383,7 +382,6 @@ async fn update_product(
         cost_price: body.cost_price,
         low_stock_threshold: body.low_stock_threshold,
         image_url: ubah_teks(body.image_url),
-        storage_location: ubah_teks(body.storage_location),
         is_active: body.is_active,
     };
 
@@ -451,6 +449,8 @@ struct BatchCreateRequest {
     quantity: i32,
     /// Boleh kosong untuk barang yang memang tidak punya kedaluwarsa.
     expiry_date: Option<NaiveDate>,
+    /// Rak tempat kiriman ini ditaruh. Boleh kosong.
+    storage_location: Option<String>,
 }
 
 /// Mencatat barang masuk. Stoknya bertambah lewat ledger di transaksi yang
@@ -496,6 +496,7 @@ async fn create_batch(
             purchase_price: body.purchase_price,
             quantity: body.quantity,
             expiry_date: body.expiry_date,
+            storage_location: bersihkan(body.storage_location),
             created_by: user.id,
         },
     )
@@ -513,17 +514,27 @@ async fn create_batch(
 
 #[derive(Debug, Deserialize)]
 struct BatchPatchRequest {
-    /// Kosong berarti "harga belinya belum diketahui", bukan "jangan diubah":
-    /// hanya satu kolom yang bisa disunting di sini, jadi tidak ada gunanya
-    /// membedakan keduanya -- dan owner harus bisa membatalkan angka yang
-    /// salah ketik.
-    purchase_price: Option<Decimal>,
+    /// Ketiganya `Ubah`: tidak disebut berarti biarkan, `null` berarti
+    /// kosongkan. Owner harus bisa membatalkan angka maupun tanggal yang
+    /// salah ketik, dan "kosong" di sini punya arti sendiri -- harga beli
+    /// yang belum diketahui, barang tanpa kedaluwarsa, rak yang belum
+    /// ditentukan.
+    #[serde(default, deserialize_with = "repo::ubah_terkirim")]
+    purchase_price: Ubah<Decimal>,
+    #[serde(default, deserialize_with = "repo::ubah_terkirim")]
+    expiry_date: Ubah<NaiveDate>,
+    #[serde(default, deserialize_with = "repo::ubah_terkirim")]
+    storage_location: Ubah<String>,
 }
 
-/// Mengoreksi harga beli batch. Jumlah dan kedaluwarsanya tidak ikut bisa
-/// diubah: keduanya menentukan stok dan urutan FEFO, dan mengubahnya lewat
-/// jalan ini akan melewati ledger. Yang salah catat dibatalkan lalu dicatat
-/// ulang.
+/// Mengoreksi catatan sebuah batch: harga beli, tanggal kedaluwarsa, dan rak
+/// penyimpanannya. Ketiganya keterangan tentang kiriman, dan keterangan yang
+/// salah harus bisa dibetulkan tanpa membongkar stok.
+///
+/// JUMLAHNYA tidak ikut bisa diubah. Jumlah menentukan stok, dan mengubahnya
+/// lewat jalan ini akan melewati ledger -- stok bergerak tanpa satu baris pun
+/// yang menjelaskan mengapa. Batch yang salah jumlahnya dibatalkan lalu
+/// dicatat ulang.
 async fn update_batch(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -532,11 +543,21 @@ async fn update_batch(
 ) -> AppResult<axum::http::StatusCode> {
     user.require(&[Role::Owner])?;
 
-    if body.purchase_price.is_some_and(|h| h.is_sign_negative()) {
+    if body
+        .purchase_price
+        .flatten()
+        .is_some_and(|h| h.is_sign_negative())
+    {
         return Err(AppError::bad_request("Harga beli tidak boleh negatif."));
     }
 
-    if !repo::update_batch_purchase_price(&state.pool, id, batch_id, body.purchase_price).await? {
+    let patch = BatchPatch {
+        purchase_price: body.purchase_price,
+        expiry_date: body.expiry_date,
+        storage_location: ubah_teks(body.storage_location),
+    };
+
+    if !repo::update_batch(&state.pool, id, batch_id, &patch).await? {
         return Err(AppError::not_found("Batch tidak ditemukan."));
     }
 

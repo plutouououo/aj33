@@ -77,6 +77,44 @@ Log: `journalctl -u aj33-backend -f` (ganti unit sesuai kebutuhan).
 
 ## Yang dikerjakan di sesi ini
 
+**Diskon dan kanal harga di kasir** (migrasi `0015`) — dua kolom baru di
+`transactions`. `discount_amount` menutup pintu yang sengaja dibiarkan tertutup
+sejak migrasi 0007 ("diskon punya aturannya sendiri dan belum ada di sistem
+ini"): potongan punya kolom sendiri, **tidak dikurangkan dari `subtotal`**,
+supaya baris struk tetap bisa dijumlahkan menjadi subtotal. Sejak migrasi ini
+omzet barang adalah `SUM(subtotal - discount_amount)` — dasbor, laporan, dan
+riwayat pelanggan sudah ikut. `sales_channel` (`toko` / `shopee` / `tiktok`)
+memilih daftar harga yang dipakai: selama Shopee dan Tokopedia belum
+tersambung, pesanannya dicatat manual di kasir, dan tanpa kanal semuanya
+tercatat seharga toko — selisihnya muncul sebagai laba yang tidak pernah ada.
+`products.price_shopee` dan `price_tiktok` sudah ada sejak migrasi 0005 tapi
+belum pernah punya jalan untuk dipakai saat menjual; sekarang punya. Harga
+kanal yang kosong jatuh ke harga dasar, bukan ke nol. Keduanya **wajib ikut
+sidik jari `Idempotency-Key`** dan karena itu harus tersimpan: tanpa itu,
+keranjang yang dikirim ulang setelah diskon atau kanalnya dibetulkan dijawab
+dengan transaksi lama yang nilainya salah, tanpa galat apa pun.
+
+**Lokasi penyimpanan pindah ke batch** (migrasi `0016`) —
+`products.storage_location` (migrasi 0005) di-drop, diganti
+`product_batches.storage_location`. Satu label per produk benar hanya selama
+satu produk tinggal di satu tempat; sejak stok hidup per batch (migrasi 0011),
+kiriman yang datang di hari berbeda memang ditaruh di rak berbeda, dan label
+yang kadang benar kadang salah lebih buruk daripada tidak ada label — ia tetap
+dipercaya. Lokasi kini sejajar dengan kedaluwarsa dan harga beli: ketiganya
+sifat kiriman. Tiket packing membaca rak dari batch yang **masih bersisa**,
+digabung tanpa pengulangan dan urut FEFO, jadi pengepak tidak dikirim ke rak
+yang sudah kosong. Tidak ada "lokasi default" lagi, karena tidak ada tempat
+yang bisa dijanjikannya dengan benar.
+
+**Kedaluwarsa dan lokasi batch bisa dikoreksi** — `PATCH
+/products/{id}/batches/{batch_id}` yang dulu hanya menerima `purchase_price`
+kini menerima ketiganya dengan semantik `Ubah` (tidak disebut = biarkan,
+`null` = kosongkan). Di halaman produk ketiganya jadi satu baris tabel dengan
+satu tombol Simpan — bukan tiga form sebaris, yang membuat orang menyimpan
+satu koreksi lalu mengira dua lainnya ikut tersimpan. **Jumlah batch tetap
+tidak bisa disunting**: ia menggerakkan stok, dan stok hanya berubah lewat
+ledger. Batch yang salah jumlahnya dibatalkan lalu dicatat ulang.
+
 **Halaman tiket packing** (`/tiket`, `/tiket/[id]`) — antrean urut tenggat,
 checklist barang, alur status ambil → kemas → selesai → serahkan. Stok
 berkurang hanya saat serah-terima.
@@ -87,7 +125,9 @@ paginasi). Ditulis di `panduan-ui.md`.
 
 **Harga per marketplace + lokasi penyimpanan** (migrasi `0005`) — kolom
 `price_shopee`, `price_tiktok` (mencakup Tokopedia, satu kanal), dan
-`storage_location` di tabel `products`. Lokasi rak tampil di tiket packing dan
+`storage_location` di tabel `products`. (Lokasi sudah pindah ke
+`product_batches` pada migrasi `0016`; sisa paragraf ini keadaan saat itu.)
+Lokasi rak tampil di tiket packing dan
 **daftar barangnya diurutkan per rak**, supaya pengepak menyusuri gudang sekali
 jalan. Lokasi dibaca hidup lewat JOIN, bukan disalin ke `ticket_items` — kalau
 barang dipindah rak, salinan lama justru menyesatkan.
@@ -163,7 +203,9 @@ tiap POST, dan hanya diganti setelah penjualan berhasil.
 (daftar + buat; nomor telepon yang sudah ada tidak digandakan), dan kolom
 `transactions.shipping_cost`. Ongkir punya kolom sendiri, **bukan dilebur ke
 `subtotal`**: subtotal adalah harga barang dan itulah dasar perhitungan
-margin. Sejak migrasi ini `SUM(total_amount)` bukan lagi omzet barang.
+margin. Sejak migrasi ini `SUM(total_amount)` bukan lagi omzet barang, dan
+sejak migrasi `0015` omzet barang bukan lagi `SUM(subtotal)` melainkan
+`SUM(subtotal - discount_amount)`.
 
 **Bug idempotensi yang sudah lama ada, diperbaiki** — `sidik_jari` mem-hash
 nominal lewat `to_string()`, sedangkan `70000` dari request dan `70000.00`

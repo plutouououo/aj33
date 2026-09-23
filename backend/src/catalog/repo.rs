@@ -52,8 +52,6 @@ pub struct Product {
     pub stock_qty: i32,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
-    /// Label rak internal yang dibaca pengepak, mis. "Rak A3".
-    pub storage_location: Option<String>,
     /// Kedaluwarsa terdekat dari batch yang MASIH BERSISA. Diambil di query
     /// yang sama supaya daftar produk bisa menandai barang yang mendekati
     /// kedaluwarsa tanpa query tambahan per baris.
@@ -110,6 +108,10 @@ pub struct ProductBatch {
     /// Sisa yang belum keluar. Inilah yang dikurangi penjualan.
     pub remaining_qty: i32,
     pub expiry_date: Option<NaiveDate>,
+    /// Rak tempat kiriman INI ditaruh, mis. "Rak A3". Sifat kiriman, bukan
+    /// sifat barang: dua kiriman produk yang sama bisa tinggal di rak yang
+    /// berbeda, dan sejak migrasi 0016 masing-masing menyebutkan sendiri.
+    pub storage_location: Option<String>,
     pub received_at: DateTime<Utc>,
     pub created_by: Option<Uuid>,
 }
@@ -164,7 +166,7 @@ pub async fn list_products(
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.storage_location,
+            p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
              WHERE b.product_id = p.id AND b.remaining_qty > 0)
                 AS "nearest_expiry?",
@@ -239,7 +241,7 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.storage_location,
+            p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
              WHERE b.product_id = p.id AND b.remaining_qty > 0)
                 AS "nearest_expiry?",
@@ -269,7 +271,7 @@ pub async fn list_variants(pool: &PgPool, parent_id: Uuid) -> AppResult<Vec<Prod
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
-            p.image_url, p.storage_location,
+            p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
              WHERE b.product_id = p.id AND b.remaining_qty > 0)
                 AS "nearest_expiry?",
@@ -304,7 +306,6 @@ pub struct NewProduct {
     pub cost_price: Option<Decimal>,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
-    pub storage_location: Option<String>,
     pub created_by: Uuid,
 }
 
@@ -320,10 +321,9 @@ pub async fn insert_product(
         INSERT INTO products
             (name, seo_name, sku, brand_name, product_type, variant_grade, variant_size,
              parent_id, category_id, price, price_shopee, price_tiktok,
-             cost_price, stock_qty, low_stock_threshold, image_url,
-             storage_location, created_by)
+             cost_price, stock_qty, low_stock_threshold, image_url, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0,
-                $14, $15, $16, $17)
+                $14, $15, $16)
         RETURNING id
         "#,
         input.name,
@@ -341,7 +341,6 @@ pub async fn insert_product(
         input.cost_price,
         input.low_stock_threshold,
         input.image_url,
-        input.storage_location,
         input.created_by
     )
     .fetch_one(&mut **tx)
@@ -409,7 +408,6 @@ pub struct ProductPatch {
     pub cost_price: Ubah<Decimal>,
     pub low_stock_threshold: Option<i32>,
     pub image_url: Ubah<String>,
-    pub storage_location: Ubah<String>,
     pub is_active: Option<bool>,
 }
 
@@ -425,7 +423,6 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
     let (ubah_tiktok, price_tiktok) = salinan(&patch.price_tiktok);
     let (ubah_modal, cost_price) = salinan(&patch.cost_price);
     let (ubah_gambar, image_url) = teks(&patch.image_url);
-    let (ubah_lokasi, storage_location) = teks(&patch.storage_location);
 
     // Kolom yang tidak boleh NULL memakai COALESCE; sisanya memakai CASE
     // dengan penanda tersendiri, karena COALESCE tidak bisa membedakan
@@ -448,7 +445,6 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
             price_tiktok        = CASE WHEN $22::bool THEN $23::numeric ELSE price_tiktok END,
             cost_price          = CASE WHEN $24::bool THEN $25::numeric ELSE cost_price END,
             image_url           = CASE WHEN $26::bool THEN $27::varchar ELSE image_url END,
-            storage_location    = CASE WHEN $28::bool THEN $29::varchar ELSE storage_location END,
             updated_at          = now()
         WHERE id = $1
         "#,
@@ -478,9 +474,7 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
         ubah_modal,
         cost_price,
         ubah_gambar,
-        image_url,
-        ubah_lokasi,
-        storage_location
+        image_url
     )
     .execute(pool)
     .await?;
@@ -596,7 +590,7 @@ pub async fn list_batches(pool: &PgPool, product_id: Uuid) -> AppResult<Vec<Prod
         ProductBatch,
         r#"
         SELECT id, product_id, batch_number, purchase_price, quantity, remaining_qty,
-               expiry_date, received_at AS "received_at!", created_by
+               expiry_date, storage_location, received_at AS "received_at!", created_by
         FROM product_batches
         WHERE product_id = $1
         ORDER BY expiry_date NULLS LAST, received_at DESC
@@ -615,6 +609,7 @@ pub struct NewBatch {
     pub purchase_price: Option<Decimal>,
     pub quantity: i32,
     pub expiry_date: Option<NaiveDate>,
+    pub storage_location: Option<String>,
     pub created_by: Uuid,
 }
 
@@ -630,8 +625,9 @@ pub async fn insert_batch(tx: &mut Transaction<'_, Postgres>, input: &NewBatch) 
     let id = sqlx::query_scalar!(
         r#"
         INSERT INTO product_batches
-            (product_id, batch_number, purchase_price, quantity, remaining_qty, expiry_date, created_by)
-        VALUES ($1, $2, $3, $4, 0, $5, $6)
+            (product_id, batch_number, purchase_price, quantity, remaining_qty, expiry_date,
+             storage_location, created_by)
+        VALUES ($1, $2, $3, $4, 0, $5, $6, $7)
         RETURNING id
         "#,
         input.product_id,
@@ -639,6 +635,7 @@ pub async fn insert_batch(tx: &mut Transaction<'_, Postgres>, input: &NewBatch) 
         input.purchase_price,
         input.quantity,
         input.expiry_date,
+        input.storage_location,
         input.created_by
     )
     .fetch_one(&mut **tx)
@@ -660,7 +657,7 @@ pub async fn list_batches_tersedia(pool: &PgPool) -> AppResult<Vec<ProductBatch>
         ProductBatch,
         r#"
         SELECT b.id, b.product_id, b.batch_number, b.purchase_price, b.quantity, b.remaining_qty,
-               b.expiry_date, b.received_at AS "received_at!", b.created_by
+               b.expiry_date, b.storage_location, b.received_at AS "received_at!", b.created_by
         FROM product_batches b
         JOIN products p ON p.id = b.product_id
         WHERE b.remaining_qty > 0
@@ -686,7 +683,7 @@ pub async fn find_batch(
         ProductBatch,
         r#"
         SELECT id, product_id, batch_number, purchase_price, quantity, remaining_qty,
-               expiry_date, received_at AS "received_at!", created_by
+               expiry_date, storage_location, received_at AS "received_at!", created_by
         FROM product_batches
         WHERE id = $1 AND product_id = $2
         "#,
@@ -699,21 +696,64 @@ pub async fn find_batch(
     Ok(row)
 }
 
-/// Mengubah harga beli sebuah batch. Batch yang sudah ada sejak sebelum
-/// migrasi 0014 tidak punya harga beli sama sekali, dan tanpa jalan ini
-/// laporan laba akan selamanya menghitungnya nol. `None` mengosongkan
-/// kembali -- artinya "belum diketahui", dan laporan tetap memperingatkan.
-pub async fn update_batch_purchase_price(
+/// Kolom batch yang boleh dikoreksi sesudah kirimannya dicatat.
+///
+/// Semuanya `Ubah`: tidak disebut berarti biarkan, `null` berarti kosongkan.
+/// Ketiganya harus bisa dikembalikan ke kosong -- harga beli yang salah
+/// ketik, tanggal kedaluwarsa yang ternyata tidak ada di kemasan, dan rak
+/// yang barangnya sudah dipindah entah ke mana.
+///
+/// `quantity` TIDAK ada di sini dan tidak akan pernah ada. Ia menggerakkan
+/// stok, dan satu-satunya jalan stok berubah adalah lewat `stock.rs` supaya
+/// tiap butir punya baris ledger yang menjelaskan asalnya. Batch yang salah
+/// jumlahnya dibatalkan lalu dicatat ulang.
+#[derive(Default)]
+pub struct BatchPatch {
+    pub purchase_price: Ubah<Decimal>,
+    pub expiry_date: Ubah<NaiveDate>,
+    pub storage_location: Ubah<String>,
+}
+
+/// Mengoreksi batch yang sudah tercatat.
+///
+/// HARGA BELI. Batch yang sudah ada sejak sebelum migrasi 0014 tidak punya
+/// harga beli sama sekali, dan tanpa jalan ini laporan laba akan selamanya
+/// menghitungnya nol.
+///
+/// KEDALUWARSA. Tanggal yang salah ketik bukan cuma angka yang jelek di
+/// layar: ia menentukan urutan FEFO dan menyalakan peringatan merah di
+/// daftar produk. Mengoreksinya di sini aman karena tidak ada butir stok
+/// yang berpindah -- yang berubah hanya urutan keluarnya batch berikutnya.
+///
+/// LOKASI. Rak tempat kiriman ini ditaruh, dibaca pengepak. Barang memang
+/// dipindah antar rak, jadi kolom yang tidak bisa dikoreksi akan menjadi
+/// petunjuk yang salah dalam hitungan minggu.
+pub async fn update_batch(
     pool: &PgPool,
     product_id: Uuid,
     id: Uuid,
-    purchase_price: Option<Decimal>,
+    patch: &BatchPatch,
 ) -> AppResult<bool> {
+    let (ubah_harga, purchase_price) = salinan(&patch.purchase_price);
+    let (ubah_exp, expiry_date) = salinan(&patch.expiry_date);
+    let (ubah_lokasi, storage_location) = teks(&patch.storage_location);
+
     let hasil = sqlx::query!(
-        "UPDATE product_batches SET purchase_price = $3 WHERE id = $1 AND product_id = $2",
+        r#"
+        UPDATE product_batches SET
+            purchase_price   = CASE WHEN $3::bool THEN $4::numeric ELSE purchase_price END,
+            expiry_date      = CASE WHEN $5::bool THEN $6::date    ELSE expiry_date END,
+            storage_location = CASE WHEN $7::bool THEN $8::varchar ELSE storage_location END
+        WHERE id = $1 AND product_id = $2
+        "#,
         id,
         product_id,
-        purchase_price
+        ubah_harga,
+        purchase_price,
+        ubah_exp,
+        expiry_date,
+        ubah_lokasi,
+        storage_location
     )
     .execute(pool)
     .await?;

@@ -26,7 +26,14 @@ pub struct Transaction {
     pub customer_id: Option<Uuid>,
     pub cashier_user_id: Uuid,
     pub payment_method: String,
+    /// `toko`, `shopee`, atau `tiktok` -- daftar harga yang dipakai saat
+    /// menjual. Lihat migrasi 0015.
+    pub sales_channel: String,
     pub subtotal: Decimal,
+    /// Potongan atas seluruh belanja. Tidak dikurangkan dari `subtotal` --
+    /// baris struk tetap harus bisa dijumlahkan menjadi subtotal. Lihat
+    /// migrasi 0015.
+    pub discount_amount: Decimal,
     /// Ongkos kirim. Tidak termasuk di `subtotal` -- hanya menambah
     /// `total_amount`. Lihat migrasi 0007.
     pub shipping_cost: Decimal,
@@ -47,7 +54,9 @@ struct TransactionHead {
     customer_id: Option<Uuid>,
     cashier_user_id: Uuid,
     payment_method: String,
+    sales_channel: String,
     subtotal: Decimal,
+    discount_amount: Decimal,
     shipping_cost: Decimal,
     total_amount: Decimal,
     amount_paid: Option<Decimal>,
@@ -77,7 +86,9 @@ async fn lengkapi(pool: &PgPool, head: TransactionHead) -> AppResult<Transaction
         customer_id: head.customer_id,
         cashier_user_id: head.cashier_user_id,
         payment_method: head.payment_method,
+        sales_channel: head.sales_channel,
         subtotal: head.subtotal,
+        discount_amount: head.discount_amount,
         shipping_cost: head.shipping_cost,
         total_amount: head.total_amount,
         amount_paid: head.amount_paid,
@@ -93,7 +104,8 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Transaction
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, subtotal, shipping_cost, total_amount,
+               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
+               shipping_cost, total_amount,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         WHERE id = $1
@@ -114,7 +126,8 @@ pub async fn find_by_idempotency_key(pool: &PgPool, key: &str) -> AppResult<Opti
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, subtotal, shipping_cost, total_amount,
+               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
+               shipping_cost, total_amount,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         WHERE idempotency_key = $1
@@ -159,7 +172,9 @@ pub struct NewTransaction {
     pub customer_id: Option<Uuid>,
     pub cashier_user_id: Uuid,
     pub payment_method: String,
+    pub sales_channel: String,
     pub subtotal: Decimal,
+    pub discount_amount: Decimal,
     /// Ongkos kirim. Tidak termasuk di `subtotal` -- hanya menambah
     /// `total_amount`. Lihat migrasi 0007.
     pub shipping_cost: Decimal,
@@ -177,8 +192,9 @@ pub async fn insert_transaction(
         r#"
         INSERT INTO transactions
             (idempotency_key, type, customer_id, cashier_user_id, payment_method,
-             subtotal, shipping_cost, total_amount, amount_paid, change_amount)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             sales_channel, subtotal, discount_amount, shipping_cost, total_amount,
+             amount_paid, change_amount)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING id
         "#,
         input.idempotency_key,
@@ -186,7 +202,9 @@ pub async fn insert_transaction(
         input.customer_id,
         input.cashier_user_id,
         input.payment_method,
+        input.sales_channel,
         input.subtotal,
+        input.discount_amount,
         input.shipping_cost,
         input.total_amount,
         input.amount_paid,
@@ -221,7 +239,8 @@ pub async fn list_transactions(pool: &PgPool, limit: i64) -> AppResult<Vec<Trans
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, subtotal, shipping_cost, total_amount,
+               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
+               shipping_cost, total_amount,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         ORDER BY created_at DESC

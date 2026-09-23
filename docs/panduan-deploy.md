@@ -302,16 +302,30 @@ EOF
 (`<<'EOF'` dengan tanda kutip membuat isinya ditulis apa adanya — tanpa itu,
 shell akan mencoba menafsirkan `$` di dalam password sebagai variabel.)
 
-**3. Buat `/etc/aj33/web.env`.** Yang ini tidak berisi rahasia apa pun, jadi
-bisa disalin utuh:
+**3. Buat `/etc/aj33/web.env`.** `AZURE_BLOB_SAS_URL` diambil dari portal
+Azure (kontainer → Shared access tokens), yang lain bisa disalin utuh:
 
 ```bash
 sudo tee /etc/aj33/web.env >/dev/null <<'EOF'
 HOST=127.0.0.1
 PORT=4321
 BACKEND_URL=http://127.0.0.1:3000
+AZURE_BLOB_SAS_URL=https://AKUN.blob.core.windows.net/KONTAINER?sp=racwdli&st=...&sig=...
 EOF
 ```
+
+SAS itu kredensial baca-tulis ke seluruh kontainer, dan ia **punya masa
+berlaku** — lihat bagian `se=` di dalamnya. Lewat tanggal itu foto produk
+berhenti terunggah *dan* berhenti tampil; terbitkan SAS baru, ganti barisnya,
+lalu `sudo systemctl restart aj33-web`. Tidak ada yang perlu diperbaiki di
+basis data: yang tersimpan di kolom `image_url` adalah path `/foto/...`
+milik aplikasi ini, bukan alamat Azure, jadi tidak ada URL yang ikut basi.
+
+Kontainernya tetap **privat** — browser tidak pernah bicara ke Azure. Setiap
+`<img>` meminta `/foto/...` ke server Astro, dan server itu yang mengambil
+blobnya memakai SAS (`web/src/pages/foto/[...nama].ts`). Konsekuensinya lalu
+lintas foto ikut lewat VPS; foto dijawab dengan `Cache-Control` satu tahun,
+jadi peramban hanya menariknya sekali.
 
 **4. Kunci izinnya**, karena `backend.env` berisi kredensial database:
 

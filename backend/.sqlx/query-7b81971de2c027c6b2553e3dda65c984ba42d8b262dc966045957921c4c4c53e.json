@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_shopee, p.price_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url, p.storage_location,\n            (SELECT min(b.expiry_date) FROM product_batches b\n             WHERE b.product_id = p.id AND b.remaining_qty > 0)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE ($1::text IS NULL\n               OR p.name ILIKE '%' || $1 || '%'\n               OR p.seo_name ILIKE '%' || $1 || '%'\n               OR p.sku ILIKE '%' || $1 || '%')\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n          AND ($4::uuid IS NULL OR p.parent_id = $4)\n          AND ($5::text IS NULL\n               OR ($5 = 'induk' AND p.parent_id IS NULL)\n               OR ($5 = 'terjual'\n                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))\n        -- `p.id` bukan hiasan: nama produk boleh kembar, dan tanpa pemutus\n        -- yang pasti urutan dua baris bernama sama bisa bertukar antar kueri.\n        -- Di daftar berhalaman itu berarti satu produk muncul dua kali dan\n        -- produk lain tidak pernah muncul sama sekali.\n        ORDER BY p.name, p.id\n        LIMIT $6 OFFSET $7\n        ",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_shopee, p.price_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url,\n            (SELECT min(b.expiry_date) FROM product_batches b\n             WHERE b.product_id = p.id AND b.remaining_qty > 0)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE ($1::text IS NULL\n               OR p.name ILIKE '%' || $1 || '%'\n               OR p.seo_name ILIKE '%' || $1 || '%'\n               OR p.sku ILIKE '%' || $1 || '%')\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n          AND ($4::uuid IS NULL OR p.parent_id = $4)\n          AND ($5::text IS NULL\n               OR ($5 = 'induk' AND p.parent_id IS NULL)\n               OR ($5 = 'terjual'\n                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))\n        -- `p.id` bukan hiasan: nama produk boleh kembar, dan tanpa pemutus\n        -- yang pasti urutan dua baris bernama sama bisa bertukar antar kueri.\n        -- Di daftar berhalaman itu berarti satu produk muncul dua kali dan\n        -- produk lain tidak pernah muncul sama sekali.\n        ORDER BY p.name, p.id\n        LIMIT $6 OFFSET $7\n        ",
   "describe": {
     "columns": [
       {
@@ -100,31 +100,26 @@
       },
       {
         "ordinal": 19,
-        "name": "storage_location",
-        "type_info": "Varchar"
-      },
-      {
-        "ordinal": 20,
         "name": "nearest_expiry?",
         "type_info": "Date"
       },
       {
-        "ordinal": 21,
+        "ordinal": 20,
         "name": "is_active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 22,
+        "ordinal": 21,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 23,
+        "ordinal": 22,
         "name": "created_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 24,
+        "ordinal": 23,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
@@ -160,7 +155,6 @@
       false,
       false,
       true,
-      true,
       null,
       false,
       true,
@@ -168,5 +162,5 @@
       false
     ]
   },
-  "hash": "0b441b3229a668bfe9bae801c3cf1325b593e2f9e8b5f1b6f5662dfcd0001bd3"
+  "hash": "7b81971de2c027c6b2553e3dda65c984ba42d8b262dc966045957921c4c4c53e"
 }

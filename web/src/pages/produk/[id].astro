@@ -1,8 +1,9 @@
 ---
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type ProductDetail } from '../../lib/api';
-import { rupiah, tanggal, waktu, sisaHari } from '../../lib/format';
+import { rupiah, waktu, sisaHari } from '../../lib/format';
 import { MEREK, kembaliKeDaftar } from '../../lib/produk';
+import { GagalUnggah, hapusFoto, unggahFoto } from '../../lib/blob';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -26,7 +27,7 @@ const kembali = kembaliKeDaftar(dari);
 const PESAN: Record<string, string> = {
   varian: 'Varian ditambahkan.',
   batch: 'Batch dicatat dan stok bertambah.',
-  'harga-batch': 'Harga beli batch disimpan.',
+  'ubah-batch': 'Catatan batch diperbarui.',
   'hapus-batch': 'Batch dibatalkan dan stoknya ditarik kembali.',
   koreksi: 'Stok dikoreksi.',
 };
@@ -70,6 +71,22 @@ if (Astro.request.method === 'POST') {
       const skuBaru = teks(form, 'sku');
       const skuLama = teks(form, 'sku_lama');
 
+      // Foto punya tiga keadaan, dan `image_url` di backend memang dibuat
+      // untuk membedakannya: tidak disebut berarti biarkan, `null` berarti
+      // kosongkan, teks berarti ganti. Lihat `Ubah` di catalog/repo.rs.
+      const berkas = form.get('foto');
+      const fotoBaru = berkas instanceof File && berkas.size > 0 ? berkas : null;
+      const dihapus = form.get('hapus_foto') === '1';
+
+      let image_url: string | null | undefined;
+      if (fotoBaru) image_url = await unggahFoto(fotoBaru);
+      else if (dihapus) image_url = null;
+
+      // Foto lama dibaca sebelum PATCH, dibuang sesudahnya -- membuangnya
+      // lebih dulu berarti PATCH yang gagal meninggalkan produk yang
+      // menunjuk blob yang sudah tidak ada.
+      const fotoLama = teks(form, 'foto_lama');
+
       await api(`/products/${id}`, {
         method: 'PATCH',
         token,
@@ -86,10 +103,14 @@ if (Astro.request.method === 'POST') {
           price_shopee: angka(form, 'price_shopee'),
           price_tiktok: angka(form, 'price_tiktok'),
           low_stock_threshold: angka(form, 'low_stock_threshold') ?? 5,
-          storage_location: teks(form, 'storage_location'),
+          image_url,
           is_active: form.get('is_active') === '1',
         },
       });
+
+      if (image_url !== undefined && fotoLama && fotoLama !== image_url) {
+        await hapusFoto(fotoLama);
+      }
       // Menyimpan data produk mengakhiri pekerjaan di halaman ini, jadi
       // jalan keluarnya sama dengan tombol Kembali: daftar produk, saringan
       // utuh. Aksi lain di halaman ini (varian, batch, koreksi stok) tetap
@@ -99,11 +120,18 @@ if (Astro.request.method === 'POST') {
       await api(`/products/${id}`, { method: 'DELETE', token });
       return Astro.redirect(kembali, 303);
     } else if (aksi === 'varian') {
+      const berkasVarian = form.get('foto');
+      const fotoVarian =
+        berkasVarian instanceof File && berkasVarian.size > 0
+          ? await unggahFoto(berkasVarian)
+          : undefined;
+
       await api('/products', {
         method: 'POST',
         token,
         body: {
           parent_id: id,
+          image_url: fotoVarian,
           name: String(form.get('name') ?? '').trim(),
           seo_name: teks(form, 'seo_name'),
           brand_name: teks(form, 'brand_name'),
@@ -131,16 +159,25 @@ if (Astro.request.method === 'POST') {
           purchase_price: angka(form, 'purchase_price'),
           quantity: angka(form, 'quantity') ?? 0,
           expiry_date: teks(form, 'expiry_date'),
+          storage_location: teks(form, 'storage_location'),
         },
       });
       berhasil = 'batch';
-    } else if (aksi === 'harga-batch') {
+    } else if (aksi === 'ubah-batch') {
+      // Ketiganya SELALU ikut terkirim, termasuk saat kosong: `null` di sini
+      // berarti "kosongkan", dan itu memang yang diminta pengguna yang
+      // menghapus isi kolomnya. Jumlah batch sengaja tidak ada di sini --
+      // ia menggerakkan stok, dan stok hanya berubah lewat ledger.
       await api(`/products/${id}/batches/${form.get('batch_id')}`, {
         method: 'PATCH',
         token,
-        body: { purchase_price: angka(form, 'purchase_price') },
+        body: {
+          purchase_price: angka(form, 'purchase_price'),
+          expiry_date: teks(form, 'expiry_date'),
+          storage_location: teks(form, 'storage_location'),
+        },
       });
-      berhasil = 'harga-batch';
+      berhasil = 'ubah-batch';
     } else if (aksi === 'hapus-batch') {
       await api(`/products/${id}/batches/${form.get('batch_id')}`, { method: 'DELETE', token });
       berhasil = 'hapus-batch';
@@ -153,7 +190,10 @@ if (Astro.request.method === 'POST') {
       berhasil = 'koreksi';
     }
   } catch (err) {
-    galat = err instanceof ApiRequestError ? err.message : 'Aksi gagal dijalankan.';
+    galat =
+      err instanceof ApiRequestError || err instanceof GagalUnggah
+        ? err.message
+        : 'Aksi gagal dijalankan.';
     sukses = null;
   }
 
@@ -240,8 +280,49 @@ const DEKAT_KEDALUWARSA = 30;
             </div>
 
             {/* id dipakai tombol simpan di bilah lengket lewat atribut form=. */}
-            <form method="POST" id="borang-produk" class="borang-tegak">
+            {/* `multipart/form-data` wajib begitu ada isian berkas: dengan
+                enctype bawaan, yang sampai ke server hanya nama berkasnya. */}
+            <form
+              method="POST"
+              id="borang-produk"
+              class="borang-tegak"
+              enctype="multipart/form-data"
+            >
               <input type="hidden" name="aksi" value="simpan" />
+              <input type="hidden" name="foto_lama" value={produk.image_url ?? ''} />
+
+              <div class="isian">
+                <span class="label">Foto produk</span>
+                <div class="flex flex-wrap items-start gap-4">
+                  <span class="foto-produk w-32 shrink-0 rounded-lg border">
+                    {produk.image_url && (
+                      <img
+                        src={produk.image_url}
+                        alt={`Foto ${produk.name}`}
+                        class="h-full w-full rounded-lg object-cover"
+                      />
+                    )}
+                  </span>
+                  <div class="min-w-48 flex-1">
+                    <input
+                      class="kolom"
+                      id="foto"
+                      name="foto"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/avif"
+                    />
+                    <p class="isian-bantu">
+                      Maksimal 5 MB. Memilih berkas baru menggantikan foto yang sekarang.
+                    </p>
+                    {produk.image_url && (
+                      <label class="mt-2 flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="hapus_foto" value="1" />
+                        Hapus foto ini
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
 
               <div class="isian">
                 <label class="label" for="name">Nama produk</label>
@@ -400,15 +481,6 @@ const DEKAT_KEDALUWARSA = 30;
                 />
               </div>
 
-              <div class="isian">
-                <label class="label" for="storage_location">Lokasi penyimpanan</label>
-                <input
-                  class="kolom"
-                  id="storage_location"
-                  name="storage_location"
-                  value={produk.storage_location ?? ''}
-                />
-              </div>
 
               <label class="isian flex items-center gap-2 text-sm">
                 <input type="checkbox" name="is_active" value="1" checked={produk.is_active} />
@@ -467,7 +539,7 @@ const DEKAT_KEDALUWARSA = 30;
               <details>
                 <summary class="tombol-halus cursor-pointer list-none">+ Tambah Varian</summary>
 
-                <form method="POST" class="borang-tegak mt-4">
+                <form method="POST" class="borang-tegak mt-4" enctype="multipart/form-data">
                   <input type="hidden" name="aksi" value="varian" />
                   {/* Atribut yang sama untuk semua varian diwariskan dari induk
                       lewat nilai tersembunyi ini, supaya tidak perlu diketik
@@ -476,12 +548,26 @@ const DEKAT_KEDALUWARSA = 30;
                   <input type="hidden" name="brand_name" value={produk.brand_name ?? ''} />
                   <input type="hidden" name="product_type" value={produk.product_type ?? ''} />
                   <input type="hidden" name="category_id" value={produk.category_id ?? ''} />
-                  <input type="hidden" name="storage_location" value={produk.storage_location ?? ''} />
                   <input type="hidden" name="seo_name" value={produk.seo_name ?? ''} />
 
                   <div class="isian">
                     <label class="label" for="v_name">Nama varian</label>
                     <input class="kolom" id="v_name" name="name" value={produk.name} required />
+                  </div>
+
+                  <div class="isian">
+                    <label class="label" for="v_foto">Foto varian</label>
+                    <input
+                      class="kolom"
+                      id="v_foto"
+                      name="foto"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/avif"
+                    />
+                    <p class="isian-bantu">
+                      Opsional, maksimal 5 MB. Varian punya fotonya sendiri — induk yang punya
+                      varian tidak pernah muncul di layar kasir, jadi fotonya tidak diwariskan.
+                    </p>
                   </div>
 
                   <div class="isian isian-pendek">
@@ -571,6 +657,15 @@ const DEKAT_KEDALUWARSA = 30;
                   </div>
 
                   <div class="isian">
+                    <label class="label" for="v_lokasi">Lokasi penyimpanan batch</label>
+                    <input class="kolom" id="v_lokasi" name="storage_location" placeholder="mis. Rak A3" />
+                    <p class="isian-bantu">
+                      Rak tempat stok awal varian ini ditaruh. Tidak diwariskan dari induk — tiap
+                      kiriman punya raknya sendiri.
+                    </p>
+                  </div>
+
+                  <div class="isian">
                     <button class="tombol-halus" type="submit">Simpan varian</button>
                   </div>
                 </form>
@@ -596,10 +691,11 @@ const DEKAT_KEDALUWARSA = 30;
                     <thead>
                       <tr>
                         <th>No. Batch</th>
-                        <th class="text-right">Harga beli</th>
                         <th class="text-right">Masuk</th>
                         <th class="text-right">Sisa</th>
+                        <th class="text-right">Harga beli</th>
                         <th>Kedaluwarsa</th>
+                        <th>Lokasi</th>
                         <th>Diterima</th>
                         <th class="text-right">Aksi</th>
                       </tr>
@@ -612,31 +708,27 @@ const DEKAT_KEDALUWARSA = 30;
                           b.remaining_qty > 0 &&
                           b.expiry_date !== null &&
                           DEKAT_KEDALUWARSA >= sisaHari(b.expiry_date);
+                        // Satu form untuk seluruh keterangan kiriman ini,
+                        // bukan satu form per kolom: ketiganya dibaca bersama
+                        // saat memeriksa barang di rak, dan tiga tombol
+                        // "Simpan" sebaris membuat orang menyimpan satu
+                        // koreksi lalu mengira dua lainnya ikut tersimpan.
+                        //
+                        // Formnya kosong dan diletakkan di sel pertama;
+                        // kolom-kolomnya menunjuk ke sana lewat atribut
+                        // form=. <form> tidak boleh jadi anak <tr>, jadi
+                        // membungkus barisnya bukan pilihan.
+                        //
+                        // Jumlah masuk sengaja tidak ikut -- ia menggerakkan
+                        // stok, dan stok hanya berubah lewat ledger.
+                        const borang = `batch-${b.id}`;
                         return (
                           <tr>
-                            <td class="font-mono text-xs">{b.batch_number ?? '—'}</td>
-                            {/* Harga beli disunting di tempat. Batch yang
-                                sudah ada sebelum kolom ini lahir tidak punya
-                                harga sama sekali, dan tanpa jalan ini laporan
-                                laba akan selamanya menghitungnya nol. */}
-                            <td class="text-right">
-                              <form method="POST" class="flex items-center justify-end gap-1">
-                                <input type="hidden" name="aksi" value="harga-batch" />
+                            <td class="font-mono text-xs">
+                              {b.batch_number ?? '—'}
+                              <form method="POST" id={borang}>
+                                <input type="hidden" name="aksi" value="ubah-batch" />
                                 <input type="hidden" name="batch_id" value={b.id} />
-                                <label class="sr-only" for={`hb_${b.id}`}>
-                                  Harga beli batch {b.batch_number ?? ''}
-                                </label>
-                                <input
-                                  class="kolom w-28 text-right"
-                                  id={`hb_${b.id}`}
-                                  name="purchase_price"
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  value={b.purchase_price ?? ''}
-                                  placeholder="—"
-                                />
-                                <button class="aksi-baris" type="submit">Simpan</button>
                               </form>
                             </td>
                             <td class="sel-angka text-[var(--color-teks-lembut)]">{b.quantity}</td>
@@ -650,19 +742,71 @@ const DEKAT_KEDALUWARSA = 30;
                                 <span class="font-semibold">{b.remaining_qty}</span>
                               )}
                             </td>
-                            <td class="whitespace-nowrap">
-                              {b.expiry_date ? (
-                                <span class={dekat ? 'font-semibold text-red-600' : ''}>
-                                  {tanggal(b.expiry_date)}
-                                </span>
-                              ) : (
-                                <span class="text-[var(--color-teks-samar)]">—</span>
-                              )}
+                            {/* Batch yang sudah ada sebelum kolom harga beli
+                                lahir tidak punya harga sama sekali, dan tanpa
+                                jalan ini laporan laba akan selamanya
+                                menghitungnya nol. */}
+                            <td class="text-right">
+                              <label class="sr-only" for={`hb_${b.id}`}>
+                                Harga beli batch {b.batch_number ?? ''}
+                              </label>
+                              <input
+                                class="kolom w-28 text-right"
+                                id={`hb_${b.id}`}
+                                form={borang}
+                                name="purchase_price"
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={b.purchase_price ?? ''}
+                                placeholder="—"
+                              />
+                            </td>
+                            {/* Tanggal yang salah ketik bukan cuma angka yang
+                                jelek di layar: ia menentukan urutan FEFO dan
+                                menyalakan peringatan merah di daftar produk.
+                                Dikosongkan berarti barangnya memang tidak
+                                punya kedaluwarsa. */}
+                            <td>
+                              <label class="sr-only" for={`exp_${b.id}`}>
+                                Kedaluwarsa batch {b.batch_number ?? ''}
+                              </label>
+                              <input
+                                class:list={[
+                                  'kolom w-40',
+                                  dekat ? 'font-semibold text-red-600' : '',
+                                ]}
+                                id={`exp_${b.id}`}
+                                form={borang}
+                                name="expiry_date"
+                                type="date"
+                                value={b.expiry_date ?? ''}
+                              />
+                            </td>
+                            {/* Barang memang dipindah antar rak. Lokasi yang
+                                tidak bisa dikoreksi jadi petunjuk yang salah
+                                dalam hitungan minggu, dan pengepak terlanjur
+                                percaya padanya. */}
+                            <td>
+                              <label class="sr-only" for={`lok_${b.id}`}>
+                                Lokasi batch {b.batch_number ?? ''}
+                              </label>
+                              <input
+                                class="kolom w-36"
+                                id={`lok_${b.id}`}
+                                form={borang}
+                                name="storage_location"
+                                value={b.storage_location ?? ''}
+                                placeholder="mis. Rak A3"
+                              />
                             </td>
                             <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
                               {waktu(b.received_at)}
                             </td>
-                            <td class="text-right">
+                            <td class="whitespace-nowrap text-right">
+                              <button class="aksi-baris" type="submit" form={borang}>
+                                Simpan
+                              </button>
                               <form method="POST" class="inline">
                                 <input type="hidden" name="aksi" value="hapus-batch" />
                                 <input type="hidden" name="batch_id" value={b.id} />
@@ -676,7 +820,7 @@ const DEKAT_KEDALUWARSA = 30;
                       })}
                       {produk.batches.length === 0 && (
                         <tr>
-                          <td colspan="7" class="py-8 text-center text-[var(--color-teks-lembut)]">
+                          <td colspan="8" class="py-8 text-center text-[var(--color-teks-lembut)]">
                             Belum ada batch yang dicatat.
                           </td>
                         </tr>
@@ -687,9 +831,12 @@ const DEKAT_KEDALUWARSA = 30;
 
                 <p class="mb-4 text-xs text-[var(--color-teks-lembut)]">
                   Stok berjalan sekarang <strong class="tabular-nums">{produk.stock_qty}</strong>
-                  pack. Jumlah di tabel adalah jumlah yang masuk
-                  saat itu, bukan sisa yang belum terjual. Membatalkan batch menarik kembali
-                  stoknya, dan ditolak kalau stok yang ada sudah tidak cukup.
+                  pack. Kolom "Masuk" adalah jumlah yang datang saat itu, bukan sisa yang belum
+                  terjual. Harga beli, kedaluwarsa, dan lokasi boleh dikoreksi kapan saja —
+                  satu "Simpan" menyimpan ketiganya. Jumlahnya tidak: batch yang salah jumlahnya
+                  dibatalkan lalu dicatat ulang, supaya stok tidak pernah bergerak tanpa catatan.
+                  Membatalkan batch menarik kembali stoknya, dan ditolak kalau stok yang ada
+                  sudah tidak cukup.
                 </p>
 
                 <form method="POST" class="borang-tegak mb-6">
@@ -721,6 +868,14 @@ const DEKAT_KEDALUWARSA = 30;
                   <div class="isian isian-pendek">
                     <label class="label" for="b_exp">Kedaluwarsa</label>
                     <input class="kolom" id="b_exp" name="expiry_date" type="date" />
+                  </div>
+
+                  <div class="isian">
+                    <label class="label" for="b_lokasi">Lokasi penyimpanan</label>
+                    <input class="kolom" id="b_lokasi" name="storage_location" placeholder="mis. Rak A3" />
+                    <p class="isian-bantu">
+                      Rak tempat kiriman ini ditaruh, dibaca pengepak di tiket packing.
+                    </p>
                   </div>
 
                   <div class="isian">

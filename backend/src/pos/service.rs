@@ -53,6 +53,45 @@ impl TransactionType {
     }
 }
 
+/// Kanal tempat penjualan ini terjadi, dan karena itu daftar harga mana yang
+/// berlaku.
+///
+/// Shopee dan Tokopedia belum tersambung ke sistem ini, jadi pesanan dari
+/// sana dicatat manual di kasir. Tanpa kanal, semuanya tercatat seharga toko
+/// -- dan selisih harga marketplace muncul sebagai laba yang tidak ada.
+///
+/// `Tiktok` mencakup Tokopedia, mengikuti penamaan `products.price_tiktok`:
+/// sejak TikTok mengakuisisi Tokopedia keduanya satu kanal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SalesChannel {
+    Toko,
+    Shopee,
+    Tiktok,
+}
+
+impl SalesChannel {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Toko => "toko",
+            Self::Shopee => "shopee",
+            Self::Tiktok => "tiktok",
+        }
+    }
+
+    /// Harga yang berlaku di kanal ini. Harga kanal yang belum diatur
+    /// (`None`) JATUH KE HARGA DASAR, bukan ke nol: `None` berarti "belum
+    /// diatur", dan menjual seharga nol adalah kerugian langsung. Lihat
+    /// migrasi 0005.
+    fn harga(self, produk: &stock::LockedProduct) -> Decimal {
+        match self {
+            Self::Toko => produk.price,
+            Self::Shopee => produk.price_shopee.unwrap_or(produk.price),
+            Self::Tiktok => produk.price_tiktok.unwrap_or(produk.price),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct CheckoutItem {
     pub product_id: Uuid,
@@ -69,9 +108,14 @@ pub struct CheckoutInput {
     pub transaction_type: TransactionType,
     pub customer_id: Option<Uuid>,
     pub payment_method: PaymentMethod,
+    /// Daftar harga yang dipakai. Menentukan `unit_price` tiap baris struk.
+    pub sales_channel: SalesChannel,
     pub amount_paid: Option<Decimal>,
     /// Ongkos kirim. `None` berarti nol -- bukan "tidak diketahui".
     pub shipping_cost: Option<Decimal>,
+    /// Potongan harga atas seluruh belanja. `None` berarti nol. Tidak boleh
+    /// melebihi subtotal -- lihat migrasi 0015.
+    pub discount_amount: Option<Decimal>,
     pub items: Vec<CheckoutItem>,
     pub cashier_user_id: Uuid,
 }
@@ -97,6 +141,23 @@ fn sidik_uang(nilai: Option<Decimal>) -> String {
         .unwrap_or_else(|| "null".into())
 }
 
+/// Bahan sidik jari sebuah transaksi.
+///
+/// Dibungkus sebagai struct, bukan deretan argumen: isinya delapan hal yang
+/// separuhnya bertipe sama, dan satu pasang yang tertukar di salah satu dari
+/// dua tempat pemanggilan akan membuat pengiriman ulang yang sah ditolak --
+/// kegagalan yang tidak akan terlihat sampai jaringan kasir sekali putus.
+struct Bahan<'a> {
+    transaction_type: TransactionType,
+    sales_channel: SalesChannel,
+    customer_id: Option<Uuid>,
+    payment_method: PaymentMethod,
+    amount_paid: Option<Decimal>,
+    shipping_cost: Decimal,
+    discount_amount: Decimal,
+    items: &'a [(Uuid, i32)],
+}
+
 /// Sidik jari isi transaksi, untuk mendeteksi `Idempotency-Key` yang dipakai
 /// ulang dengan isi yang BERBEDA.
 ///
@@ -104,37 +165,40 @@ fn sidik_uang(nilai: Option<Decimal>) -> String {
 /// transaksi lama bisa dihitung ulang dari barisnya -- tidak perlu kolom
 /// khusus. Item diurutkan lebih dulu agar urutan input yang berbeda tapi
 /// isinya sama tetap dianggap sama.
-fn sidik_jari(
-    transaction_type: TransactionType,
-    customer_id: Option<Uuid>,
-    payment_method: PaymentMethod,
-    amount_paid: Option<Decimal>,
-    shipping_cost: Decimal,
-    items: &[(Uuid, i32)],
-) -> String {
-    let mut urut: Vec<(Uuid, i32)> = items.to_vec();
+fn sidik_jari(bahan: &Bahan<'_>) -> String {
+    let mut urut: Vec<(Uuid, i32)> = bahan.items.to_vec();
     urut.sort_unstable();
 
     let mut hasher = Sha256::new();
-    hasher.update(transaction_type.as_str().as_bytes());
+    hasher.update(bahan.transaction_type.as_str().as_bytes());
+    hasher.update(b"|");
+    // Kanal WAJIB ikut: ia menentukan daftar harga, jadi keranjang yang sama
+    // di kanal berbeda adalah tagihan yang berbeda.
+    hasher.update(bahan.sales_channel.as_str().as_bytes());
     hasher.update(b"|");
     hasher.update(
-        customer_id
+        bahan
+            .customer_id
             .map(|c| c.to_string())
             .unwrap_or_else(|| "null".into())
             .as_bytes(),
     );
     hasher.update(b"|");
-    hasher.update(payment_method.as_str().as_bytes());
+    hasher.update(bahan.payment_method.as_str().as_bytes());
     hasher.update(b"|");
-    hasher.update(sidik_uang(amount_paid).as_bytes());
+    hasher.update(sidik_uang(bahan.amount_paid).as_bytes());
     hasher.update(b"|");
     // Ongkir WAJIB ikut. Tanpa ini, kasir yang sadar ongkirnya belum terisi
     // lalu mengirim ulang keranjang yang sama dengan ongkir baru akan
     // dianggap mengirim permintaan kembar: backend mengembalikan transaksi
     // lama, layar menampilkan struk yang kurang sebesar ongkirnya, dan tidak
     // ada galat di mana pun yang memberi tahu.
-    hasher.update(sidik_uang(Some(shipping_cost)).as_bytes());
+    hasher.update(sidik_uang(Some(bahan.shipping_cost)).as_bytes());
+    hasher.update(b"|");
+    // Diskon, dengan alasan yang sama persis seperti ongkir -- hanya arahnya
+    // terbalik: yang terkirim ulang tanpa ini adalah struk yang KELEBIHAN
+    // sebesar potongan yang baru saja disepakati di depan meja.
+    hasher.update(sidik_uang(Some(bahan.discount_amount)).as_bytes());
     for (product_id, qty) in urut {
         hasher.update(b"|");
         hasher.update(product_id.as_bytes());
@@ -160,6 +224,15 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     let ongkir = uang(input.shipping_cost.unwrap_or(Decimal::ZERO));
     if ongkir.is_sign_negative() {
         return Err(AppError::bad_request("Ongkos kirim tidak boleh negatif."));
+    }
+
+    // Dinormalkan bersama ongkir, dan dengan alasan yang sama: angka yang
+    // di-hash harus persis angka yang tersimpan. Batas atasnya -- tidak
+    // melebihi subtotal -- baru bisa diperiksa setelah harga barang dibaca
+    // dari database, jadi pemeriksaannya ada di bawah.
+    let diskon = uang(input.discount_amount.unwrap_or(Decimal::ZERO));
+    if diskon.is_sign_negative() {
+        return Err(AppError::bad_request("Diskon tidak boleh negatif."));
     }
 
     // Digabung DULU, baru disidikjari: yang tersimpan di database juga versi
@@ -193,27 +266,31 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     // yang dijaga `Idempotency-Key` adalah "jangan menagih dua kali", dan
     // itu soal isi belanja, bukan soal rak.
     let per_produk = stock::total_per_produk(&lines);
-    let sidik = sidik_jari(
-        input.transaction_type,
-        input.customer_id,
-        input.payment_method,
-        amount_paid_tersimpan,
-        ongkir,
-        &per_produk,
-    );
+    let sidik = sidik_jari(&Bahan {
+        transaction_type: input.transaction_type,
+        sales_channel: input.sales_channel,
+        customer_id: input.customer_id,
+        payment_method: input.payment_method,
+        amount_paid: amount_paid_tersimpan,
+        shipping_cost: ongkir,
+        discount_amount: diskon,
+        items: &per_produk,
+    });
 
     // Request ulang yang sah: kembalikan transaksi yang sudah ada, tanpa
     // menyentuh stok lagi.
     if let Some(existing) = repo::find_by_idempotency_key(pool, &input.idempotency_key).await? {
         let items_lama = repo::item_bahan_sidik_jari(pool, existing.id).await?;
-        let sidik_lama = sidik_jari(
-            parse_type(&existing.transaction_type)?,
-            existing.customer_id,
-            parse_payment(&existing.payment_method)?,
-            existing.amount_paid,
-            existing.shipping_cost,
-            &items_lama,
-        );
+        let sidik_lama = sidik_jari(&Bahan {
+            transaction_type: parse_type(&existing.transaction_type)?,
+            sales_channel: parse_channel(&existing.sales_channel)?,
+            customer_id: existing.customer_id,
+            payment_method: parse_payment(&existing.payment_method)?,
+            amount_paid: existing.amount_paid,
+            shipping_cost: existing.shipping_cost,
+            discount_amount: existing.discount_amount,
+            items: &items_lama,
+        });
 
         if sidik_lama == sidik {
             return Ok(existing);
@@ -239,8 +316,9 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
 
         // Harga diambil dari database, bukan dari request -- kalau client
         // yang menentukan harga, siapa pun yang bisa memanggil API ini bisa
-        // membeli apa saja seharga nol.
-        let unit_price = uang(product.price);
+        // membeli apa saja seharga nol. Yang datang dari request hanyalah
+        // KANAL-nya: daftar harga mana yang berlaku, bukan angkanya.
+        let unit_price = uang(input.sales_channel.harga(product));
         let baris_subtotal = uang(unit_price * Decimal::from(qty));
         subtotal += baris_subtotal;
 
@@ -254,11 +332,22 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     }
 
     let subtotal = uang(subtotal);
-    // `subtotal` tetap harga barang saja; ongkir hanya menambah total. Itulah
-    // yang membuat margin masih bisa dihitung dari subtotal, dan sekaligus
-    // membuat pemeriksaan uang tunai serta kembalian di bawah otomatis benar
-    // tanpa disentuh -- keduanya sudah memakai `total_amount`.
-    let total_amount = uang(subtotal + ongkir);
+
+    // Diskon tidak boleh melebihi harga barangnya. Batas ini juga ada sebagai
+    // CHECK di database (migrasi 0015); di sini supaya kasir mendapat kalimat
+    // yang bisa dibaca, bukan galat constraint.
+    if diskon > subtotal {
+        return Err(AppError::bad_request(
+            "Diskon tidak boleh melebihi subtotal belanja.",
+        ));
+    }
+
+    // `subtotal` tetap harga barang saja; diskon dan ongkir punya kolomnya
+    // sendiri dan hanya bertemu di `total_amount`. Itulah yang membuat baris
+    // struk tetap bisa dijumlahkan menjadi subtotal, dan sekaligus membuat
+    // pemeriksaan uang tunai serta kembalian di bawah otomatis benar tanpa
+    // disentuh -- keduanya sudah memakai `total_amount`.
+    let total_amount = uang(subtotal - diskon + ongkir);
 
     if input.payment_method == PaymentMethod::Cash {
         let dibayar = amount_paid_tersimpan
@@ -280,7 +369,9 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             customer_id: input.customer_id,
             cashier_user_id: input.cashier_user_id,
             payment_method: input.payment_method.as_str().to_string(),
+            sales_channel: input.sales_channel.as_str().to_string(),
             subtotal,
+            discount_amount: diskon,
             shipping_cost: ongkir,
             total_amount,
             amount_paid: amount_paid_tersimpan,
@@ -317,6 +408,15 @@ fn parse_type(raw: &str) -> AppResult<TransactionType> {
     }
 }
 
+fn parse_channel(raw: &str) -> AppResult<SalesChannel> {
+    match raw {
+        "toko" => Ok(SalesChannel::Toko),
+        "shopee" => Ok(SalesChannel::Shopee),
+        "tiktok" => Ok(SalesChannel::Tiktok),
+        _ => Err(AppError::conflict("Kanal penjualan lama tidak dikenal.")),
+    }
+}
+
 fn parse_payment(raw: &str) -> AppResult<PaymentMethod> {
     match raw {
         "cash" => Ok(PaymentMethod::Cash),
@@ -334,68 +434,48 @@ mod tests {
         Uuid::from_u128(n)
     }
 
+    /// Bahan sidik jari dengan isi paling biasa. Tiap pengujian mengubah
+    /// SATU hal darinya, supaya yang diuji benar-benar hal itu.
+    fn bahan(items: &[(Uuid, i32)]) -> Bahan<'_> {
+        Bahan {
+            transaction_type: TransactionType::WalkIn,
+            sales_channel: SalesChannel::Toko,
+            customer_id: None,
+            payment_method: PaymentMethod::Cash,
+            amount_paid: Some(Decimal::new(10000, 0)),
+            shipping_cost: Decimal::ZERO,
+            discount_amount: Decimal::ZERO,
+            items,
+        }
+    }
+
     #[test]
     fn urutan_item_tidak_mengubah_sidik_jari() {
-        let a = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(10000, 0)),
-            Decimal::ZERO,
-            &[(produk(1), 2), (produk(2), 1)],
-        );
-        let b = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(10000, 0)),
-            Decimal::ZERO,
-            &[(produk(2), 1), (produk(1), 2)],
-        );
+        let maju = [(produk(1), 2), (produk(2), 1)];
+        let mundur = [(produk(2), 1), (produk(1), 2)];
 
-        assert_eq!(a, b);
+        assert_eq!(sidik_jari(&bahan(&maju)), sidik_jari(&bahan(&mundur)));
     }
 
     #[test]
     fn isi_yang_berbeda_menghasilkan_sidik_jari_berbeda() {
-        let dasar = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(10000, 0)),
-            Decimal::ZERO,
-            &[(produk(1), 2)],
-        );
+        let items = [(produk(1), 2)];
+        let lebih_banyak = [(produk(1), 3)];
+        let dasar = sidik_jari(&bahan(&items));
 
-        let qty_beda = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(10000, 0)),
-            Decimal::ZERO,
-            &[(produk(1), 3)],
-        );
-        assert_ne!(dasar, qty_beda);
+        assert_ne!(dasar, sidik_jari(&bahan(&lebih_banyak)));
 
-        let bayar_beda = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(20000, 0)),
-            Decimal::ZERO,
-            &[(produk(1), 2)],
-        );
-        assert_ne!(dasar, bayar_beda);
+        let bayar_beda = Bahan {
+            amount_paid: Some(Decimal::new(20000, 0)),
+            ..bahan(&items)
+        };
+        assert_ne!(dasar, sidik_jari(&bayar_beda));
 
-        let metode_beda = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Transfer,
-            Some(Decimal::new(10000, 0)),
-            Decimal::ZERO,
-            &[(produk(1), 2)],
-        );
-        assert_ne!(dasar, metode_beda);
+        let metode_beda = Bahan {
+            payment_method: PaymentMethod::Transfer,
+            ..bahan(&items)
+        };
+        assert_ne!(dasar, sidik_jari(&metode_beda));
     }
 
     #[test]
@@ -413,24 +493,17 @@ mod tests {
         // Kalau sidik jarinya berbeda, pengiriman ulang yang SAH -- jaringan
         // putus lalu kasir menekan Bayar lagi -- dijawab "isi berbeda", justru
         // kegagalan yang Idempotency-Key ada untuk mencegahnya.
-        let dari_request = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(70000, 0)),
-            Decimal::ZERO,
-            &[(produk(1), 1)],
-        );
-        let dari_database = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(7000000, 2)),
-            Decimal::ZERO,
-            &[(produk(1), 1)],
-        );
+        let items = [(produk(1), 1)];
+        let dari_request = Bahan {
+            amount_paid: Some(Decimal::new(70000, 0)),
+            ..bahan(&items)
+        };
+        let dari_database = Bahan {
+            amount_paid: Some(Decimal::new(7000000, 2)),
+            ..bahan(&items)
+        };
 
-        assert_eq!(dari_request, dari_database);
+        assert_eq!(sidik_jari(&dari_request), sidik_jari(&dari_database));
     }
 
     #[test]
@@ -439,23 +512,61 @@ mod tests {
         // BERBEDA. Kalau sidik jarinya sama, mengirim ulang setelah ongkir
         // diperbaiki akan mengembalikan transaksi lama yang nilainya kurang --
         // tanpa galat apa pun yang memberi tahu.
-        let tanpa_ongkir = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(70000, 0)),
-            Decimal::ZERO,
-            &[(produk(1), 1)],
-        );
-        let dengan_ongkir = sidik_jari(
-            TransactionType::WalkIn,
-            None,
-            PaymentMethod::Cash,
-            Some(Decimal::new(70000, 0)),
-            Decimal::new(20000, 0),
-            &[(produk(1), 1)],
-        );
+        let items = [(produk(1), 1)];
+        let dengan_ongkir = Bahan {
+            shipping_cost: Decimal::new(20000, 0),
+            ..bahan(&items)
+        };
 
-        assert_ne!(tanpa_ongkir, dengan_ongkir);
+        assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&dengan_ongkir));
+    }
+
+    #[test]
+    fn diskon_berbeda_menghasilkan_sidik_jari_berbeda() {
+        // Sama seperti ongkir, arah sebaliknya: tanpa diskon di sidik jari,
+        // kasir yang mengirim ulang keranjang setelah menyepakati potongan
+        // akan menagih pembeli penuh -- dan struk yang tercetak adalah struk
+        // lama yang tidak pernah kena potongan.
+        let items = [(produk(1), 1)];
+        let dengan_diskon = Bahan {
+            discount_amount: Decimal::new(5000, 0),
+            ..bahan(&items)
+        };
+
+        assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&dengan_diskon));
+    }
+
+    #[test]
+    fn kanal_berbeda_menghasilkan_sidik_jari_berbeda() {
+        // Keranjang yang sama di kanal berbeda memakai daftar harga berbeda,
+        // jadi tagihannya berbeda. Tanpa kanal di sidik jari, membetulkan
+        // kanal lalu mengirim ulang akan dijawab dengan transaksi lama yang
+        // harganya salah.
+        let items = [(produk(1), 1)];
+        let shopee = Bahan {
+            sales_channel: SalesChannel::Shopee,
+            ..bahan(&items)
+        };
+
+        assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&shopee));
+    }
+
+    #[test]
+    fn harga_kanal_jatuh_ke_harga_dasar_saat_belum_diatur() {
+        // `None` berarti "belum diatur", bukan "gratis". Menjual seharga nol
+        // adalah kerugian langsung, dan produk yang harga marketplace-nya
+        // belum sempat diisi adalah keadaan yang biasa, bukan luar biasa.
+        let produk = stock::LockedProduct {
+            id: produk(1),
+            name: "Ceker Bersih".into(),
+            price: Decimal::new(25000, 0),
+            price_shopee: Some(Decimal::new(28000, 0)),
+            price_tiktok: None,
+            stock_qty: 10,
+        };
+
+        assert_eq!(SalesChannel::Toko.harga(&produk), Decimal::new(25000, 0));
+        assert_eq!(SalesChannel::Shopee.harga(&produk), Decimal::new(28000, 0));
+        assert_eq!(SalesChannel::Tiktok.harga(&produk), Decimal::new(25000, 0));
     }
 }

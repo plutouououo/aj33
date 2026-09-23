@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, price, stock_qty\n        FROM products\n        WHERE id = ANY($1)\n        ORDER BY id\n        FOR UPDATE\n        ",
+  "query": "\n        SELECT id, name, price, price_shopee, price_tiktok, stock_qty\n        FROM products\n        WHERE id = ANY($1)\n        ORDER BY id\n        FOR UPDATE\n        ",
   "describe": {
     "columns": [
       {
@@ -20,6 +20,16 @@
       },
       {
         "ordinal": 3,
+        "name": "price_shopee",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "price_tiktok",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
         "name": "stock_qty",
         "type_info": "Int4"
       }
@@ -33,8 +43,10 @@
       false,
       false,
       false,
+      true,
+      true,
       false
     ]
   },
-  "hash": "8b036ccb50a0532339d51691540e0096cd535a42e0b116fe5927c82c735ce163"
+  "hash": "c39abe0ea1ebd44ee932c2e2b9acf6076fad62c1e6ad98c45d78d86d8bed52c9"
 }

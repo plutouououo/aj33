@@ -151,8 +151,6 @@ export interface Product {
   stock_qty: number;
   low_stock_threshold: number;
   image_url: string | null;
-  /** Label rak internal, mis. "Rak A3". */
-  storage_location: string | null;
   /** Kedaluwarsa terdekat dari seluruh batch produk ini. */
   nearest_expiry: string | null;
   is_active: boolean;
@@ -179,6 +177,12 @@ export interface ProductBatch {
   /** Sisa yang belum keluar. Inilah yang dikurangi penjualan. */
   remaining_qty: number;
   expiry_date: string | null;
+  /**
+   * Rak tempat kiriman INI ditaruh, mis. "Rak A3". Milik batch, bukan
+   * produk: dua kiriman produk yang sama bisa tinggal di rak berbeda.
+   * Lihat migrasi 0016.
+   */
+  storage_location: string | null;
   received_at: string;
 }
 
@@ -227,11 +231,26 @@ export interface TransactionItem {
   subtotal: number;
 }
 
+/**
+ * Daftar harga yang dipakai saat menjual.
+ *
+ * Shopee dan Tokopedia belum tersambung, jadi pesanannya dicatat manual di
+ * kasir -- dan harus memakai harga kanalnya, bukan harga toko. `tiktok`
+ * mencakup Tokopedia: keduanya satu kanal sejak akuisisi TikTok.
+ */
+export type SalesChannel = 'toko' | 'shopee' | 'tiktok';
+
 export interface Transaction {
   id: string;
   type: string;
   payment_method: string;
+  sales_channel: SalesChannel;
   subtotal: number;
+  /**
+   * Potongan atas seluruh belanja. Tidak dikurangkan dari `subtotal` --
+   * baris struk tetap harus bisa dijumlahkan menjadi subtotal.
+   */
+  discount_amount: number;
   /** Ongkir tidak termasuk `subtotal`; hanya menambah `total_amount`. */
   shipping_cost: number;
   total_amount: number;
@@ -316,7 +335,10 @@ export interface TicketItem {
   product_name_snapshot: string;
   qty: number;
   is_packed: boolean;
-  /** Dibaca langsung dari produk, jadi selalu rak yang berlaku sekarang. */
+  /**
+   * Rak-rak tempat barang ini masih ada, urut FEFO dan dipisah koma. Dibaca
+   * langsung dari batch yang bersisa, jadi selalu keadaan sekarang.
+   */
   storage_location: string | null;
 }
 
@@ -343,8 +365,9 @@ export interface Ticket {
 /**
  * Satu baris penjualan pada dasbor maupun laporan.
  *
- * `revenue` adalah omzet barang (`subtotal` di backend) dan tidak termasuk
- * `shipping`; `total_amount` adalah jumlah yang benar-benar dibayar pembeli.
+ * `revenue` adalah omzet barang sesudah diskon (`subtotal - discount_amount`
+ * di backend) dan tidak termasuk `shipping`; `total_amount` adalah jumlah
+ * yang benar-benar dibayar pembeli.
  * Memakai `total_amount` sebagai omzet membuat margin salah -- ongkir tidak
  * punya margin.
  */

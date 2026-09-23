@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT c.id, c.name, c.phone, c.address, c.source,\n               c.created_at                                          AS \"created_at!\",\n               (SELECT count(*) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS \"purchase_count!\",\n               (SELECT COALESCE(SUM(t.subtotal), 0) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS \"total_spent!\",\n               (SELECT max(t.created_at) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS last_purchase_at\n        FROM customers c\n        WHERE c.id = $1\n        ",
+  "query": "\n        SELECT c.id, c.name, c.phone, c.address, c.source,\n               c.created_at                                          AS \"created_at!\",\n               (SELECT count(*) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS \"purchase_count!\",\n               (SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS \"total_spent!\",\n               (SELECT max(t.created_at) FROM transactions t\n                WHERE t.customer_id = c.id AND t.status = 'completed') AS last_purchase_at\n        FROM customers c\n        WHERE c.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -66,5 +66,5 @@
       null
     ]
   },
-  "hash": "90820c09c4c594f8f50fccbf2ff43d3d679a024ca730eefa86e6bdd707c6f094"
+  "hash": "8578f705b65da0abe860356e95b5f4efa2ff132db4f4dd31efbc41e8f9451a4a"
 }

@@ -236,22 +236,46 @@ const DEKAT_KEDALUWARSA = 30;
                   {p.sku ?? '—'}
                 </td>
                 <td>
-                  <a class="font-medium hover:underline" href={`/produk/${p.id}${bawaSaringan}`}>
-                    {p.name}
-                  </a>
-                  {p.seo_name && (
-                    <span class="block text-xs text-[var(--color-teks-lembut)]">{p.seo_name}</span>
-                  )}
-                  {punyaVarian && (
-                    <span class="mt-1 inline-block text-xs text-[var(--color-teks-lembut)]">
-                      {p.variant_count} varian
+                  {/* Foto ditempel di sel nama, bukan jadi kolom sendiri:
+                      satu kolom lagi mempersempit tabel yang sudah punya
+                      delapan, dan foto tanpa namanya tidak dicari siapa pun.
+                      Ukurannya tetap meski fotonya belum ada, jadi barisan
+                      nama tetap lurus. */}
+                  <div class="flex items-start gap-2.5">
+                    <span class="foto-produk h-10 w-10 shrink-0 rounded border">
+                      {p.image_url && (
+                        <img
+                          src={p.image_url}
+                          alt=""
+                          loading="lazy"
+                          class="h-full w-full rounded object-cover"
+                        />
+                      )}
                     </span>
-                  )}
-                  {p.parent_id && (
-                    <span class="mt-1 inline-block text-xs text-[var(--color-teks-samar)]">
-                      varian
-                    </span>
-                  )}
+                    <div>
+                      <a
+                        class="font-medium hover:underline"
+                        href={`/produk/${p.id}${bawaSaringan}`}
+                      >
+                        {p.name}
+                      </a>
+                      {p.seo_name && (
+                        <span class="block text-xs text-[var(--color-teks-lembut)]">
+                          {p.seo_name}
+                        </span>
+                      )}
+                      {punyaVarian && (
+                        <span class="mt-1 inline-block text-xs text-[var(--color-teks-lembut)]">
+                          {p.variant_count} varian
+                        </span>
+                      )}
+                      {p.parent_id && (
+                        <span class="mt-1 inline-block text-xs text-[var(--color-teks-samar)]">
+                          varian
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </td>
                 <td class="text-[var(--color-teks-lembut)]">{p.category_name ?? '—'}</td>
                 <td class="sel-angka">
