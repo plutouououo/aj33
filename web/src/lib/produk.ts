@@ -15,7 +15,7 @@ export const MEREK = ['AFCO', 'BEST CHICKEN', 'OK CHICK', 'ZAHRA'] as const;
  * titipan query string lewat `?dari=`, dan hanya kunci di sini yang diterima
  * kembali -- titipan itu datang dari URL, jadi ia data, bukan perintah.
  */
-const SARINGAN_DAFTAR = ['cari', 'kategori', 'status', 'tampil', 'per', 'halaman'] as const;
+const SARINGAN_DAFTAR = ['cari', 'kategori', 'tab', 'urut', 'hanya_menipis', 'per', 'halaman'] as const;
 
 /**
  * Tautan kembali ke daftar produk dengan saringan dan halaman yang sama

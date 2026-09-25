@@ -568,8 +568,14 @@ function ringkasBatch(p: Product): string {
                 aria-haspopup="dialog"
                 aria-label={`Pilih batch untuk ${p.name}`}
               >
-                <span class="foto-produk">
-                  {/* `loading="lazy"`: seluruh katalog dirender sekaligus --
+                <span class="foto-produk aspect-square h-auto">
+                  {/* `aspect-square h-auto`: rasio 1:1 seperti kartu produk
+                      Shopee, mengikuti lebar kolom grid alih-alih tinggi
+                      tetap `.foto-produk` -- supaya kartu tetap persegi di
+                      semua ukuran layar, bukan gepeng di kartu yang sempit
+                      atau lebar.
+
+                      `loading="lazy"`: seluruh katalog dirender sekaligus --
                       penyaringannya terjadi di browser -- jadi tanpa ini
                       membuka kasir berarti menarik foto setiap produk,
                       termasuk yang tidak pernah tergulir ke layar. */}
