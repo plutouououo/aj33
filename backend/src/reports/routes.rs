@@ -169,14 +169,16 @@ async fn dashboard(State(state): State<AppState>, user: CurrentUser) -> AppResul
     // `SalesFilter::periode` (yang lain kosong) sudah pas -- persis yang
     // dipakai `today_and_month` di atas, hanya jendelanya digeser satu
     // hari/bulan ke belakang oleh `sales_summary_previous`.
-    let yesterday_revenue = repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Some("day")))
-        .await?
-        .map(|s| s.revenue)
-        .unwrap_or_default();
-    let last_month_revenue = repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Some("month")))
-        .await?
-        .map(|s| s.revenue)
-        .unwrap_or_default();
+    let yesterday_revenue =
+        repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Some("day")))
+            .await?
+            .map(|s| s.revenue)
+            .unwrap_or_default();
+    let last_month_revenue =
+        repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Some("month")))
+            .await?
+            .map(|s| s.revenue)
+            .unwrap_or_default();
 
     // Daftar penjualan terakhir sengaja tanpa batas periode: dasbor yang
     // kosong sepanjang pagi karena belum ada transaksi hari ini tidak
