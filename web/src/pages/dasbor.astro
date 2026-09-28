@@ -1,7 +1,7 @@
 ---
 import AppShell from '../layouts/AppShell.astro';
 import { api, type Dashboard } from '../lib/api';
-import { rupiah, waktu } from '../lib/format';
+import { hitungTren, labelTren, rupiah, waktu } from '../lib/format';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -20,16 +20,48 @@ const JENIS: Record<string, string> = {
     Ringkasan toko hari ini. Angka omzet adalah harga barang, belum termasuk ongkir.
   </p>
 
+  {/* Ikon, kartu pertama yang di-highlight, dan pil naik/turun -- elemen
+      yang sama dengan kartu ringkasan di halaman Laporan (lihat
+      `laporan/index.astro`), supaya kedua halaman terasa satu sistem.
+      Produk Aktif dan Stok Menipis tidak punya pil: keduanya cacahan
+      keadaan sekarang, bukan angka periode yang punya "kemarin"/"bulan
+      lalu" untuk dibandingkan. */}
   <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    <div class="kartu-angka">
-      <span class="kartu-angka-label">Omzet Hari Ini</span>
+    <div class="kartu-angka bg-merah-600 text-white">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 6v12m3-8.5c0-1.38-1.34-2.5-3-2.5s-3 1.12-3 2.5 1.34 2.5 3 2.5 3 1.12 3 2.5-1.34 2.5-3 2.5-3-1.12-3-2.5" />
+          </svg>
+        </span>
+        {hitungTren(data.today_revenue, data.yesterday_revenue) && (
+          <span class={`lencana-${hitungTren(data.today_revenue, data.yesterday_revenue)!.arah}`}>
+            {labelTren(hitungTren(data.today_revenue, data.yesterday_revenue))}
+          </span>
+        )}
+      </div>
+      <span class="kartu-angka-label !text-white/80">Omzet Hari Ini</span>
       <span class="kartu-angka-nilai">{rupiah(data.today_revenue)}</span>
-      <span class="kartu-angka-bantu">
-        {data.today_transaction_count} transaksi
+      <span class="kartu-angka-bantu !text-white/70">
+        {data.today_transaction_count} transaksi · vs kemarin {rupiah(data.yesterday_revenue)}
       </span>
     </div>
 
     <div class="kartu-angka">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2.25 18L9 11.25l4.306 4.306a11.95 11.95 0 015.814-5.518l2.74-1.22M21.75 6.75l-5.94 2.28 2.28 5.94" />
+          </svg>
+        </span>
+        {hitungTren(data.month_revenue, data.last_month_revenue) && (
+          <span class={`lencana-${hitungTren(data.month_revenue, data.last_month_revenue)!.arah}`}>
+            {labelTren(hitungTren(data.month_revenue, data.last_month_revenue))}
+          </span>
+        )}
+      </div>
       <span class="kartu-angka-label">Omzet Bulan Ini</span>
       <span class="kartu-angka-nilai">{rupiah(data.month_revenue)}</span>
       <span class="kartu-angka-bantu">
@@ -38,12 +70,28 @@ const JENIS: Record<string, string> = {
     </div>
 
     <div class="kartu-angka">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+          </svg>
+        </span>
+      </div>
       <span class="kartu-angka-label">Produk Aktif</span>
       <span class="kartu-angka-nilai">{data.product_count}</span>
       <span class="kartu-angka-bantu">{data.customer_count} pelanggan tercatat</span>
     </div>
 
     <div class="kartu-angka">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+        </span>
+      </div>
       <span class="kartu-angka-label">Stok Menipis</span>
       {/* Nol bukan peringatan, jadi tidak diwarnai merah. */}
       <span class={data.low_stock_count > 0 ? 'kartu-angka-nilai text-red-600' : 'kartu-angka-nilai'}>

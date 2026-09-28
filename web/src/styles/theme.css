@@ -178,6 +178,17 @@
     @apply text-xs text-[var(--color-teks-lembut)];
   }
 
+  /* Pil naik/turun di kartu ringkasan laporan, dibanding periode setara
+     sebelumnya. `red-600` Tailwind bawaan dipakai untuk "turun" -- sama
+     seperti "bahaya" di atas -- bukan `merah-*` milik merek, supaya
+     "turun" tidak disalahbaca sebagai warna aksi utama. */
+  .lencana-naik {
+    @apply lencana bg-emerald-50 text-emerald-700;
+  }
+  .lencana-turun {
+    @apply lencana bg-red-50 text-red-600;
+  }
+
   /* --- Kolom isian --------------------------------------------------- */
 
   .kolom {
@@ -503,6 +514,37 @@
   .kotak-kurang {
     @apply rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-800;
   }
+
+  /* --- Nota cetak (struk kertas) ---------------------------------------- */
+
+  /* Disembunyikan di layar. Hanya `@media print` di bawah -- di luar
+     @layer, supaya urutan cascade-nya pasti menang atas komponen ini --
+     yang menampilkannya kembali saat mencetak. Lebar sempit dan huruf
+     monospace meniru struk printer thermal/kasir, bukan kertas A4. */
+  .nota-cetak {
+    @apply mx-auto hidden max-w-xs font-mono text-xs text-black;
+  }
+  .nota-toko {
+    @apply text-center text-sm font-bold;
+  }
+  .nota-baris-pusat {
+    @apply text-center;
+  }
+  .nota-garis {
+    @apply my-1.5 border-0 border-t border-dashed border-black;
+  }
+  .nota-tabel {
+    @apply w-full border-collapse;
+  }
+  .nota-tabel td {
+    @apply py-0.5 align-top;
+  }
+  .nota-kanan {
+    @apply text-right tabular-nums;
+  }
+  .nota-total td {
+    @apply border-t border-dashed border-black pt-1 font-bold;
+  }
 }
 
 /*
@@ -575,5 +617,38 @@
   }
   :root[data-sidebar='ciut'] .teks-sidebar {
     display: revert;
+  }
+}
+
+/*
+  Cetak nota kasir.
+
+  Trik "sembunyikan semuanya, tampilkan satu blok" klasik: SELURUH halaman
+  disembunyikan lewat `visibility` (bukan `display`, supaya tata letaknya
+  tidak ikut runtuh sebelum aturan kedua sempat menimpanya), lalu `.nota-cetak`
+  beserta seluruh isinya dikembalikan terlihat dan dilepas dari alur normal ke
+  pojok kiri-atas kertas. `.nota-cetak` sendiri berawal `display: none` (lihat
+  komponennya di atas) -- itu sebabnya blok ini juga harus mengembalikan
+  `display: block`, karena `visibility: visible` saja tidak berlaku pada
+  elemen yang sudah `display: none`.
+
+  Di luar @layer dengan alasan yang sama seperti blok `.hanya-js`/`.tanpa-js`
+  di atas: gaya tanpa @layer selalu menang atas gaya di dalam @layer,
+  terlepas dari urutan tempatnya ditulis di berkas ini.
+*/
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .nota-cetak,
+  .nota-cetak * {
+    visibility: visible;
+  }
+  .nota-cetak {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
   }
 }

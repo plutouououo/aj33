@@ -30,10 +30,26 @@ export interface Saringan {
   /** String kosong berarti "semua". */
   metode: string;
   jenis: string;
+  /**
+   * Periode kartu Produk Terlaris, terpisah dari `periode` di atas. String
+   * kosong berarti ikut `periode` -- lihat komentar di `kueriApi`.
+   */
+  top_periode: string;
 }
 
 /** Nilai baku periode. Sama dengan baku di backend. */
 const PERIODE_BAKU = 'month';
+
+/**
+ * Nomor pesanan yang ditampilkan ke pengguna: 8 karakter awal UUID
+ * transaksi, huruf besar. Bukan kolom database sendiri -- UUID transaksi
+ * sudah unik, jadi potongannya cukup untuk membedakan antar transaksi tanpa
+ * migrasi tambahan. Dipakai di tabel Penjualan, ekspor CSV, dan halaman
+ * detail transaksi supaya ketiganya selalu menunjuk nomor yang sama.
+ */
+export function nomorPesanan(id: string): string {
+  return id.slice(0, 8).toUpperCase();
+}
 
 function sah(nilai: string | null, pilihan: readonly { nilai: string }[]): string {
   return nilai && pilihan.some((p) => p.nilai === nilai) ? nilai : '';
@@ -49,6 +65,7 @@ export function bacaSaringan(url: URL): Saringan {
     periode: sah(p.get('periode'), PERIODE) || PERIODE_BAKU,
     metode: sah(p.get('metode'), METODE),
     jenis: sah(p.get('jenis'), JENIS),
+    top_periode: sah(p.get('top_periode'), PERIODE),
   };
 }
 
@@ -57,6 +74,9 @@ export function kueriApi(s: Saringan, batas: number): string {
   const q = new URLSearchParams({ period: s.periode, sales_limit: String(batas) });
   if (s.metode) q.set('payment_method', s.metode);
   if (s.jenis) q.set('type', s.jenis);
+  // Kosong berarti "ikut periode utama" -- backend sudah menjawab itu
+  // sendiri kalau `top_period` tidak dikirim sama sekali.
+  if (s.top_periode) q.set('top_period', s.top_periode);
   return q.toString();
 }
 
@@ -66,6 +86,7 @@ export function kueriHalaman(s: Saringan): string {
   if (s.periode !== PERIODE_BAKU) q.set('periode', s.periode);
   if (s.metode) q.set('metode', s.metode);
   if (s.jenis) q.set('jenis', s.jenis);
+  if (s.top_periode) q.set('top_periode', s.top_periode);
   return q.toString();
 }
 

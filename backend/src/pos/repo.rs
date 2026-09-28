@@ -38,6 +38,28 @@ pub struct Transaction {
     /// `total_amount`. Lihat migrasi 0007.
     pub shipping_cost: Decimal,
     pub total_amount: Decimal,
+    /// Nama kolom di bawah ini SENGAJA mengikuti field asli
+    /// `v2.payment.get_escrow_detail` milik Shopee (lihat migrasi 0018),
+    /// bukan istilah rakitan sendiri -- supaya kalau toko ini suatu saat
+    /// tersambung sungguhan, angka di sini bisa dibandingkan field-demi-
+    /// field dengan struk asli Shopee.
+    ///
+    /// Persentase komisi Shopee yang benar-benar dipakai transaksi ini
+    /// (pecahan, 0,1725 = 17,25%). Nol untuk kanal selain Shopee. Kasir bisa
+    /// mengedit ini per transaksi -- lihat `pos::service::checkout`.
+    pub platform_commission_fee_percent: Decimal,
+    pub platform_commission_fee: Decimal,
+    /// Persentase biaya layanan Shopee (program opsional seperti Gratis
+    /// Ongkir Xtra/Star+). Nol kalau toko tidak ikut program itu -- lihat
+    /// `service_fee` di API Shopee.
+    pub platform_service_fee_percent: Decimal,
+    pub platform_service_fee: Decimal,
+    /// PPh final UMKM, mengikuti `withholding_tax` di API Shopee: 0,5% dari
+    /// omzet Shopee setelah diskon. Tetap, tidak bisa diedit kasir.
+    pub platform_withholding_tax: Decimal,
+    /// Rp1.250 tetap, SEKALI per transaksi Shopee -- mengikuti
+    /// `seller_order_processing_fee` di API Shopee.
+    pub platform_order_processing_fee: Decimal,
     pub amount_paid: Option<Decimal>,
     pub change_amount: Option<Decimal>,
     pub status: String,
@@ -59,6 +81,12 @@ struct TransactionHead {
     discount_amount: Decimal,
     shipping_cost: Decimal,
     total_amount: Decimal,
+    platform_commission_fee_percent: Decimal,
+    platform_commission_fee: Decimal,
+    platform_service_fee_percent: Decimal,
+    platform_service_fee: Decimal,
+    platform_withholding_tax: Decimal,
+    platform_order_processing_fee: Decimal,
     amount_paid: Option<Decimal>,
     change_amount: Option<Decimal>,
     status: String,
@@ -91,6 +119,12 @@ async fn lengkapi(pool: &PgPool, head: TransactionHead) -> AppResult<Transaction
         discount_amount: head.discount_amount,
         shipping_cost: head.shipping_cost,
         total_amount: head.total_amount,
+        platform_commission_fee_percent: head.platform_commission_fee_percent,
+        platform_commission_fee: head.platform_commission_fee,
+        platform_service_fee_percent: head.platform_service_fee_percent,
+        platform_service_fee: head.platform_service_fee,
+        platform_withholding_tax: head.platform_withholding_tax,
+        platform_order_processing_fee: head.platform_order_processing_fee,
         amount_paid: head.amount_paid,
         change_amount: head.change_amount,
         status: head.status,
@@ -106,6 +140,9 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Transaction
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
                cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
                shipping_cost, total_amount,
+               platform_commission_fee_percent, platform_commission_fee,
+               platform_service_fee_percent, platform_service_fee,
+               platform_withholding_tax, platform_order_processing_fee,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         WHERE id = $1
@@ -128,6 +165,9 @@ pub async fn find_by_idempotency_key(pool: &PgPool, key: &str) -> AppResult<Opti
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
                cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
                shipping_cost, total_amount,
+               platform_commission_fee_percent, platform_commission_fee,
+               platform_service_fee_percent, platform_service_fee,
+               platform_withholding_tax, platform_order_processing_fee,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         WHERE idempotency_key = $1
@@ -179,6 +219,15 @@ pub struct NewTransaction {
     /// `total_amount`. Lihat migrasi 0007.
     pub shipping_cost: Decimal,
     pub total_amount: Decimal,
+    /// Nol untuk kanal selain Shopee -- lihat migrasi 0018. Nama field
+    /// mengikuti `v2.payment.get_escrow_detail` Shopee, bukan istilah
+    /// sendiri.
+    pub platform_commission_fee_percent: Decimal,
+    pub platform_commission_fee: Decimal,
+    pub platform_service_fee_percent: Decimal,
+    pub platform_service_fee: Decimal,
+    pub platform_withholding_tax: Decimal,
+    pub platform_order_processing_fee: Decimal,
     pub amount_paid: Option<Decimal>,
     pub change_amount: Option<Decimal>,
 }
@@ -193,8 +242,11 @@ pub async fn insert_transaction(
         INSERT INTO transactions
             (idempotency_key, type, customer_id, cashier_user_id, payment_method,
              sales_channel, subtotal, discount_amount, shipping_cost, total_amount,
+             platform_commission_fee_percent, platform_commission_fee,
+             platform_service_fee_percent, platform_service_fee,
+             platform_withholding_tax, platform_order_processing_fee,
              amount_paid, change_amount)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING id
         "#,
         input.idempotency_key,
@@ -207,6 +259,12 @@ pub async fn insert_transaction(
         input.discount_amount,
         input.shipping_cost,
         input.total_amount,
+        input.platform_commission_fee_percent,
+        input.platform_commission_fee,
+        input.platform_service_fee_percent,
+        input.platform_service_fee,
+        input.platform_withholding_tax,
+        input.platform_order_processing_fee,
         input.amount_paid,
         input.change_amount
     )
@@ -241,6 +299,9 @@ pub async fn list_transactions(pool: &PgPool, limit: i64) -> AppResult<Vec<Trans
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
                cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
                shipping_cost, total_amount,
+               platform_commission_fee_percent, platform_commission_fee,
+               platform_service_fee_percent, platform_service_fee,
+               platform_withholding_tax, platform_order_processing_fee,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
         ORDER BY created_at DESC

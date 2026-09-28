@@ -95,9 +95,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   return (await res.json()) as T;
 }
 
-// ---------------------------------------------------------------------
-// Bentuk data dari backend
-// ---------------------------------------------------------------------
+// --- Bentuk data dari backend ---
 
 export type Role = 'owner' | 'kasir' | 'pengepak';
 
@@ -253,7 +251,36 @@ export interface Transaction {
   discount_amount: number;
   /** Ongkir tidak termasuk `subtotal`; hanya menambah `total_amount`. */
   shipping_cost: number;
+  /**
+   * Untuk kanal Shopee, ini BUKAN yang dibayar pembeli -- pembeli sudah
+   * membayar penuh lewat Shopee. Ini uang yang sungguh cair ke toko setelah
+   * `platform_commission_fee + platform_service_fee + platform_withholding_tax
+   * + platform_order_processing_fee` dipotong. Kanal lain tidak kena potongan
+   * ini, jadi nilainya tetap "yang dibayar pembeli" seperti sebelumnya.
+   */
   total_amount: number;
+  /**
+   * Nama field di bawah ini SENGAJA mengikuti field asli
+   * `v2.payment.get_escrow_detail` milik Shopee, bukan istilah rakitan
+   * sendiri -- lihat `backend/src/marketplace/shopee/client.rs` untuk
+   * pemanggilan API-nya (belum tersambung) dan `pos::service` untuk
+   * perhitungannya.
+   */
+  /** Persentase `commission_fee` yang dipakai transaksi ini (pecahan,
+   * 0,1725 = 17,25%). Nol untuk kanal selain Shopee. Bisa diedit kasir per
+   * transaksi -- lihat halaman kasir. */
+  platform_commission_fee_percent: number;
+  platform_commission_fee: number;
+  /** Persentase `service_fee` (program opsional seperti Gratis Ongkir
+   * Xtra/Star+). Nol kalau toko tidak ikut program itu. Bisa diedit kasir. */
+  platform_service_fee_percent: number;
+  platform_service_fee: number;
+  /** `withholding_tax`: PPh final UMKM, 0,5% dari omzet Shopee setelah
+   * diskon. Tetap. */
+  platform_withholding_tax: number;
+  /** `seller_order_processing_fee`: Rp1.250 tetap, sekali per transaksi
+   * Shopee. */
+  platform_order_processing_fee: number;
   amount_paid: number | null;
   change_amount: number | null;
   status: string;
@@ -358,9 +385,7 @@ export interface Ticket {
   items: TicketItem[];
 }
 
-// ---------------------------------------------------------------------
-// Dasbor dan laporan
-// ---------------------------------------------------------------------
+// --- Dasbor dan laporan ---
 
 /**
  * Satu baris penjualan pada dasbor maupun laporan.
@@ -395,6 +420,10 @@ export interface LowStockProduct {
 export interface Dashboard {
   today_revenue: number;
   month_revenue: number;
+  /** Omzet kemarin, untuk pil naik/turun di kartu "Omzet Hari Ini". */
+  yesterday_revenue: number;
+  /** Omzet bulan lalu, untuk pil naik/turun di kartu "Omzet Bulan Ini". */
+  last_month_revenue: number;
   today_transaction_count: number;
   product_count: number;
   customer_count: number;
@@ -408,6 +437,15 @@ export interface SalesSummary {
   shipping: number;
   cogs: number;
   expenses: number;
+  /**
+   * Jumlah biaya administrasi (bisa diedit per transaksi) + PPh UMKM 0,5% +
+   * biaya proses pemesanan (Rp1.250/transaksi) Shopee pada periode ini,
+   * dibaca dari yang sungguh tersimpan tiap transaksi -- bukan tarif tetap.
+   * Nol kalau tidak ada penjualan Shopee pada periode ini. Kanal lain tidak
+   * tersentuh.
+   */
+  platform_fees: number;
+  /** `revenue - cogs - expenses - platform_fees`. */
   profit: number;
   transaction_count: number;
   /**
@@ -439,10 +477,66 @@ export interface TopProduct {
 
 export interface SalesReport {
   summary: SalesSummary;
+  /**
+   * Angka periode setara sebelumnya (mis. bulan lalu kalau saringan "Bulan
+   * Ini"), untuk kartu trend naik/turun. `null` kalau saringan "Seluruh
+   * Waktu" -- rentang itu tidak punya pembanding.
+   */
+  previous_summary: SalesSummary | null;
   /** Selalu enam bulan terakhir, tidak ikut saringan periode. */
   trend: MonthlyPoint[];
   expense_breakdown: ExpenseSlice[];
   top_products: TopProduct[];
   sales: SaleRow[];
   sales_limit: number;
+}
+
+/** Satu baris item pada detail transaksi. */
+export interface TransactionDetailItem {
+  id: string;
+  product_id: string;
+  /** Nama saat terjual, bukan nama sekarang. */
+  name: string;
+  /** SKU produk saat ini. `null` kalau produknya sudah dihapus. */
+  sku: string | null;
+  qty: number;
+  unit_price: number;
+  subtotal: number;
+}
+
+/** Bentuk `GET /reports/sales/{id}`. Owner saja. */
+export interface TransactionDetail {
+  id: string;
+  created_at: string;
+  status: string;
+  voided_at: string | null;
+  void_reason: string | null;
+  type: string;
+  sales_channel: SalesChannel;
+  payment_method: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  customer_email: string | null;
+  cashier_name: string;
+  subtotal: number;
+  discount_amount: number;
+  shipping_cost: number;
+  total_amount: number;
+  amount_paid: number | null;
+  change_amount: number | null;
+  platform_commission_fee_percent: number;
+  platform_commission_fee: number;
+  platform_service_fee_percent: number;
+  platform_service_fee: number;
+  platform_withholding_tax: number;
+  platform_order_processing_fee: number;
+  /** Batas atas kalau `items_without_cost > 0`. */
+  cogs: number;
+  items_without_cost: number;
+  /**
+   * `subtotal - discount_amount - cogs` dikurangi seluruh potongan Shopee.
+   * Beban toko tidak ikut -- itu milik periode, bukan transaksi tunggal.
+   */
+  net_profit: number;
+  items: TransactionDetailItem[];
 }

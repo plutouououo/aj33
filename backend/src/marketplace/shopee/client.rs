@@ -24,6 +24,10 @@ const PATH_PARAMETER_KIRIM: &str = "/api/v2/logistics/get_shipping_parameter";
 const PATH_KIRIM_ORDER: &str = "/api/v2/logistics/ship_order";
 #[allow(dead_code)]
 const PATH_NOMOR_RESI: &str = "/api/v2/logistics/get_tracking_number";
+// Belum dipanggil dari mana pun juga -- lihat catatan di bagian "Rincian
+// akuntansi pesanan (escrow)".
+#[allow(dead_code)]
+const PATH_DETAIL_ESCROW: &str = "/api/v2/payment/get_escrow_detail";
 
 /// Batas `page_size` menurut dokumentasi `get_order_list`.
 const MAKS_PER_HALAMAN: i32 = 100;
@@ -145,9 +149,7 @@ async fn kirim<T: DeserializeOwned>(permintaan: reqwest::RequestBuilder) -> AppR
     Ok(body.response)
 }
 
-// ---------------------------------------------------------------------
-// Menarik order
-// ---------------------------------------------------------------------
+// --- Menarik order ---
 
 #[derive(Debug, Deserialize)]
 struct DaftarOrder {
@@ -273,9 +275,7 @@ pub async fn detail_order(
     Ok(data.map(|d| d.order_list).unwrap_or_default())
 }
 
-// ---------------------------------------------------------------------
-// Memperbarui status pengiriman
-// ---------------------------------------------------------------------
+// --- Memperbarui status pengiriman ---
 //
 // BELUM TERSAMBUNG. Separuh pembaca order (`daftar_order`, `detail_order`)
 // sudah dipakai; separuh pengiriman di bawah ini sudah ditulis terhadap
@@ -419,6 +419,111 @@ pub async fn nomor_resi(
     Ok(data
         .and_then(|d| d.tracking_number)
         .filter(|n| !n.trim().is_empty()))
+}
+
+// --- Rincian akuntansi pesanan (escrow) ---
+//
+// BELUM TERSAMBUNG, sama seperti bagian pengiriman di atas: `SHOPEE_PARTNER_ID`
+// dkk. di `.env` masih kosong, jadi belum ada toko yang benar-benar
+// tersambung untuk dipanggil. Disiapkan lebih dulu supaya begitu toko
+// tersambung, tinggal dipanggil dari `orders` atau `reports` -- bukan
+// ditulis dari nol saat kebutuhannya baru muncul.
+//
+// KENAPA ENDPOINT INI. Model biaya platform Shopee di `pos::service`
+// (migrasi 0017/0018 -- `commission_fee`, `service_fee`, `withholding_tax`,
+// `seller_order_processing_fee`) adalah PERKIRAAN yang kasir masukkan
+// sendiri sebelum transaksi disimpan. `get_escrow_detail` adalah satu-
+// satunya sumber angka SUNGGUHAN: laporan akuntansi resmi Shopee per
+// pesanan, dibuat setelah pesanan selesai. Begitu toko tersambung, inilah
+// yang dipanggil untuk membandingkan (atau menggantikan) perkiraan kasir
+// dengan angka yang benar-benar Shopee potong.
+//
+// BENTUK RESPONSNYA ~80 FIELD (lihat skema `v2.payment.get_escrow_detail`
+// di `congminh1254/shopee-sdk`); yang didaftarkan di `RincianEscrow`/
+// `PendapatanOrder` cuma yang relevan untuk perbandingan itu. Field lain
+// (pajak lintas-negara, kompensasi Shopee Ads, dst.) sengaja tidak
+// didaftarkan -- kalau suatu saat perlu, tinggal ditambah, bukan ditulis
+// ulang.
+
+/// Bentuk jawaban `get_escrow_detail`. Hanya field tingkat atas yang dipakai
+/// yang didaftarkan; sisanya (mis. `buyer_payment_info`) tidak diambil sama
+/// sekali.
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct RincianEscrow {
+    #[serde(default)]
+    pub order_sn: String,
+    #[serde(default)]
+    pub order_income: Option<PendapatanOrder>,
+}
+
+/// Subset `order_income` dari `get_escrow_detail` -- angka yang benar-benar
+/// dibandingkan dengan perkiraan kasir di `pos::service::checkout`.
+///
+/// Semuanya `Option<f64>`, bukan `Decimal` atau wajib ada: dokumentasi
+/// Shopee menyebut banyak field ini "Only display for non cb sip affiliate
+/// shop", jadi ketidakhadirannya bukan kegagalan parsing.
+#[allow(dead_code)]
+#[derive(Debug, Default, Deserialize)]
+pub struct PendapatanOrder {
+    /// Uang yang sungguh cair ke toko untuk pesanan ini. Bandingkan dengan
+    /// `total_amount` yang kasir catat di `pos::service::checkout`.
+    #[serde(default)]
+    pub escrow_amount: Option<f64>,
+    #[serde(default)]
+    pub buyer_total_amount: Option<f64>,
+    /// "The commission fee charged by Shopee platform if applicable."
+    /// Bandingkan dengan `platform_commission_fee` kasir.
+    #[serde(default)]
+    pub commission_fee: Option<f64>,
+    /// "Amount charged by Shopee to seller for additional services"
+    /// (mis. Gratis Ongkir Xtra, Star+). Bandingkan dengan
+    /// `platform_service_fee` kasir.
+    #[serde(default)]
+    pub service_fee: Option<f64>,
+    #[serde(default)]
+    pub seller_transaction_fee: Option<f64>,
+    /// "Cross-border tax imposed by the Indonesian government on sellers."
+    /// TIDAK dimodelkan di `pos::service` -- lihat catatan perbandingan.
+    #[serde(default)]
+    pub escrow_tax: Option<f64>,
+    /// "According to regulations issued by Directorate General of Taxation
+    /// in ID, the Withholding Tax is applied to the income stated in the
+    /// invoice..." -- PPh final UMKM. Bandingkan dengan
+    /// `platform_withholding_tax` kasir.
+    #[serde(default)]
+    pub withholding_tax: Option<f64>,
+    /// "Order Processing Fee is the amount charged to sellers for every
+    /// order created." Bandingkan dengan `platform_order_processing_fee`
+    /// kasir.
+    #[serde(default)]
+    pub seller_order_processing_fee: Option<f64>,
+    #[serde(default)]
+    pub actual_shipping_fee: Option<f64>,
+    #[serde(default)]
+    pub buyer_paid_shipping_fee: Option<f64>,
+}
+
+/// Mengambil rincian akuntansi satu pesanan.
+///
+/// Berbeda dari `detail_order`: dipanggil SETELAH pesanan selesai (angkanya
+/// baru final saat itu), satu order per panggilan (Shopee juga punya
+/// `get_escrow_detail_batch` untuk sampai 50 sekaligus, belum disiapkan di
+/// sini karena belum ada pemanggil yang butuh itu).
+#[allow(dead_code)]
+pub async fn detail_escrow(
+    cfg: &ShopeeConfig,
+    kredensial: &Kredensial,
+    order_sn: &str,
+) -> AppResult<Option<RincianEscrow>> {
+    let url = url_toko(
+        cfg,
+        kredensial,
+        PATH_DETAIL_ESCROW,
+        &[("order_sn", order_sn.to_string())],
+    );
+
+    kirim(reqwest::Client::new().get(&url)).await
 }
 
 #[cfg(test)]
@@ -574,5 +679,72 @@ mod tests {
         let terlalu_banyak: Vec<String> = (0..51).map(|i| format!("SN{i}")).collect();
         let hasil = detail_order(&cfg(), &kredensial(), &terlalu_banyak).await;
         assert!(hasil.is_err());
+    }
+
+    #[test]
+    fn url_escrow_membawa_order_sn_dan_ditandatangani_seperti_order() {
+        let url = url_toko(
+            &cfg(),
+            &kredensial(),
+            PATH_DETAIL_ESCROW,
+            &[("order_sn", "2404098R48U37H".into())],
+        );
+
+        assert!(url.starts_with("https://partner.test/api/v2/payment/get_escrow_detail?"));
+        assert!(url.contains("order_sn=2404098R48U37H"));
+        assert!(url.contains("access_token=token-akses"));
+        assert!(url.contains("shop_id=322300222"));
+        assert!(url.contains("sign="));
+    }
+
+    /// Potongan nyata dari skema `v2.payment.get_escrow_detail` (SDK
+    /// `congminh1254/shopee-sdk`) -- memastikan `RincianEscrow` membaca field
+    /// yang benar-benar dipakai untuk perbandingan, bukan salah ketik nama
+    /// field yang baru ketahuan saat toko sungguhan tersambung.
+    #[test]
+    fn rincian_escrow_membaca_field_yang_dibandingkan_dengan_kasir() {
+        let raw = serde_json::json!({
+            "order_sn": "2404098R48U37H",
+            "order_income": {
+                "escrow_amount": 42875.0,
+                "buyer_total_amount": 45000.0,
+                "commission_fee": 776.25,
+                "service_fee": 0.0,
+                "seller_transaction_fee": 0.0,
+                "escrow_tax": 0.0,
+                "withholding_tax": 97.5,
+                "seller_order_processing_fee": 1250.0,
+                "actual_shipping_fee": 0.0,
+                "buyer_paid_shipping_fee": 0.0
+            }
+        });
+
+        let hasil: RincianEscrow = serde_json::from_value(raw).unwrap();
+        let pendapatan = hasil.order_income.unwrap();
+
+        assert_eq!(hasil.order_sn, "2404098R48U37H");
+        assert_eq!(pendapatan.escrow_amount, Some(42875.0));
+        assert_eq!(pendapatan.commission_fee, Some(776.25));
+        assert_eq!(pendapatan.withholding_tax, Some(97.5));
+        assert_eq!(pendapatan.seller_order_processing_fee, Some(1250.0));
+    }
+
+    #[test]
+    fn rincian_escrow_field_yang_tidak_dikirim_shopee_tidak_gagal_parse() {
+        // Banyak field `order_income` "hanya tampil untuk non cb sip
+        // affiliate shop" menurut dokumentasi Shopee -- payload yang
+        // memangkasnya harus tetap terbaca, bukan menolak seluruh respons.
+        let raw = serde_json::json!({
+            "order_sn": "2404098R48U37H",
+            "order_income": {
+                "escrow_amount": 42875.0
+            }
+        });
+
+        let hasil: RincianEscrow = serde_json::from_value(raw).unwrap();
+        let pendapatan = hasil.order_income.unwrap();
+
+        assert_eq!(pendapatan.escrow_amount, Some(42875.0));
+        assert_eq!(pendapatan.commission_fee, None);
     }
 }

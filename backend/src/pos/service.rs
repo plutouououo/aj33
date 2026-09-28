@@ -13,7 +13,7 @@
 use super::repo::{self, NewTransaction, NewTransactionItem, Transaction as TxRow};
 use crate::error::{AppError, AppResult};
 use crate::stock::{self, StockLine, StockReason};
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -92,6 +92,40 @@ impl SalesChannel {
     }
 }
 
+/// Tarif Shopee. Nama fungsi mengikuti field ASLI di
+/// `v2.payment.get_escrow_detail` milik Shopee (lihat migrasi 0018 dan
+/// `docs/` hasil riset `congminh1254/shopee-sdk`), bukan istilah rakitan
+/// sendiri:
+///
+/// - `commission_fee`: komisi dasar, berlaku semua pesanan.
+///   `shopee_commission_persen_default` bisa DIGANTI kasir per transaksi
+///   lewat `CheckoutInput::platform_commission_fee_percent`.
+/// - `service_fee`: biaya program tambahan yang OPSIONAL (mis. Gratis
+///   Ongkir Xtra, Star+). Defaultnya NOL -- kita tidak tahu toko ini ikut
+///   program berbayar yang mana, jadi kasir yang mengisi kalau ternyata
+///   berlaku. Juga bisa diedit lewat `CheckoutInput::platform_service_fee_percent`.
+/// - `withholding_tax`: PPh final UMKM. Tetap 0,5%, tidak bisa diedit.
+/// - `seller_order_processing_fee`: Rp1.250 tetap, SEKALI per pesanan.
+///   Tidak bisa diedit.
+///
+/// Keempatnya disimpan per transaksi (migrasi 0017/0018), bukan dihitung
+/// ulang di laporan dengan tarif global.
+///
+/// `Decimal::new` bukan `const fn` pada versi crate ini, jadi semuanya
+/// fungsi kecil, bukan `const`.
+fn shopee_commission_persen_default() -> Decimal {
+    Decimal::new(1725, 4) // 17,25%
+}
+fn shopee_service_persen_default() -> Decimal {
+    Decimal::ZERO
+}
+fn shopee_withholding_tax_persen() -> Decimal {
+    Decimal::new(5, 3) // 0,5%
+}
+fn shopee_order_processing_fee() -> Decimal {
+    Decimal::new(1250, 0)
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct CheckoutItem {
     pub product_id: Uuid,
@@ -111,11 +145,19 @@ pub struct CheckoutInput {
     /// Daftar harga yang dipakai. Menentukan `unit_price` tiap baris struk.
     pub sales_channel: SalesChannel,
     pub amount_paid: Option<Decimal>,
-    /// Ongkos kirim. `None` berarti nol -- bukan "tidak diketahui".
+    /// Ongkos kirim. `None` berarti nol -- bukan "tidak diketahui". Diabaikan
+    /// sama sekali untuk `SalesChannel::Shopee` -- lihat `checkout`.
     pub shipping_cost: Option<Decimal>,
     /// Potongan harga atas seluruh belanja. `None` berarti nol. Tidak boleh
     /// melebihi subtotal -- lihat migrasi 0015.
     pub discount_amount: Option<Decimal>,
+    /// Persentase `commission_fee` Shopee, sebagai pecahan (0,1725 = 17,25%).
+    /// Hanya berlaku untuk `SalesChannel::Shopee`; diabaikan untuk kanal
+    /// lain. `None` jatuh ke `shopee_commission_persen_default()`.
+    pub platform_commission_fee_percent: Option<Decimal>,
+    /// Persentase `service_fee` Shopee (program opsional). `None` jatuh ke
+    /// `shopee_service_persen_default()` (nol).
+    pub platform_service_fee_percent: Option<Decimal>,
     pub items: Vec<CheckoutItem>,
     pub cashier_user_id: Uuid,
 }
@@ -125,6 +167,23 @@ pub struct CheckoutInput {
 /// tercatat.
 fn uang(nilai: Decimal) -> Decimal {
     nilai.round_dp(2)
+}
+
+/// Biaya platform Shopee dibulatkan ke RUPIAH PENUH (bukan `uang`, yang
+/// menyisakan 2 desimal) -- harga barang di sistem ini selalu bulat, dan
+/// menyimpan sisa sen dari perkalian persen (mis. Rp7.762,50) adalah
+/// pecahan yang tidak pernah muncul di tempat lain.
+///
+/// Strateginya DIPAKSA `MidpointAwayFromZero`, bukan dibiarkan memakai
+/// default `round_dp` (`MidpointNearestEven`, alias pembulatan ke genap
+/// terdekat). Kasir kanal Shopee di kasir.astro menghitung ulang angka yang
+/// sama ini lewat `Math.round` JavaScript SEBELUM transaksi disimpan, dan
+/// `Math.round` selalu membulatkan ,50 ke ATAS. Kalau backend diam-diam
+/// memakai aturan pembulatan yang berbeda, angka yang kasir lihat di layar
+/// sebelum menekan "Selesaikan" bisa beda satu rupiah dari yang tercatat di
+/// struk -- persis di titik seperti Rp45.000 × 17,25% = Rp7.762,50.
+fn rupiah_bulat(nilai: Decimal) -> Decimal {
+    nilai.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
 }
 
 /// Nominal uang sebagai bahan sidik jari, SELALU dua angka di belakang koma.
@@ -141,6 +200,14 @@ fn sidik_uang(nilai: Option<Decimal>) -> String {
         .unwrap_or_else(|| "null".into())
 }
 
+/// Sama seperti `sidik_uang`, tapi untuk persentase -- yang butuh presisi 4
+/// angka di belakang koma (0,1725), bukan 2. Dipakai untuk
+/// `platform_commission_fee_percent`/`platform_service_fee_percent`,
+/// satu-satunya nominal non-uang yang ikut menentukan isi transaksi.
+fn sidik_persen(nilai: Decimal) -> String {
+    format!("{nilai:.4}")
+}
+
 /// Bahan sidik jari sebuah transaksi.
 ///
 /// Dibungkus sebagai struct, bukan deretan argumen: isinya delapan hal yang
@@ -155,6 +222,10 @@ struct Bahan<'a> {
     amount_paid: Option<Decimal>,
     shipping_cost: Decimal,
     discount_amount: Decimal,
+    /// Nol untuk kanal selain Shopee. Diikutkan karena persen yang berbeda
+    /// berarti biaya yang tersimpan juga berbeda -- lihat migrasi 0018.
+    platform_commission_fee_percent: Decimal,
+    platform_service_fee_percent: Decimal,
     items: &'a [(Uuid, i32)],
 }
 
@@ -199,6 +270,10 @@ fn sidik_jari(bahan: &Bahan<'_>) -> String {
     // terbalik: yang terkirim ulang tanpa ini adalah struk yang KELEBIHAN
     // sebesar potongan yang baru saja disepakati di depan meja.
     hasher.update(sidik_uang(Some(bahan.discount_amount)).as_bytes());
+    hasher.update(b"|");
+    hasher.update(sidik_persen(bahan.platform_commission_fee_percent).as_bytes());
+    hasher.update(b"|");
+    hasher.update(sidik_persen(bahan.platform_service_fee_percent).as_bytes());
     for (product_id, qty) in urut {
         hasher.update(b"|");
         hasher.update(product_id.as_bytes());
@@ -219,12 +294,34 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         return Err(AppError::bad_request("Jumlah item harus lebih dari 0."));
     }
 
+    // Transaksi Shopee dicatat sebagai uang yang sudah pasti diterima lewat
+    // ShopeePay, bukan tunai yang dihitung kembaliannya di depan meja. Kalau
+    // keduanya bercampur, "kembalian" jadi tidak berarti apa-apa karena
+    // `total_amount`-nya sendiri sudah bersih dari potongan Shopee.
+    if input.sales_channel == SalesChannel::Shopee && input.payment_method == PaymentMethod::Cash {
+        return Err(AppError::bad_request(
+            "Transaksi Shopee tidak bisa dicatat sebagai tunai -- uangnya diterima lewat ShopeePay.",
+        ));
+    }
+
+    // Ongkir tidak berlaku sama sekali untuk Shopee -- logistiknya di luar
+    // sistem ini, dan mencampurnya ke "Estimasi Total Penghasilan" (yang
+    // sudah berarti "uang yang cair ke toko") memberi angka yang tidak
+    // berarti apa-apa. Apa pun yang terkirim di kolom ini untuk kanal
+    // Shopee diabaikan, bukan ditolak -- klien lama yang belum tahu kolom
+    // ini sudah tidak berlaku untuk Shopee tidak perlu error.
+    //
     // Dinormalkan sekali di sini lalu dipakai untuk sidik jari MAUPUN total,
     // supaya angka yang di-hash persis angka yang tersimpan.
-    let ongkir = uang(input.shipping_cost.unwrap_or(Decimal::ZERO));
-    if ongkir.is_sign_negative() {
-        return Err(AppError::bad_request("Ongkos kirim tidak boleh negatif."));
-    }
+    let ongkir = if input.sales_channel == SalesChannel::Shopee {
+        Decimal::ZERO
+    } else {
+        let nilai = uang(input.shipping_cost.unwrap_or(Decimal::ZERO));
+        if nilai.is_sign_negative() {
+            return Err(AppError::bad_request("Ongkos kirim tidak boleh negatif."));
+        }
+        nilai
+    };
 
     // Dinormalkan bersama ongkir, dan dengan alasan yang sama: angka yang
     // di-hash harus persis angka yang tersimpan. Batas atasnya -- tidak
@@ -234,6 +331,38 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     if diskon.is_sign_negative() {
         return Err(AppError::bad_request("Diskon tidak boleh negatif."));
     }
+
+    // Diselesaikan di sini, sebelum sidik jari -- persennya bagian dari apa
+    // yang diminta kasir, bukan sesuatu yang bergantung pada harga barang.
+    // Nol untuk kanal selain Shopee: mengirimkan persen untuk kanal lain
+    // tidak berarti apa-apa dan tidak boleh ikut tersimpan (lihat migrasi
+    // 0018, `transactions_platform_fee_channel_check`).
+    let jepit_persen = |persen: Decimal, label: &str| -> AppResult<Decimal> {
+        if persen.is_sign_negative() || persen > Decimal::ONE {
+            return Err(AppError::bad_request(format!(
+                "Persentase {label} harus di antara 0% dan 100%."
+            )));
+        }
+        Ok(persen)
+    };
+
+    let (commission_persen, service_persen) = match input.sales_channel {
+        SalesChannel::Shopee => (
+            jepit_persen(
+                input
+                    .platform_commission_fee_percent
+                    .unwrap_or_else(shopee_commission_persen_default),
+                "biaya komisi",
+            )?,
+            jepit_persen(
+                input
+                    .platform_service_fee_percent
+                    .unwrap_or_else(shopee_service_persen_default),
+                "biaya layanan",
+            )?,
+        ),
+        _ => (Decimal::ZERO, Decimal::ZERO),
+    };
 
     // Digabung DULU, baru disidikjari: yang tersimpan di database juga versi
     // gabungannya, jadi sidik jari request dan sidik jari transaksi lama
@@ -274,6 +403,8 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         amount_paid: amount_paid_tersimpan,
         shipping_cost: ongkir,
         discount_amount: diskon,
+        platform_commission_fee_percent: commission_persen,
+        platform_service_fee_percent: service_persen,
         items: &per_produk,
     });
 
@@ -289,6 +420,8 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             amount_paid: existing.amount_paid,
             shipping_cost: existing.shipping_cost,
             discount_amount: existing.discount_amount,
+            platform_commission_fee_percent: existing.platform_commission_fee_percent,
+            platform_service_fee_percent: existing.platform_service_fee_percent,
             items: &items_lama,
         });
 
@@ -342,12 +475,42 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         ));
     }
 
+    // Potongan Shopee: commission_fee (bisa diedit) + service_fee (bisa
+    // diedit, default nol) + withholding_tax 0,5% (tetap), ketiganya dari
+    // omzet SETELAH diskon (ongkir sudah nol untuk Shopee, jadi tidak perlu
+    // dikecualikan lagi di sini). Plus seller_order_processing_fee Rp1.250
+    // tetap, sekali per transaksi. Nol untuk kanal selain Shopee.
+    //
+    // `rupiah_bulat`, bukan `uang`: lihat komentarnya -- membulatkan ke
+    // rupiah penuh dengan strategi yang SAMA dengan `Math.round` di
+    // kasir.astro, supaya angka yang kasir lihat sebelum membayar sama
+    // persis dengan yang tersimpan di struk.
+    let basis_fee = subtotal - diskon;
+    let (biaya_komisi, biaya_layanan, pph, biaya_proses) =
+        if input.sales_channel == SalesChannel::Shopee {
+            (
+                rupiah_bulat(basis_fee * commission_persen),
+                rupiah_bulat(basis_fee * service_persen),
+                rupiah_bulat(basis_fee * shopee_withholding_tax_persen()),
+                shopee_order_processing_fee(),
+            )
+        } else {
+            (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO)
+        };
+
     // `subtotal` tetap harga barang saja; diskon dan ongkir punya kolomnya
     // sendiri dan hanya bertemu di `total_amount`. Itulah yang membuat baris
     // struk tetap bisa dijumlahkan menjadi subtotal, dan sekaligus membuat
     // pemeriksaan uang tunai serta kembalian di bawah otomatis benar tanpa
     // disentuh -- keduanya sudah memakai `total_amount`.
-    let total_amount = uang(subtotal - diskon + ongkir);
+    //
+    // Untuk Shopee, `total_amount` di sini BUKAN "yang dibayar pembeli" --
+    // pembeli sudah membayar penuh lewat Shopee. Ia adalah uang yang
+    // sungguh cair ke toko setelah potongan Shopee: itulah angka yang benar
+    // untuk dicatat, karena layar kasir ini memang cuma untuk mencatat apa
+    // yang sudah terjadi, bukan menagih pembayaran baru.
+    let total_amount =
+        uang(subtotal - diskon + ongkir - biaya_komisi - biaya_layanan - pph - biaya_proses);
 
     if input.payment_method == PaymentMethod::Cash {
         let dibayar = amount_paid_tersimpan
@@ -374,6 +537,12 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             discount_amount: diskon,
             shipping_cost: ongkir,
             total_amount,
+            platform_commission_fee_percent: commission_persen,
+            platform_commission_fee: biaya_komisi,
+            platform_service_fee_percent: service_persen,
+            platform_service_fee: biaya_layanan,
+            platform_withholding_tax: pph,
+            platform_order_processing_fee: biaya_proses,
             amount_paid: amount_paid_tersimpan,
             change_amount,
         },
@@ -445,6 +614,8 @@ mod tests {
             amount_paid: Some(Decimal::new(10000, 0)),
             shipping_cost: Decimal::ZERO,
             discount_amount: Decimal::ZERO,
+            platform_commission_fee_percent: Decimal::ZERO,
+            platform_service_fee_percent: Decimal::ZERO,
             items,
         }
     }
@@ -482,6 +653,22 @@ mod tests {
     fn pembulatan_uang_konsisten_dua_desimal() {
         assert_eq!(uang(Decimal::new(1005, 3)), Decimal::new(100, 2));
         assert_eq!(uang(Decimal::new(70000, 0)), Decimal::new(70000, 0));
+    }
+
+    #[test]
+    fn biaya_platform_dibulatkan_ke_rupiah_penuh_bukan_genap_terdekat() {
+        // Rp45.000 x 17,25% = Rp7.762,50 PERSIS di tengah dua rupiah. Default
+        // `round_dp` rust_decimal membulatkan ke GENAP terdekat (7762,50 ->
+        // 7762, karena 7762 genap) -- kalau `rupiah_bulat` diam-diam kembali
+        // memakai itu, kasir yang melihat Rp7.763 di layar (dihitung
+        // `Math.round` JavaScript, yang selalu membulatkan ,50 ke atas) akan
+        // menerima struk yang mencatat Rp7.762. Uji ini mengunci arahnya.
+        let basis = Decimal::new(45000, 0);
+        let persen = Decimal::new(1725, 4); // 17,25%
+        assert_eq!(rupiah_bulat(basis * persen), Decimal::new(7763, 0));
+
+        // Kasus non-tengah tetap harus membulatkan seperti biasa.
+        assert_eq!(rupiah_bulat(Decimal::new(72249, 2)), Decimal::new(722, 0));
     }
 
     #[test]
@@ -534,6 +721,34 @@ mod tests {
         };
 
         assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&dengan_diskon));
+    }
+
+    #[test]
+    fn persen_komisi_shopee_berbeda_menghasilkan_sidik_jari_berbeda() {
+        // Kasir bisa mengedit persen commission_fee Shopee per transaksi.
+        // Tanpa ini di sidik jari, mengoreksi persen yang salah lalu mengirim
+        // ulang keranjang yang sama akan dijawab dengan transaksi lama yang
+        // biaya platformnya tersimpan salah.
+        let items = [(produk(1), 1)];
+        let persen_beda = Bahan {
+            platform_commission_fee_percent: Decimal::new(20, 2), // 20%
+            ..bahan(&items)
+        };
+
+        assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&persen_beda));
+    }
+
+    #[test]
+    fn persen_layanan_shopee_berbeda_menghasilkan_sidik_jari_berbeda() {
+        // Sama seperti komisi, tapi untuk service_fee -- program opsional
+        // yang persennya juga bisa diedit kasir.
+        let items = [(produk(1), 1)];
+        let persen_beda = Bahan {
+            platform_service_fee_percent: Decimal::new(5, 2), // 5%
+            ..bahan(&items)
+        };
+
+        assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&persen_beda));
     }
 
     #[test]

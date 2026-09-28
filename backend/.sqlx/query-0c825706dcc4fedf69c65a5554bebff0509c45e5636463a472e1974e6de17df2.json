@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(\n                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)),\n                   0\n               ) AS \"cogs!\",\n               COUNT(*) FILTER (\n                   WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL\n               ) AS \"tanpa_pokok!\"\n        FROM stock_adjustments sa\n        LEFT JOIN product_batches pb ON pb.id = sa.batch_id\n        LEFT JOIN products p ON p.id = sa.product_id\n        WHERE sa.reason = 'sale'\n          AND sa.change_qty < 0\n          AND sa.reference_type = 'transaction'\n          AND sa.reference_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cogs!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "tanpa_pokok!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "0c825706dcc4fedf69c65a5554bebff0509c45e5636463a472e1974e6de17df2"
+}

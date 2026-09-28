@@ -298,9 +298,7 @@ pub async fn upsert_order(
     })
 }
 
-// ---------------------------------------------------------------------
-// Pemetaan listing marketplace ke produk internal
-// ---------------------------------------------------------------------
+// --- Pemetaan listing marketplace ke produk internal ---
 
 #[derive(Debug, Serialize)]
 pub struct Mapping {

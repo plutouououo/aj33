@@ -1,7 +1,7 @@
 ---
 import AppShell from '../../layouts/AppShell.astro';
 import { api, type SalesReport } from '../../lib/api';
-import { rupiah, waktu } from '../../lib/format';
+import { hitungTren, labelTren, rupiah, waktu } from '../../lib/format';
 import {
   JENIS,
   METODE,
@@ -12,6 +12,7 @@ import {
   labelJenis,
   labelMetode,
   labelPeriode,
+  nomorPesanan,
 } from '../../lib/laporan';
 
 const user = Astro.locals.user!;
@@ -29,7 +30,7 @@ const laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, BARI
 const kueri = kueriHalaman(saringan);
 const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
 
-const { summary, trend, expense_breakdown, top_products, sales } = laporan;
+const { summary, previous_summary, trend, expense_breakdown, top_products, sales } = laporan;
 
 // Skala grafik. Satu skala untuk omzet dan beban sekaligus supaya tinggi
 // batang keduanya bisa dibandingkan langsung; kalau masing-masing punya
@@ -61,7 +62,12 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       URL -- bisa di-bookmark, dibagikan, dan tombol kembali bekerja. Tombol
       ekspor membaca saringan dari URL yang sama, jadi berkas yang diunduh
       tidak pernah berisi periode lain dari yang terlihat di layar. */}
-  <form method="GET" class="kartu mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-[12rem_12rem_12rem_1fr]">
+  <form
+    method="GET"
+    id="saringan"
+    action="#saringan"
+    class="kartu mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-[12rem_12rem_12rem_1fr]"
+  >
     <div>
       <label class="label" for="periode">Periode</label>
       <select class="kolom" id="periode" name="periode">
@@ -103,30 +109,111 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     </div>
   </form>
 
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    <div class="kartu-angka">
-      <span class="kartu-angka-label">Omzet Barang</span>
+  {/* Ikon dan pil naik/turun di atas hanya perbandingan arah, bukan
+      penilaian baik/buruk -- "Harga Pokok naik" bukan berarti buruk kalau
+      omzetnya ikut naik lebih banyak. Pil disembunyikan sama sekali kalau
+      saringan "Seluruh Waktu" (tidak ada periode sebelumnya untuk
+      dibandingkan) -- lihat `previous_summary` di backend. */}
+  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+    <div class="kartu-angka bg-merah-600 text-white">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 6v12m3-8.5c0-1.38-1.34-2.5-3-2.5s-3 1.12-3 2.5 1.34 2.5 3 2.5 3 1.12 3 2.5-1.34 2.5-3 2.5-3-1.12-3-2.5" />
+          </svg>
+        </span>
+        {hitungTren(summary.revenue, previous_summary?.revenue) && (
+          <span class={`lencana-${hitungTren(summary.revenue, previous_summary?.revenue)!.arah}`}>
+            {labelTren(hitungTren(summary.revenue, previous_summary?.revenue))}
+          </span>
+        )}
+      </div>
+      <span class="kartu-angka-label !text-white/80">Omzet Barang</span>
       <span class="kartu-angka-nilai">{rupiah(summary.revenue)}</span>
-      <span class="kartu-angka-bantu">
+      <span class="kartu-angka-bantu !text-white/70">
         {labelPeriode(saringan.periode)} · ongkir {rupiah(summary.shipping)} di luar angka ini
       </span>
     </div>
 
     <div class="kartu-angka">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2.25 18L9 11.25l4.306 4.306a11.95 11.95 0 015.814-5.518l2.74-1.22M21.75 6.75l-5.94 2.28 2.28 5.94" />
+          </svg>
+        </span>
+        {hitungTren(summary.profit, previous_summary?.profit) && (
+          <span class={`lencana-${hitungTren(summary.profit, previous_summary?.profit)!.arah}`}>
+            {labelTren(hitungTren(summary.profit, previous_summary?.profit))}
+          </span>
+        )}
+      </div>
       <span class="kartu-angka-label">Laba</span>
       <span class={summary.profit < 0 ? 'kartu-angka-nilai text-red-600' : 'kartu-angka-nilai'}>
         {rupiah(summary.profit)}
       </span>
-      <span class="kartu-angka-bantu">Omzet − harga pokok − beban</span>
+      <span class="kartu-angka-bantu">Omzet − harga pokok − beban − potongan Shopee</span>
     </div>
 
     <div class="kartu-angka">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+          </svg>
+        </span>
+        {hitungTren(summary.cogs, previous_summary?.cogs) && (
+          <span class={`lencana-${hitungTren(summary.cogs, previous_summary?.cogs)!.arah}`}>
+            {labelTren(hitungTren(summary.cogs, previous_summary?.cogs))}
+          </span>
+        )}
+      </div>
       <span class="kartu-angka-label">Harga Pokok</span>
       <span class="kartu-angka-nilai">{rupiah(summary.cogs)}</span>
       <span class="kartu-angka-bantu">Marjin kotor {marjin.toFixed(1)}%</span>
     </div>
 
+    {/* Omzet Shopee di atas masih angka KOTOR -- sama seperti di struk.
+        Potongan ini (komisi + layanan + PPh 0,5% + Rp1.250 per TRANSAKSI
+        Shopee, bukan per barang) adalah bagian yang tidak pernah cair ke
+        toko, dan sudah dikurangkan dari kartu Laba di atas. Kartu ini hanya
+        menjelaskan dari mana selisihnya berasal. */}
     <div class="kartu-angka">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.659A2.25 2.25 0 009.568 3z M6 6h.008v.008H6V6z" />
+          </svg>
+        </span>
+        {hitungTren(summary.platform_fees, previous_summary?.platform_fees) && (
+          <span class={`lencana-${hitungTren(summary.platform_fees, previous_summary?.platform_fees)!.arah}`}>
+            {labelTren(hitungTren(summary.platform_fees, previous_summary?.platform_fees))}
+          </span>
+        )}
+      </div>
+      <span class="kartu-angka-label">Potongan Shopee</span>
+      <span class="kartu-angka-nilai">{rupiah(summary.platform_fees)}</span>
+      <span class="kartu-angka-bantu">Komisi + layanan + PPh + biaya proses pesanan Shopee</span>
+    </div>
+
+    <div class="kartu-angka">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 12h6m-6 3.75h6M10.5 3H8.25A2.25 2.25 0 006 5.25v13.5A2.25 2.25 0 008.25 21h7.5A2.25 2.25 0 0018 18.75V8.25L12.75 3H10.5zm0 0v4.5a1.5 1.5 0 001.5 1.5h4.5" />
+          </svg>
+        </span>
+        {hitungTren(summary.transaction_count, previous_summary?.transaction_count) && (
+          <span class={`lencana-${hitungTren(summary.transaction_count, previous_summary?.transaction_count)!.arah}`}>
+            {labelTren(hitungTren(summary.transaction_count, previous_summary?.transaction_count))}
+          </span>
+        )}
+      </div>
       <span class="kartu-angka-label">Transaksi</span>
       <span class="kartu-angka-nilai">{summary.transaction_count}</span>
       <span class="kartu-angka-bantu">Beban tercatat {rupiah(summary.expenses)}</span>
@@ -226,10 +313,35 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     </section>
   </div>
 
-  <section class="kartu-rapat mb-6 overflow-x-auto">
-    <h2 class="border-b border-[var(--color-garis)] px-5 py-4 text-base font-bold">
-      Produk Terlaris
-    </h2>
+  <section class="kartu-rapat mb-6 overflow-x-auto" id="produk-terlaris">
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-garis)] px-5 py-4">
+      <h2 class="text-base font-bold">Produk Terlaris</h2>
+
+      {/* Periode kartu ini terpisah dari saringan utama di atas, supaya
+          bisa lihat "1 Minggu Ini" tanpa mengubah seluruh laporan. Metode
+          bayar & jenis pembeli tetap ikut saringan utama lewat input
+          tersembunyi -- submit form ini tidak boleh mereset keduanya.
+          `action="#produk-terlaris"` supaya setelah submit browser kembali
+          scroll ke kartu ini, bukan ke paling atas halaman. */}
+      <form method="GET" class="flex items-center gap-2" action="#produk-terlaris">
+        {saringan.metode && <input type="hidden" name="metode" value={saringan.metode} />}
+        {saringan.jenis && <input type="hidden" name="jenis" value={saringan.jenis} />}
+        {saringan.periode !== 'month' && (
+          <input type="hidden" name="periode" value={saringan.periode} />
+        )}
+        <select class="kolom !py-2 !text-xs" name="top_periode" aria-label="Periode Produk Terlaris">
+          <option value="" selected={!saringan.top_periode}>
+            Ikut saringan di atas
+          </option>
+          {PERIODE.map((p) => (
+            <option value={p.nilai} selected={saringan.top_periode === p.nilai}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        <button class="tombol-halus !px-3 !py-2 !text-xs" type="submit">Terapkan</button>
+      </form>
+    </div>
     <table class="tabel">
       <thead>
         <tr>
@@ -284,6 +396,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     <table class="tabel">
       <thead>
         <tr>
+          <th>No. Pesanan</th>
           <th>Waktu</th>
           <th>Pembeli</th>
           <th>Metode</th>
@@ -297,6 +410,11 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         {
           sales.map((s) => (
             <tr>
+              <td class="whitespace-nowrap">
+                <a class="font-medium text-merah-700 hover:underline" href={`/laporan/transaksi/${s.id}`}>
+                  #{nomorPesanan(s.id)}
+                </a>
+              </td>
               <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
                 {waktu(s.created_at)}
               </td>
@@ -318,7 +436,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         {
           sales.length === 0 && (
             <tr>
-              <td colspan="7" class="py-12 text-center text-[var(--color-teks-lembut)]">
+              <td colspan="8" class="py-12 text-center text-[var(--color-teks-lembut)]">
                 Tidak ada penjualan yang cocok dengan saringan ini.
               </td>
             </tr>

@@ -39,9 +39,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-// ---------------------------------------------------------------------
-// Platform
-// ---------------------------------------------------------------------
+// --- Platform ---
 
 #[derive(Debug, Serialize)]
 struct PlatformDto {
@@ -83,9 +81,7 @@ fn kredensial_terisi(state: &AppState, platform_name: &str) -> bool {
     }
 }
 
-// ---------------------------------------------------------------------
-// Platform: TikTok Shop
-// ---------------------------------------------------------------------
+// --- Platform: TikTok Shop ---
 
 async fn connect_tiktok(State(state): State<AppState>, user: CurrentUser) -> AppResult<Redirect> {
     user.require(&[Role::Owner])?;
@@ -149,9 +145,7 @@ async fn disconnect_tiktok(
     Ok(Json(()))
 }
 
-// ---------------------------------------------------------------------
-// Platform: Shopee
-// ---------------------------------------------------------------------
+// --- Platform: Shopee ---
 
 async fn connect_shopee(State(state): State<AppState>, user: CurrentUser) -> AppResult<Redirect> {
     user.require(&[Role::Owner])?;
@@ -331,9 +325,7 @@ async fn sync_shopee(
     }))
 }
 
-// ---------------------------------------------------------------------
-// Webhook
-// ---------------------------------------------------------------------
+// --- Webhook ---
 
 #[derive(Debug, Deserialize)]
 struct WebhookBody {
@@ -455,9 +447,7 @@ async fn simpan_order(
     Ok(hasil)
 }
 
-// ---------------------------------------------------------------------
-// Pesanan
-// ---------------------------------------------------------------------
+// --- Pesanan ---
 
 #[derive(Debug, Deserialize)]
 struct OrderListQuery {
@@ -485,9 +475,7 @@ async fn get_order(
     Ok(Json(order))
 }
 
-// ---------------------------------------------------------------------
-// Pemetaan listing ke produk
-// ---------------------------------------------------------------------
+// --- Pemetaan listing ke produk ---
 
 async fn list_mappings(
     State(state): State<AppState>,

@@ -21,6 +21,7 @@ import {
   labelJenis,
   labelMetode,
   labelPeriode,
+  nomorPesanan,
 } from '../../lib/laporan';
 import { waktuEkspor } from '../../lib/format';
 import { ambilToken } from '../../lib/session';
@@ -81,11 +82,16 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     baris(['Ongkir ditagihkan', summary.shipping]),
     baris(['Harga pokok', summary.cogs]),
     baris(['Beban', summary.expenses]),
+    baris([
+      'Potongan Shopee (komisi + layanan + PPh 0,5% + Rp1.250/transaksi)',
+      summary.platform_fees,
+    ]),
     baris(['Laba', summary.profit]),
     baris(['Jumlah transaksi', summary.transaction_count]),
     baris(['Item tanpa harga pokok', summary.items_without_cost]),
     '',
     baris([
+      'No. Pesanan',
       'Waktu',
       'ID Transaksi',
       'Pembeli',
@@ -98,6 +104,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     ]),
     ...sales.map((s) =>
       baris([
+        nomorPesanan(s.id),
         waktuEkspor(s.created_at),
         s.id,
         s.customer_name,

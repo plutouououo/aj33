@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, idempotency_key, type AS transaction_type, customer_id,\n               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,\n               shipping_cost, total_amount,\n               amount_paid, change_amount, status, created_at AS \"created_at!\"\n        FROM transactions\n        ORDER BY created_at DESC\n        LIMIT $1\n        ",
+  "query": "\n        SELECT id, idempotency_key, type AS transaction_type, customer_id,\n               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,\n               shipping_cost, total_amount,\n               platform_commission_fee_percent, platform_commission_fee,\n               platform_service_fee_percent, platform_service_fee,\n               platform_withholding_tax, platform_order_processing_fee,\n               amount_paid, change_amount, status, created_at AS \"created_at!\"\n        FROM transactions\n        ORDER BY created_at DESC\n        LIMIT $1\n        ",
   "describe": {
     "columns": [
       {
@@ -60,21 +60,51 @@
       },
       {
         "ordinal": 11,
-        "name": "amount_paid",
+        "name": "platform_commission_fee_percent",
         "type_info": "Numeric"
       },
       {
         "ordinal": 12,
-        "name": "change_amount",
+        "name": "platform_commission_fee",
         "type_info": "Numeric"
       },
       {
         "ordinal": 13,
+        "name": "platform_service_fee_percent",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 14,
+        "name": "platform_service_fee",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 15,
+        "name": "platform_withholding_tax",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 16,
+        "name": "platform_order_processing_fee",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 17,
+        "name": "amount_paid",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 18,
+        "name": "change_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 19,
         "name": "status",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 14,
+        "ordinal": 20,
         "name": "created_at!",
         "type_info": "Timestamptz"
       }
@@ -96,11 +126,17 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
       true,
       true,
       false,
       false
     ]
   },
-  "hash": "c6b7ff71f6144d918e613797906dfabd5958255335d785e738dd39d4115e0fc6"
+  "hash": "0d8bf6dbc7d98d9919b8907f56ae197241f8f174c6a70b848cebad0b69908641"
 }

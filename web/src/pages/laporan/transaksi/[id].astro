@@ -1,0 +1,261 @@
+---
+import AppShell from '../../../layouts/AppShell.astro';
+import { api, ApiRequestError, type TransactionDetail } from '../../../lib/api';
+import { rupiah, waktu } from '../../../lib/format';
+import { nomorPesanan, labelJenis, labelMetode } from '../../../lib/laporan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const { id } = Astro.params;
+
+const KANAL_LABEL: Record<string, string> = {
+  toko: 'Toko',
+  shopee: 'Shopee',
+  tiktok: 'Tokopedia / TikTok',
+};
+
+let galat: string | null = null;
+let transaksi: TransactionDetail | null = null;
+
+try {
+  transaksi = await api<TransactionDetail>(`/reports/sales/${id}`, { token });
+} catch (err) {
+  if (err instanceof ApiRequestError && (err.status === 404 || err.status === 400)) {
+    galat = err.message;
+  } else {
+    throw err;
+  }
+}
+
+const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
+---
+
+<AppShell judul={nomor ? `Transaksi #${nomor}` : 'Transaksi'} user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/laporan">Laporan</a>
+    <span aria-hidden="true">›</span>
+    <span aria-current="page">{nomor ? `#${nomor}` : 'Tidak ditemukan'}</span>
+  </nav>
+
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+
+  {
+    transaksi && (
+      <Fragment>
+        <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <h1 class="text-xl font-bold">Transaksi #{nomor}</h1>
+            <span class={transaksi.status === 'completed' ? 'lencana-selesai' : 'lencana-gagal'}>
+              {transaksi.status === 'completed' ? 'Selesai' : 'Dibatalkan'}
+            </span>
+          </div>
+          <a class="tombol-halus" href="/laporan">← Kembali ke Laporan</a>
+        </div>
+
+        {transaksi.status !== 'completed' && (
+          <div class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <p class="font-semibold">Transaksi ini dibatalkan.</p>
+            {transaksi.void_reason && <p class="mt-1">Alasan: {transaksi.void_reason}</p>}
+            {transaksi.voided_at && (
+              <p class="mt-1 text-xs opacity-80">Dibatalkan {waktu(transaksi.voided_at)}</p>
+            )}
+          </div>
+        )}
+
+        {transaksi.items_without_cost > 0 && (
+          <p class="mb-6 rounded-lg border border-kuning-500/40 bg-kuning-50 px-4 py-3 text-sm text-kuning-700">
+            {transaksi.items_without_cost} baris di transaksi ini keluar dari batch yang harga
+            belinya belum diisi. Selama itu, <strong>harga pokok dan laba di bawah terlalu
+            kecil/besar</strong>. Isi harga beli batch di halaman produk supaya angkanya benar.
+          </p>
+        )}
+
+        <div class="grid gap-4 lg:grid-cols-[minmax(0,22rem)_1fr]">
+          <section class="kartu h-fit">
+            <h2 class="mb-4 text-base font-bold">Info Transaksi</h2>
+            <dl class="space-y-3 text-sm">
+              <div>
+                <dt class="text-xs text-[var(--color-teks-lembut)]">Waktu</dt>
+                <dd class="font-medium">{waktu(transaksi.created_at)}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-[var(--color-teks-lembut)]">Kasir</dt>
+                <dd class="font-medium">{transaksi.cashier_name}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-[var(--color-teks-lembut)]">Jenis</dt>
+                <dd class="font-medium">{labelJenis(transaksi.type)}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-[var(--color-teks-lembut)]">Kanal</dt>
+                <dd class="font-medium">
+                  {KANAL_LABEL[transaksi.sales_channel] ?? transaksi.sales_channel}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs text-[var(--color-teks-lembut)]">Metode Pembayaran</dt>
+                <dd class="font-medium">{labelMetode(transaksi.payment_method)}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-[var(--color-teks-lembut)]">Pembeli</dt>
+                {transaksi.customer_name ? (
+                  <dd class="font-medium">
+                    {transaksi.customer_name}
+                    {transaksi.customer_phone && (
+                      <span class="block text-xs font-normal text-[var(--color-teks-lembut)]">
+                        {transaksi.customer_phone}
+                      </span>
+                    )}
+                    {transaksi.customer_email && (
+                      <span class="block text-xs font-normal text-[var(--color-teks-lembut)]">
+                        {transaksi.customer_email}
+                      </span>
+                    )}
+                  </dd>
+                ) : (
+                  <dd class="font-medium text-[var(--color-teks-lembut)]">Tidak dicatat</dd>
+                )}
+              </div>
+            </dl>
+          </section>
+
+          <div class="grid gap-4">
+            <section class="kartu-rapat overflow-x-auto">
+              <h2 class="border-b border-[var(--color-garis)] px-5 py-4 text-base font-bold">
+                Produk
+              </h2>
+              <table class="tabel">
+                <thead>
+                  <tr>
+                    <th>Produk</th>
+                    <th>SKU</th>
+                    <th class="text-right">Jumlah</th>
+                    <th class="text-right">Harga Satuan</th>
+                    <th class="text-right">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transaksi.items.map((it) => (
+                    <tr>
+                      <td>
+                        <a class="font-medium hover:underline" href={`/produk/${it.product_id}`}>
+                          {it.name}
+                        </a>
+                      </td>
+                      <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+                        {it.sku ?? '—'}
+                      </td>
+                      <td class="sel-angka">{it.qty}</td>
+                      <td class="sel-angka">{rupiah(it.unit_price)}</td>
+                      <td class="sel-angka font-semibold">{rupiah(it.subtotal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section class="kartu">
+              <h2 class="mb-4 text-base font-bold">Rincian Keuangan</h2>
+              <table class="w-full text-sm">
+                <tbody>
+                  <tr>
+                    <td class="py-1">Subtotal Barang</td>
+                    <td class="py-1 text-right tabular-nums">{rupiah(transaksi.subtotal)}</td>
+                  </tr>
+                  {transaksi.discount_amount > 0 && (
+                    <tr>
+                      <td class="py-1">Diskon</td>
+                      <td class="py-1 text-right tabular-nums">
+                        -{rupiah(transaksi.discount_amount)}
+                      </td>
+                    </tr>
+                  )}
+                  {transaksi.shipping_cost > 0 && (
+                    <tr>
+                      <td class="py-1">Ongkos Kirim</td>
+                      <td class="py-1 text-right tabular-nums">
+                        {rupiah(transaksi.shipping_cost)}
+                      </td>
+                    </tr>
+                  )}
+                  {transaksi.sales_channel === 'shopee' && (
+                    <Fragment>
+                      <tr>
+                        <td class="py-1 text-[var(--color-teks-lembut)]">
+                          Biaya Komisi ({(transaksi.platform_commission_fee_percent * 100).toFixed(2)}%)
+                        </td>
+                        <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
+                          -{rupiah(transaksi.platform_commission_fee)}
+                        </td>
+                      </tr>
+                      {transaksi.platform_service_fee > 0 && (
+                        <tr>
+                          <td class="py-1 text-[var(--color-teks-lembut)]">
+                            Biaya Layanan ({(transaksi.platform_service_fee_percent * 100).toFixed(2)}%)
+                          </td>
+                          <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
+                            -{rupiah(transaksi.platform_service_fee)}
+                          </td>
+                        </tr>
+                      )}
+                      <tr>
+                        <td class="py-1 text-[var(--color-teks-lembut)]">PPh UMKM (0,5%)</td>
+                        <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
+                          -{rupiah(transaksi.platform_withholding_tax)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="py-1 text-[var(--color-teks-lembut)]">Biaya Proses Pemesanan</td>
+                        <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
+                          -{rupiah(transaksi.platform_order_processing_fee)}
+                        </td>
+                      </tr>
+                    </Fragment>
+                  )}
+                  <tr class="border-t border-[var(--color-garis)] font-bold">
+                    <td class="py-1.5">
+                      {transaksi.sales_channel === 'shopee' ? 'Estimasi Total Penghasilan' : 'Total'}
+                    </td>
+                    <td class="py-1.5 text-right tabular-nums">{rupiah(transaksi.total_amount)}</td>
+                  </tr>
+                  {transaksi.amount_paid !== null && (
+                    <tr>
+                      <td class="py-1">Dibayar</td>
+                      <td class="py-1 text-right tabular-nums">{rupiah(transaksi.amount_paid)}</td>
+                    </tr>
+                  )}
+                  {transaksi.change_amount !== null && (
+                    <tr>
+                      <td class="py-1">Kembalian</td>
+                      <td class="py-1 text-right tabular-nums">{rupiah(transaksi.change_amount)}</td>
+                    </tr>
+                  )}
+                  <tr class="border-t border-[var(--color-garis)]">
+                    <td class="py-1 text-[var(--color-teks-lembut)]">Harga Pokok</td>
+                    <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
+                      {rupiah(transaksi.cogs)}
+                    </td>
+                  </tr>
+                  <tr class="font-bold">
+                    <td class="py-1.5">Laba Transaksi Ini</td>
+                    <td
+                      class={`py-1.5 text-right tabular-nums ${transaksi.net_profit < 0 ? 'text-red-600' : ''}`}
+                    >
+                      {rupiah(transaksi.net_profit)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p class="mt-3 text-xs text-[var(--color-teks-lembut)]">
+                Laba = subtotal − diskon − harga pokok
+                {transaksi.sales_channel === 'shopee' && ' − potongan Shopee'}. Beban toko per
+                periode tidak ikut dihitung di sini -- lihat halaman Laporan untuk angka itu.
+              </p>
+            </section>
+          </div>
+        </div>
+      </Fragment>
+    )
+  }
+</AppShell>

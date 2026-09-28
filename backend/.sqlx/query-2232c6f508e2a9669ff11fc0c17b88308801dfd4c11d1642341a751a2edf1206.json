@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(SUM(e.amount), 0) AS \"total!\"\n        FROM expenses e\n        WHERE e.expense_date >= (date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')\n                                  - ('1 ' || $1)::interval)::date\n          AND e.expense_date <  date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')::date\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2232c6f508e2a9669ff11fc0c17b88308801dfd4c11d1642341a751a2edf1206"
+}

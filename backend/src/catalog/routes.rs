@@ -44,9 +44,7 @@ pub fn router() -> Router<AppState> {
         .route("/sku-codes/{id}", delete(delete_sku_code))
 }
 
-// ---------------------------------------------------------------------
-// Daftar produk
-// ---------------------------------------------------------------------
+// --- Daftar produk ---
 
 #[derive(Debug, Deserialize)]
 struct ListQuery {
@@ -141,9 +139,7 @@ async fn get_product(
     }))
 }
 
-// ---------------------------------------------------------------------
-// Membuat produk
-// ---------------------------------------------------------------------
+// --- Membuat produk ---
 
 #[derive(Debug, Deserialize)]
 struct ProductCreateRequest {
@@ -284,9 +280,7 @@ async fn create_product(
     Ok((axum::http::StatusCode::CREATED, Json(product)))
 }
 
-// ---------------------------------------------------------------------
-// Menyunting dan menghapus produk
-// ---------------------------------------------------------------------
+// --- Menyunting dan menghapus produk ---
 
 /// Field bertipe `Option<Option<T>>`: tidak disebut berarti "biarkan", `null`
 /// berarti "kosongkan". Lihat `repo::Ubah`.
@@ -403,11 +397,12 @@ async fn delete_product(
 ) -> AppResult<axum::http::StatusCode> {
     user.require(&[Role::Owner])?;
 
-    ambil_produk(&state, id).await?;
+    let produk = ambil_produk(&state, id).await?;
 
     if let Some(penahan) = repo::penahan_hapus(&state.pool, id).await? {
         return Err(AppError::conflict(format!(
-            "Produk tidak bisa dihapus karena {penahan}. Nonaktifkan saja."
+            "\"{}\" tidak bisa dihapus karena {penahan}. Nonaktifkan saja.",
+            produk.name
         )));
     }
 
@@ -418,9 +413,7 @@ async fn delete_product(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-// ---------------------------------------------------------------------
-// Batch barang masuk
-// ---------------------------------------------------------------------
+// --- Batch barang masuk ---
 
 /// Batch yang masih bersisa untuk seluruh produk yang bisa dijual.
 ///
@@ -606,9 +599,7 @@ async fn delete_batch(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-// ---------------------------------------------------------------------
-// Ledger stok
-// ---------------------------------------------------------------------
+// --- Ledger stok ---
 
 async fn list_stock_adjustments(
     State(state): State<AppState>,
@@ -680,9 +671,7 @@ async fn adjust_stock(
     Ok(Json(ambil_produk(&state, id).await?))
 }
 
-// ---------------------------------------------------------------------
-// Kategori
-// ---------------------------------------------------------------------
+// --- Kategori ---
 
 async fn list_categories(
     State(state): State<AppState>,
@@ -719,9 +708,7 @@ async fn create_category(
     Ok((axum::http::StatusCode::CREATED, Json(category)))
 }
 
-// ---------------------------------------------------------------------
-// Perkakas bersama
-// ---------------------------------------------------------------------
+// --- Perkakas bersama ---
 
 async fn ambil_produk(state: &AppState, id: Uuid) -> AppResult<Product> {
     repo::find_product(&state.pool, id)
@@ -823,9 +810,7 @@ async fn rakit_sku(
     Ok(kode)
 }
 
-// ---------------------------------------------------------------------
-// Kamus kode SKU
-// ---------------------------------------------------------------------
+// --- Kamus kode SKU ---
 
 /// Kamus dibaca siapa pun yang sudah login -- halaman produk memakainya
 /// untuk menjelaskan kenapa sebuah SKU ditolak. Yang mengubahnya hanya

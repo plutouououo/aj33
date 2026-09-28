@@ -67,3 +67,34 @@ export function sisaHari(iso: string): number {
   const hariIni = new Date(kini.getFullYear(), kini.getMonth(), kini.getDate());
   return Math.round((target.getTime() - hariIni.getTime()) / 86_400_000);
 }
+
+/**
+ * Perubahan satu angka dibanding waktu pembanding sebelumnya -- dipakai
+ * kartu ringkasan di Dasbor dan Laporan, supaya keduanya menghitung dan
+ * menampilkan tren dengan cara yang sama persis.
+ */
+export interface Tren {
+  arah: 'naik' | 'turun';
+  /** `null` kalau angka pembanding nol -- persentase dari nol tidak berarti apa-apa. */
+  persen: number | null;
+}
+
+/**
+ * `null` kalau tidak ada pembanding (mis. saringan "Seluruh Waktu" di
+ * Laporan) atau kalau keduanya persis sama -- tidak ada yang perlu
+ * ditunjukkan.
+ */
+export function hitungTren(sekarang: number, dulu: number | null | undefined): Tren | null {
+  if (dulu === null || dulu === undefined || sekarang === dulu) return null;
+  if (dulu === 0) return { arah: sekarang > 0 ? 'naik' : 'turun', persen: null };
+  const persen = ((sekarang - dulu) / Math.abs(dulu)) * 100;
+  return { arah: persen >= 0 ? 'naik' : 'turun', persen: Math.abs(persen) };
+}
+
+/** Teks pil naik/turun, mis. `↑ 12.4%` atau `↓ Baru`. */
+export function labelTren(t: Tren | null): string {
+  if (!t) return '';
+  const panah = t.arah === 'naik' ? '↑' : '↓';
+  const nilai = t.persen === null ? 'Baru' : `${t.persen.toFixed(1)}%`;
+  return `${panah} ${nilai}`;
+}

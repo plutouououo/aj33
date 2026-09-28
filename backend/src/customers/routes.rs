@@ -126,9 +126,7 @@ async fn get_customer(
     }))
 }
 
-// ---------------------------------------------------------------------
-// Pemeriksaan isian
-// ---------------------------------------------------------------------
+// --- Pemeriksaan isian ---
 
 fn periksa_nama(nama: &str) -> AppResult<()> {
     if nama.is_empty() {
@@ -162,9 +160,7 @@ fn bersihkan(nilai: Option<String>, maks: usize, nama: &str) -> AppResult<Option
     Ok(Some(nilai))
 }
 
-// ---------------------------------------------------------------------
-// Tambah, ubah, hapus
-// ---------------------------------------------------------------------
+// --- Tambah, ubah, hapus ---
 
 #[derive(Debug, Deserialize)]
 struct CustomerCreateRequest {

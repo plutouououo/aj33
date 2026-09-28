@@ -581,9 +581,7 @@ pub async fn delete_product(pool: &PgPool, id: Uuid) -> AppResult<bool> {
     Ok(hasil.rows_affected() > 0)
 }
 
-// ---------------------------------------------------------------------
-// Batch barang masuk
-// ---------------------------------------------------------------------
+// --- Batch barang masuk ---
 
 pub async fn list_batches(pool: &PgPool, product_id: Uuid) -> AppResult<Vec<ProductBatch>> {
     let rows = sqlx::query_as!(
@@ -769,9 +767,7 @@ pub async fn delete_batch(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> AppRe
     Ok(())
 }
 
-// ---------------------------------------------------------------------
-// Kategori dan ledger stok
-// ---------------------------------------------------------------------
+// --- Kategori dan ledger stok ---
 
 pub async fn list_categories(pool: &PgPool) -> AppResult<Vec<Category>> {
     let rows = sqlx::query_as!(
@@ -837,9 +833,7 @@ pub async fn list_stock_adjustments(
     Ok(rows)
 }
 
-// ---------------------------------------------------------------------
-// Kamus kode SKU
-// ---------------------------------------------------------------------
+// --- Kamus kode SKU ---
 
 /// Satu entri kamus seperti yang dilihat frontend.
 #[derive(Debug, Serialize)]

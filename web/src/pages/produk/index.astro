@@ -28,29 +28,18 @@ const URUT = [
 ] as const;
 type Urut = (typeof URUT)[number]['nilai'];
 
-/** Angka dari form. Kosong -> `null`, supaya harga kanal bisa dikosongkan lagi. */
-function angkaAtauNull(v: FormDataEntryValue | undefined): number | null {
-  const s = String(v ?? '').trim();
-  if (!s) return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-}
-/** Sama seperti di atas, tapi kosong jatuh ke 0 -- dipakai untuk harga dasar dan stok. */
-function angkaAtauNol(v: FormDataEntryValue | undefined): number {
-  return angkaAtauNull(v) ?? 0;
-}
-
 let galat: string | null = null;
 
 /**
- * Satu form besar membungkus SELURUH baris halaman ini (lihat markup di
- * bawah): checkbox pilih, dan kolom harga/stok tiap baris tanpa varian, semua
- * ikut terkirim di request yang sama -- apa pun tombol yang menekan submit.
+ * Harga dan stok TIDAK bisa disunting di sini -- lihat "Kelola" pada tiap
+ * baris, yang membuka `/produk/{id}` dan formulir simpan/koreksinya sendiri.
+ * Daftar ini murni menampilkan, supaya angka yang terlihat sambil memindai
+ * banyak produk tidak bisa diam-diam berubah lewat form yang salah pencet.
  *
- * Itu sebabnya perubahan harga/stok diproses DI SINI, sebelum melihat tombol
- * mana yang ditekan (`aksi` / `toggle`): sekali form ini disatukan, menekan
- * "Nonaktifkan Terpilih" sambil ada harga yang barusan diketik tidak boleh
- * diam-diam membuang ketikan itu.
+ * Aksi yang tersedia dari sini cuma yang menyentuh STATUS baris, bukan
+ * isinya: toggle aktif/nonaktif satu baris (`toggle`), dan tiga aksi massal
+ * (aktifkan, nonaktifkan, hapus) atas produk yang dicentang lewat `pilih_id`
+ * (`aksi`).
  */
 if (Astro.request.method === 'POST') {
   if (!pemilik) {
@@ -62,94 +51,61 @@ if (Astro.request.method === 'POST') {
     // komentar di baris tombolnya sendiri soal alasannya.
     const toggle = String(form.get('toggle') ?? '');
 
-    const id = form.getAll('id').map(String);
-    const hargaAsli = form.getAll('harga_asli');
-    const harga = form.getAll('harga');
-    const shopeeAsli = form.getAll('shopee_asli');
-    const shopee = form.getAll('shopee');
-    const tiktokAsli = form.getAll('tiktok_asli');
-    const tiktok = form.getAll('tiktok');
-    const stokAsli = form.getAll('stok_asli');
-    const stok = form.getAll('stok');
-
-    let diubah = 0;
-    const pesanGalat: string[] = [];
-
-    for (let i = 0; i < id.length; i++) {
-      const hA = angkaAtauNol(hargaAsli[i]);
-      const hB = angkaAtauNol(harga[i]);
-      const sA = angkaAtauNull(shopeeAsli[i]);
-      const sB = angkaAtauNull(shopee[i]);
-      const tA = angkaAtauNull(tiktokAsli[i]);
-      const tB = angkaAtauNull(tiktok[i]);
-      const kA = angkaAtauNol(stokAsli[i]);
-      const kB = angkaAtauNol(stok[i]);
-
+    if (toggle) {
+      const [id, target] = toggle.split(':');
       try {
-        if (hA !== hB || sA !== sB || tA !== tB) {
-          await api(`/products/${id[i]}`, {
-            method: 'PATCH',
-            token,
-            body: { price: hB, price_shopee: sB, price_tiktok: tB },
-          });
-          diubah++;
-        }
-        // Tidak ada endpoint "atur stok ke angka X" -- stok hanya berubah
-        // lewat selisih (lihat komentar `adjust_stock` di backend), jadi
-        // baris ini mengirim SELISIHNYA, bukan angka barunya.
-        if (kA !== kB) {
-          await api(`/products/${id[i]}/stock-adjustments`, {
-            method: 'POST',
-            token,
-            body: { change_qty: kB - kA },
-          });
-          diubah++;
-        }
+        await api(`/products/${id}`, { method: 'PATCH', token, body: { is_active: target === '1' } });
+        const tujuan = new URL(Astro.url);
+        tujuan.searchParams.set('pesan', target === '1' ? 'aktif' : 'nonaktif');
+        return Astro.redirect(tujuan.pathname + tujuan.search, 303);
       } catch (err) {
-        pesanGalat.push(err instanceof ApiRequestError ? err.message : 'Gagal menyimpan salah satu baris.');
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal mengubah status produk.';
       }
-    }
-
-    let kodeBerhasil: string | null = null;
-    try {
-      if (toggle) {
-        const [idToggle, target] = toggle.split(':');
-        await api(`/products/${idToggle}`, { method: 'PATCH', token, body: { is_active: target === '1' } });
-        kodeBerhasil = target === '1' ? 'aktif' : 'nonaktif';
-      } else if (aksi === 'bulk-aktif' || aksi === 'bulk-nonaktif') {
-        const dipilih = form.getAll('pilih_id').map(String);
-        if (dipilih.length === 0) {
-          pesanGalat.push('Pilih dulu produk yang mau diubah statusnya.');
-        } else {
-          await Promise.all(
-            dipilih.map((idBaris) =>
-              api(`/products/${idBaris}`, {
+    } else if (aksi === 'bulk-aktif' || aksi === 'bulk-nonaktif' || aksi === 'bulk-hapus') {
+      const dipilih = form.getAll('pilih_id').map(String);
+      if (dipilih.length === 0) {
+        galat = 'Pilih dulu produk yang mau diubah.';
+      } else {
+        // Satu per satu, bukan Promise.all: produk yang ditolak backend
+        // (mis. masih punya varian, atau sudah pernah terjual -- lihat
+        // `penahan_hapus` di backend) tidak boleh menghentikan baris lain
+        // yang sebetulnya bisa berhasil.
+        let berhasil = 0;
+        const pesanGalat: string[] = [];
+        for (const idBaris of dipilih) {
+          try {
+            if (aksi === 'bulk-hapus') {
+              await api(`/products/${idBaris}`, { method: 'DELETE', token });
+            } else {
+              await api(`/products/${idBaris}`, {
                 method: 'PATCH',
                 token,
                 body: { is_active: aksi === 'bulk-aktif' },
-              }),
-            ),
-          );
-          kodeBerhasil = aksi;
+              });
+            }
+            berhasil++;
+          } catch (err) {
+            pesanGalat.push(err instanceof ApiRequestError ? err.message : 'Gagal memproses salah satu produk.');
+          }
         }
-      } else {
-        kodeBerhasil = 'simpan';
-      }
-    } catch (err) {
-      pesanGalat.push(err instanceof ApiRequestError ? err.message : 'Gagal mengubah status produk.');
-    }
 
-    if (pesanGalat.length > 0) {
-      galat =
-        diubah > 0
-          ? `${diubah} perubahan tersimpan, tapi ada yang gagal: ${pesanGalat[0]}`
-          : pesanGalat[0];
-    } else {
-      // POST-redirect-GET, saringan yang sedang dibuka ikut terbawa apa
-      // adanya -- lihat kenapa ini penting di komentar `saringan()` di bawah.
-      const tujuan = new URL(Astro.url);
-      tujuan.searchParams.set('pesan', kodeBerhasil ?? 'simpan');
-      return Astro.redirect(tujuan.pathname + tujuan.search, 303);
+        if (pesanGalat.length > 0) {
+          // Semua pesan ditampilkan, bukan cuma yang pertama -- pada
+          // "Hapus Terpilih" khususnya, produk yang gagal (mis. sudah
+          // pernah terjual) TETAP ada di database walau baris lain
+          // berhasil. Kalau cuma pesan pertama yang tampil, sisanya
+          // terlihat seperti berhasil padahal tidak -- dan baru ketahuan
+          // saat baris itu "muncul lagi" pada kunjungan berikutnya.
+          galat =
+            berhasil > 0
+              ? `${berhasil} produk berhasil. ${pesanGalat.length} gagal: ${pesanGalat.join(' | ')}`
+              : pesanGalat.join(' | ');
+        } else {
+          const tujuan = new URL(Astro.url);
+          tujuan.searchParams.set('pesan', aksi);
+          return Astro.redirect(tujuan.pathname + tujuan.search, 303);
+        }
+      }
     }
   }
 }
@@ -168,9 +124,9 @@ const PESAN: Record<string, string> = {
   aktif: 'Produk diaktifkan.',
   nonaktif: 'Produk dinonaktifkan.',
   dibuat: 'Produk ditambahkan.',
-  simpan: 'Perubahan disimpan.',
   'bulk-aktif': 'Produk terpilih diaktifkan.',
   'bulk-nonaktif': 'Produk terpilih dinonaktifkan.',
+  'bulk-hapus': 'Produk terpilih dihapus.',
 };
 const kodePesan = params.get('pesan') ?? '';
 const sukses = Object.hasOwn(PESAN, kodePesan) ? PESAN[kodePesan] : null;
@@ -400,322 +356,264 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
     </p>
   )}
 
-  {/* Satu form untuk seluruh baris: checkbox pilih dan kolom harga/stok tiap
-      baris tanpa varian ikut terkirim bersama, apa pun tombol yang ditekan --
-      lihat penjelasan di bagian POST kenapa itu disengaja. */}
+  {/* Satu form membungkus tabel dan bilah aksi massal di bawahnya: checkbox
+      pilih tiap baris (`pilih_id`) ikut terkirim apa pun tombol yang ditekan
+      -- termasuk tombol Aktifkan/Nonaktifkan per baris, yang menumpang di
+      form yang sama lewat kode "id:target" (lihat komentar di tombolnya). */}
   <form method="POST" id="borang-produk">
-    <div class="kartu-rapat overflow-x-auto">
-      <table class="tabel">
-        <thead>
-          <tr>
-            {pemilik && (
-              <th class="w-8">
-                <input
-                  type="checkbox"
-                  class="hanya-js h-4 w-4 accent-white"
-                  data-pilih-semua
-                  aria-label="Pilih semua produk pada halaman ini"
-                />
-              </th>
-            )}
-            <th>Produk</th>
-            <th class="text-right">Harga dasar</th>
-            <th class="text-right">Shopee</th>
-            <th class="text-right">Tokopedia / TikTok</th>
-            <th class="text-right">Stok</th>
-            <th>Kedaluwarsa</th>
-            <th>Status</th>
-            {pemilik && <th class="text-right">Aksi</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {halamanIni.map((p) => {
-            const varian = varianIndukPeta.get(p.id) ?? [];
-            const punyaVarian = varian.length > 0;
-            const stok = stokInduk(p, varian);
-            const dekat = p.nearest_expiry !== null && DEKAT_KEDALUWARSA >= sisaHari(p.nearest_expiry);
-            const atribut = [p.category_name, p.product_type, p.variant_grade, p.variant_size]
-              .filter(Boolean)
-              .join(' · ');
-            const catatan = kanalKosong(p, varian);
+  <div class="kartu-rapat overflow-x-auto">
+    <table class="tabel">
+      <thead>
+        <tr>
+          {pemilik && (
+            <th class="w-8">
+              <input
+                type="checkbox"
+                class="hanya-js h-4 w-4 accent-white"
+                data-pilih-semua
+                aria-label="Pilih semua produk pada halaman ini"
+              />
+            </th>
+          )}
+          <th>Produk</th>
+          <th class="text-right">Harga dasar</th>
+          <th class="text-right">Shopee</th>
+          <th class="text-right">Tokopedia / TikTok</th>
+          <th class="text-right">Stok</th>
+          <th>Kedaluwarsa</th>
+          <th>Status</th>
+          {pemilik && <th class="text-right">Aksi</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {halamanIni.map((p) => {
+          const varian = varianIndukPeta.get(p.id) ?? [];
+          const punyaVarian = varian.length > 0;
+          const stok = stokInduk(p, varian);
+          const dekat = p.nearest_expiry !== null && DEKAT_KEDALUWARSA >= sisaHari(p.nearest_expiry);
+          const atribut = [p.category_name, p.product_type, p.variant_grade, p.variant_size]
+            .filter(Boolean)
+            .join(' · ');
+          const catatan = kanalKosong(p, varian);
 
-            return (
-              <Fragment>
-                <tr data-baris-edit>
-                  {pemilik && (
-                    <td>
-                      <input
-                        type="checkbox"
-                        name="pilih_id"
-                        value={p.id}
-                        class="h-4 w-4 accent-merah-600"
-                        data-pilih-baris
-                        aria-label={`Pilih ${p.name}`}
-                      />
-                    </td>
-                  )}
+          return (
+            <Fragment>
+              <tr>
+                {pemilik && (
                   <td>
-                    <div class="flex items-start gap-2.5">
-                      <span class="foto-produk h-10 w-10 shrink-0 rounded border">
-                        {p.image_url && (
-                          <img src={p.image_url} alt="" loading="lazy" class="h-full w-full rounded object-cover" />
-                        )}
-                      </span>
-                      <div class="min-w-0">
-                        <a class="font-medium hover:underline" href={`/produk/${p.id}${bawaSaringan}`}>
-                          {p.name}
-                        </a>
-                        <span class="block font-mono text-xs text-[var(--color-teks-samar)]">{p.sku ?? '—'}</span>
-                        {atribut && (
-                          <span class="block text-xs text-[var(--color-teks-lembut)]">{atribut}</span>
-                        )}
-                        {catatan && (
-                          <span class="mt-0.5 block text-xs font-semibold text-merah-700">
-                            Harga kanal belum lengkap
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    <input
+                      type="checkbox"
+                      name="pilih_id"
+                      value={p.id}
+                      class="h-4 w-4 accent-merah-600"
+                      data-pilih-baris
+                      aria-label={`Pilih ${p.name}`}
+                    />
                   </td>
+                )}
+                <td>
+                  <div class="flex items-start gap-2.5">
+                    <span class="foto-produk h-10 w-10 shrink-0 rounded border">
+                      {p.image_url && (
+                        <img src={p.image_url} alt="" loading="lazy" class="h-full w-full rounded object-cover" />
+                      )}
+                    </span>
+                    <div class="min-w-0">
+                      <a class="font-medium hover:underline" href={`/produk/${p.id}${bawaSaringan}`}>
+                        {p.name}
+                      </a>
+                      <span class="block font-mono text-xs text-[var(--color-teks-samar)]">{p.sku ?? '—'}</span>
+                      {atribut && (
+                        <span class="block text-xs text-[var(--color-teks-lembut)]">{atribut}</span>
+                      )}
+                      {catatan && (
+                        <span class="mt-0.5 block text-xs font-semibold text-merah-700">
+                          Harga kanal belum lengkap
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </td>
 
-                  {punyaVarian ? (
-                    <td class="sel-angka text-xs text-[var(--color-teks-samar)]" colspan={3}>
-                      Harga per varian
+                {punyaVarian ? (
+                  <td class="sel-angka text-xs text-[var(--color-teks-samar)]" colspan={3}>
+                    Harga per varian
+                  </td>
+                ) : (
+                  <Fragment>
+                    <td class="sel-angka">{rupiah(p.price)}</td>
+                    <td class="sel-angka text-xs text-[var(--color-teks-lembut)]">
+                      {p.price_shopee === null ? '—' : rupiah(p.price_shopee)}
                     </td>
+                    <td class="sel-angka text-xs text-[var(--color-teks-lembut)]">
+                      {p.price_tiktok === null ? '—' : rupiah(p.price_tiktok)}
+                    </td>
+                  </Fragment>
+                )}
+
+                <td class="sel-angka">
+                  {punyaVarian ? (
+                    <span class="text-xs text-[var(--color-teks-samar)]">per varian</span>
                   ) : (
                     <Fragment>
-                      <td class="sel-angka">
-                        <input type="hidden" name="id" value={p.id} />
-                        <input type="hidden" name="harga_asli" value={p.price} />
-                        <input
-                          class="kolom w-28 text-right tabular-nums"
-                          type="number"
-                          min="0"
-                          step="1"
-                          name="harga"
-                          value={p.price}
-                          data-asli={p.price}
-                          aria-label={`Harga dasar ${p.name}`}
-                          disabled={!pemilik}
-                        />
-                      </td>
-                      <td class="sel-angka">
-                        <input type="hidden" name="shopee_asli" value={p.price_shopee ?? ''} />
-                        <input
-                          class="kolom w-28 text-right tabular-nums"
-                          type="number"
-                          min="0"
-                          step="1"
-                          name="shopee"
-                          placeholder="ikut harga dasar"
-                          value={p.price_shopee ?? ''}
-                          data-asli={p.price_shopee ?? ''}
-                          aria-label={`Harga Shopee ${p.name}`}
-                          disabled={!pemilik}
-                        />
-                      </td>
-                      <td class="sel-angka">
-                        <input type="hidden" name="tiktok_asli" value={p.price_tiktok ?? ''} />
-                        <input
-                          class="kolom w-28 text-right tabular-nums"
-                          type="number"
-                          min="0"
-                          step="1"
-                          name="tiktok"
-                          placeholder="ikut harga dasar"
-                          value={p.price_tiktok ?? ''}
-                          data-asli={p.price_tiktok ?? ''}
-                          aria-label={`Harga Tokopedia / TikTok ${p.name}`}
-                          disabled={!pemilik}
-                        />
-                      </td>
+                      <span class={stok.menipis || stok.habis ? 'font-semibold text-red-600' : ''}>
+                        {p.stock_qty}
+                      </span>
+                      {stok.menipis && <span class="ml-1 text-xs font-semibold text-red-600">menipis</span>}
                     </Fragment>
                   )}
+                </td>
 
-                  <td class="sel-angka">
-                    {punyaVarian ? (
-                      <span class="text-xs text-[var(--color-teks-samar)]">per varian</span>
-                    ) : (
-                      <Fragment>
-                        <input type="hidden" name="stok_asli" value={p.stock_qty} />
-                        <input
-                          class="kolom w-20 text-right tabular-nums"
-                          type="number"
-                          min="0"
-                          step="1"
-                          name="stok"
-                          value={p.stock_qty}
-                          data-asli={p.stock_qty}
-                          aria-label={`Stok ${p.name}`}
-                          disabled={!pemilik}
-                        />
-                        {stok.menipis && <span class="ml-1 text-xs font-semibold text-red-600">menipis</span>}
-                      </Fragment>
-                    )}
-                  </td>
-
-                  <td class="whitespace-nowrap text-xs">
-                    {p.nearest_expiry ? (
-                      <span class={dekat ? 'font-semibold text-red-600' : 'text-[var(--color-teks-lembut)]'}>
-                        {tanggal(p.nearest_expiry)}
-                      </span>
-                    ) : (
-                      <span class="text-[var(--color-teks-samar)]">—</span>
-                    )}
-                  </td>
-
-                  <td>
-                    <span class={p.is_active ? 'lencana-selesai' : 'lencana-nonaktif'}>
-                      {p.is_active ? 'Aktif' : 'Nonaktif'}
+                <td class="whitespace-nowrap text-xs">
+                  {p.nearest_expiry ? (
+                    <span class={dekat ? 'font-semibold text-red-600' : 'text-[var(--color-teks-lembut)]'}>
+                      {tanggal(p.nearest_expiry)}
                     </span>
-                  </td>
+                  ) : (
+                    <span class="text-[var(--color-teks-samar)]">—</span>
+                  )}
+                </td>
 
-                  {pemilik && (
-                    <td class="whitespace-nowrap text-right">
+                <td>
+                  <span class={p.is_active ? 'lencana-selesai' : 'lencana-nonaktif'}>
+                    {p.is_active ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </td>
+
+                {pemilik && (
+                  <td class="whitespace-nowrap text-right">
+                    {/* Atas-bawah, bukan berjajar: dua target sentuh sempit
+                        bersisian mengundang salah ketuk, apalagi "Nonaktifkan"
+                        yang akibatnya langsung berlaku tanpa konfirmasi. */}
+                    <div class="flex flex-col items-end gap-1">
                       <a class="aksi-baris" href={`/produk/${p.id}${bawaSaringan}`}>Kelola</a>
                       {/* Kode "id:target" pada SATU tombol, bukan hidden field
                           terpisah: tombol ini hidup di dalam form besar yang
-                          baris lain juga mengisi `id`/`harga`/dst., jadi
-                          hidden field bernama sama akan tertukar dengan milik
-                          baris lain. Nilai tombol yang diklik yang ikut
-                          terkirim -- tombol yang tidak diklik tidak pernah
-                          mengirim apa-apa. */}
+                          juga menampung checkbox `pilih_id` tiap baris lain,
+                          jadi hidden field bernama `id` akan tertukar antar
+                          baris. Nilai tombol yang diklik yang ikut terkirim
+                          -- tombol yang tidak diklik tidak pernah mengirim
+                          apa-apa. */}
                       <button class="aksi-baris" type="submit" name="toggle" value={`${p.id}:${p.is_active ? 0 : 1}`}>
                         {p.is_active ? 'Nonaktifkan' : 'Aktifkan'}
                       </button>
+                    </div>
+                  </td>
+                )}
+              </tr>
+
+              {/* Baris varian selalu terbuka, tidak ada tombol lipat: pada
+                  toko sekecil ini jumlah variannya sedikit, dan lipatan
+                  yang bergantung JavaScript untuk tabel adalah kerumitan
+                  yang tidak pantas ditukar dengan sekadar sedikit baris
+                  tambahan. Harganya sendiri tidak bisa disunting di sini --
+                  tiap varian punya halaman kelolanya sendiri. */}
+              {varian.map((v) => {
+                const vAtribut = [v.variant_grade, v.variant_size].filter(Boolean).join(' · ');
+                const vMenipis = v.stock_qty > 0 && v.stock_qty <= v.low_stock_threshold;
+                const vHabis = v.stock_qty <= 0;
+                return (
+                  <tr class="bg-stone-50/60">
+                    {pemilik && <td />}
+                    <td class="pl-8">
+                      <span class="block text-sm font-medium">{v.name}</span>
+                      <span class="block font-mono text-xs text-[var(--color-teks-samar)]">{v.sku ?? '—'}</span>
+                      {vAtribut && <span class="block text-xs text-[var(--color-teks-lembut)]">{vAtribut}</span>}
                     </td>
-                  )}
-                </tr>
-
-                {/* Baris varian selalu terbuka, tidak ada tombol lipat: pada
-                    toko sekecil ini jumlah variannya sedikit, dan lipatan
-                    yang bergantung JavaScript untuk tabel adalah kerumitan
-                    yang tidak pantas ditukar dengan sekadar sedikit baris
-                    tambahan. Harganya sendiri tidak bisa disunting di sini --
-                    tiap varian punya halaman kelolanya sendiri. */}
-                {varian.map((v) => {
-                  const vAtribut = [v.variant_grade, v.variant_size].filter(Boolean).join(' · ');
-                  const vMenipis = v.stock_qty > 0 && v.stock_qty <= v.low_stock_threshold;
-                  const vHabis = v.stock_qty <= 0;
-                  return (
-                    <tr class="bg-stone-50/60">
-                      {pemilik && <td />}
-                      <td class="pl-8">
-                        <span class="block text-sm font-medium">{v.name}</span>
-                        <span class="block font-mono text-xs text-[var(--color-teks-samar)]">{v.sku ?? '—'}</span>
-                        {vAtribut && <span class="block text-xs text-[var(--color-teks-lembut)]">{vAtribut}</span>}
-                      </td>
-                      <td class="sel-angka">{rupiah(v.price)}</td>
-                      <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
-                        {v.price_shopee === null ? '—' : rupiah(v.price_shopee)}
-                      </td>
-                      <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
-                        {v.price_tiktok === null ? '—' : rupiah(v.price_tiktok)}
-                      </td>
-                      <td class="sel-angka">
-                        <span class={vHabis || vMenipis ? 'font-semibold text-red-600' : ''}>{v.stock_qty}</span>
-                      </td>
-                      <td class="whitespace-nowrap text-xs">
-                        {v.nearest_expiry ? (
-                          <span class={DEKAT_KEDALUWARSA >= sisaHari(v.nearest_expiry) ? 'font-semibold text-red-600' : 'text-[var(--color-teks-lembut)]'}>
-                            {tanggal(v.nearest_expiry)}
-                          </span>
-                        ) : (
-                          <span class="text-[var(--color-teks-samar)]">—</span>
-                        )}
-                      </td>
-                      <td>
-                        <span class={v.is_active ? 'lencana-selesai' : 'lencana-nonaktif'}>
-                          {v.is_active ? 'Aktif' : 'Nonaktif'}
+                    <td class="sel-angka">{rupiah(v.price)}</td>
+                    <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
+                      {v.price_shopee === null ? '—' : rupiah(v.price_shopee)}
+                    </td>
+                    <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
+                      {v.price_tiktok === null ? '—' : rupiah(v.price_tiktok)}
+                    </td>
+                    <td class="sel-angka">
+                      <span class={vHabis || vMenipis ? 'font-semibold text-red-600' : ''}>{v.stock_qty}</span>
+                    </td>
+                    <td class="whitespace-nowrap text-xs">
+                      {v.nearest_expiry ? (
+                        <span class={DEKAT_KEDALUWARSA >= sisaHari(v.nearest_expiry) ? 'font-semibold text-red-600' : 'text-[var(--color-teks-lembut)]'}>
+                          {tanggal(v.nearest_expiry)}
                         </span>
-                      </td>
-                      {pemilik && (
-                        <td class="whitespace-nowrap text-right">
-                          <a class="aksi-baris" href={`/produk/${v.id}${bawaSaringan}`}>Kelola varian</a>
-                        </td>
+                      ) : (
+                        <span class="text-[var(--color-teks-samar)]">—</span>
                       )}
-                    </tr>
-                  );
-                })}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                    </td>
+                    <td>
+                      <span class={v.is_active ? 'lencana-selesai' : 'lencana-nonaktif'}>
+                        {v.is_active ? 'Aktif' : 'Nonaktif'}
+                      </span>
+                    </td>
+                    {pemilik && (
+                      <td class="whitespace-nowrap text-right">
+                        <a class="aksi-baris" href={`/produk/${v.id}${bawaSaringan}`}>Kelola varian</a>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </Fragment>
+          );
+        })}
+      </tbody>
+    </table>
 
-      {halamanIni.length === 0 && (
-        <p class="py-12 text-center text-[var(--color-teks-lembut)]">
-          {cari ? `Tidak ada produk yang cocok dengan "${cari}".` : 'Tidak ada produk pada tab ini.'}
-        </p>
-      )}
-    </div>
-
-    <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-      <p class="text-[var(--color-teks-lembut)]">
-        Menampilkan <span class="tabular-nums">{dari}–{sampai}</span> dari
-        <span class="tabular-nums"> {total}</span> produk
+    {halamanIni.length === 0 && (
+      <p class="py-12 text-center text-[var(--color-teks-lembut)]">
+        {cari ? `Tidak ada produk yang cocok dengan "${cari}".` : 'Tidak ada produk pada tab ini.'}
       </p>
+    )}
+  </div>
 
-      {halamanTerakhir > 1 && (
-        <div class="flex items-center gap-2">
-          {halaman > 1 ? (
-            <a class="tombol-halus" href={tautanHalaman(halaman - 1)}>← Sebelumnya</a>
-          ) : (
-            <span class="tombol-halus opacity-40">← Sebelumnya</span>
-          )}
-          <span class="px-2 tabular-nums text-[var(--color-teks-lembut)]">{halaman} / {halamanTerakhir}</span>
-          {halaman < halamanTerakhir ? (
-            <a class="tombol-halus" href={tautanHalaman(halaman + 1)}>Berikutnya →</a>
-          ) : (
-            <span class="tombol-halus opacity-40">Berikutnya →</span>
-          )}
-        </div>
-      )}
+  <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+    <p class="text-[var(--color-teks-lembut)]">
+      Menampilkan <span class="tabular-nums">{dari}–{sampai}</span> dari
+      <span class="tabular-nums"> {total}</span> produk
+    </p>
+
+    {halamanTerakhir > 1 && (
+      <div class="flex items-center gap-2">
+        {halaman > 1 ? (
+          <a class="tombol-halus" href={tautanHalaman(halaman - 1)}>← Sebelumnya</a>
+        ) : (
+          <span class="tombol-halus opacity-40">← Sebelumnya</span>
+        )}
+        <span class="px-2 tabular-nums text-[var(--color-teks-lembut)]">{halaman} / {halamanTerakhir}</span>
+        {halaman < halamanTerakhir ? (
+          <a class="tombol-halus" href={tautanHalaman(halaman + 1)}>Berikutnya →</a>
+        ) : (
+          <span class="tombol-halus opacity-40">Berikutnya →</span>
+        )}
+      </div>
+    )}
+  </div>
+
+  {/* Bilah aksi massal: tanpa JavaScript selalu terlihat (satu-satunya cara
+      menekan aksi massal), server yang menolak kalau belum ada yang
+      dicentang. Dengan JavaScript, hitungan terpilih tampil hidup dan
+      "Hapus Terpilih" minta konfirmasi -- lihat skrip di bawah. */}
+  {pemilik && (
+    <div class="bilah-bawah">
+      <span class="hanya-js text-sm font-medium" data-ringkas-bilah>Tidak ada produk dipilih</span>
+      <div class="ml-auto flex flex-wrap gap-2">
+        <button class="tombol-halus" type="submit" name="aksi" value="bulk-aktif">Aktifkan Terpilih</button>
+        <button class="tombol-halus" type="submit" name="aksi" value="bulk-nonaktif">Nonaktifkan Terpilih</button>
+        <button class="tombol-bahaya" type="submit" name="aksi" value="bulk-hapus" data-tombol-hapus>
+          Hapus Terpilih
+        </button>
+      </div>
     </div>
-
-    {/* Tanpa JavaScript, bilah ini adalah satu-satunya jalan menekan aksi
-        massal -- selalu terlihat, tanpa hitungan hidup. Dengan JavaScript,
-        bilah ini disembunyikan dan digantikan `#bilah-perubahan` di bawah. */}
-    {pemilik && (
-      <div class="tanpa-js bilah-bawah">
-        <button class="tombol-halus" type="reset">Batalkan</button>
-        <div class="ml-auto flex flex-wrap gap-2">
-          <button class="tombol-halus" type="submit" name="aksi" value="bulk-aktif">Aktifkan Terpilih</button>
-          <button class="tombol-halus" type="submit" name="aksi" value="bulk-nonaktif">Nonaktifkan Terpilih</button>
-          <button class="tombol-utama" type="submit" name="aksi" value="simpan">Simpan Perubahan</button>
-        </div>
-      </div>
-    )}
-
-    {/* Versi JavaScript: sembunyi kalau tidak ada yang dipilih maupun
-        diubah, dan menunjukkan hitungannya hidup. Dimulai `hidden` karena
-        saat halaman baru dimuat memang belum ada perubahan apa pun --
-        skrip di bawah yang mengambil alih sejak baris pertamanya jalan. */}
-    {pemilik && (
-      <div class="hanya-js bilah-bawah" id="bilah-perubahan" hidden>
-        <span class="text-sm font-medium" data-ringkas-bilah>Tidak ada perubahan</span>
-        <div class="ml-auto flex flex-wrap gap-2">
-          <button class="tombol-halus" type="reset">Batalkan</button>
-          <button class="tombol-halus" type="submit" name="aksi" value="bulk-aktif" data-tombol-aktifkan>
-            Aktifkan
-          </button>
-          <button class="tombol-halus" type="submit" name="aksi" value="bulk-nonaktif" data-tombol-nonaktifkan>
-            Nonaktifkan
-          </button>
-          <button class="tombol-utama" type="submit" name="aksi" value="simpan" data-tombol-simpan>
-            Simpan Perubahan
-          </button>
-        </div>
-      </div>
-    )}
+  )}
   </form>
 </AppShell>
 
 {/*
-  Progressive enhancement murni: skrip ini hanya menghitung ulang teks dan
-  keadaan tombol dari input yang sudah ada di HTML, persis pola yang sama
-  dengan halaman kasir. Tidak ada baris yang dirakit, tidak ada request yang
-  dikirim dari sini -- pengiriman tetap lewat submit form biasa.
+  Progressive enhancement murni: skrip ini cuma menghitung ulang teks dari
+  checkbox yang sudah ada di HTML dan meminta konfirmasi sebelum menghapus,
+  persis pola yang sama dengan halaman kasir. Tidak ada baris yang dirakit,
+  tidak ada request yang dikirim dari sini -- pengiriman tetap lewat submit
+  form biasa, dan tanpa skrip ini pun aksi massal tetap bisa dipakai (cuma
+  tanpa hitungan hidup dan tanpa konfirmasi hapus).
 */}
 <script is:inline>
   (function () {
@@ -726,48 +624,20 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
     var checkSemua = borang.querySelector('[data-pilih-semua]');
     var checkBaris = Array.prototype.slice.call(borang.querySelectorAll('[data-pilih-baris]'));
-    var barisEdit = Array.prototype.slice.call(borang.querySelectorAll('[data-baris-edit]'));
-    var bilah = document.getElementById('bilah-perubahan');
-    var ringkas = bilah ? bilah.querySelector('[data-ringkas-bilah]') : null;
-    var tombolSimpan = bilah ? bilah.querySelector('[data-tombol-simpan]') : null;
-    var tombolAktif = bilah ? bilah.querySelector('[data-tombol-aktifkan]') : null;
-    var tombolNonaktif = bilah ? bilah.querySelector('[data-tombol-nonaktifkan]') : null;
-
-    function barisBerubah(tr) {
-      var input = Array.prototype.slice.call(tr.querySelectorAll('input[data-asli]'));
-      return input.some(function (i) {
-        return i.value !== i.dataset.asli;
-      });
-    }
+    var ringkas = borang.querySelector('[data-ringkas-bilah]');
+    var tombolHapus = borang.querySelector('[data-tombol-hapus]');
 
     function hitungUlang() {
       var dipilih = checkBaris.filter(function (c) {
         return c.checked;
       }).length;
-      var diubah = 0;
-
-      barisEdit.forEach(function (tr) {
-        var berubah = barisBerubah(tr);
-        if (berubah) diubah++;
-        tr.classList.toggle('bg-merah-50/40', berubah);
-      });
-
-      var bagian = [];
-      if (dipilih > 0) bagian.push(dipilih + ' produk dipilih');
-      if (diubah > 0) bagian.push(diubah + ' baris diubah');
-      if (ringkas) ringkas.textContent = bagian.length > 0 ? bagian.join(' · ') : 'Tidak ada perubahan';
-
-      if (tombolSimpan) tombolSimpan.disabled = diubah === 0;
-      if (tombolAktif) tombolAktif.disabled = dipilih === 0;
-      if (tombolNonaktif) tombolNonaktif.disabled = dipilih === 0;
-      if (bilah) bilah.hidden = dipilih === 0 && diubah === 0;
+      if (ringkas) {
+        ringkas.textContent = dipilih > 0 ? dipilih + ' produk dipilih' : 'Tidak ada produk dipilih';
+      }
     }
 
     checkBaris.forEach(function (c) {
       c.addEventListener('change', hitungUlang);
-    });
-    Array.prototype.slice.call(borang.querySelectorAll('input[data-asli]')).forEach(function (i) {
-      i.addEventListener('input', hitungUlang);
     });
     if (checkSemua) {
       checkSemua.addEventListener('change', function () {
@@ -777,11 +647,20 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
         hitungUlang();
       });
     }
-    // `reset` mengembalikan nilai INPUT sesudah event ini selesai, jadi
-    // hitung ulang harus menunggu satu giliran event loop.
-    borang.addEventListener('reset', function () {
-      setTimeout(hitungUlang, 0);
-    });
+
+    if (tombolHapus) {
+      tombolHapus.addEventListener('click', function (e) {
+        var dipilih = checkBaris.filter(function (c) {
+          return c.checked;
+        }).length;
+        if (dipilih === 0) return;
+        var pesan =
+          dipilih === 1
+            ? 'Hapus 1 produk terpilih? Tindakan ini tidak bisa dibatalkan.'
+            : 'Hapus ' + dipilih + ' produk terpilih? Tindakan ini tidak bisa dibatalkan.';
+        if (!window.confirm(pesan)) e.preventDefault();
+      });
+    }
 
     hitungUlang();
   })();

@@ -11,7 +11,7 @@ import {
   type ProductBatch,
   type Transaction,
 } from '../lib/api';
-import { rupiah, sisaHari, tanggal } from '../lib/format';
+import { rupiah, sisaHari, tanggal, waktu } from '../lib/format';
 
 /**
  * Kanal tempat penjualan dicatat, dan karena itu daftar harga yang berlaku.
@@ -32,6 +32,64 @@ const KANAL = [
 ] as const;
 
 type Kanal = (typeof KANAL)[number]['nilai'];
+
+/**
+ * Biaya platform Shopee atas SATU transaksi, empat komponen yang jumlahnya
+ * sama persis dengan `platform_commission_fee + platform_service_fee +
+ * platform_withholding_tax + platform_order_processing_fee` yang backend
+ * hitung dan simpan saat checkout (`backend/src/pos/service.rs`, migrasi
+ * 0017/0018). Nama field SENGAJA mengikuti field asli
+ * `v2.payment.get_escrow_detail` milik Shopee, bukan istilah rakitan
+ * sendiri -- lihat `backend/src/marketplace/shopee/client.rs` untuk
+ * pemanggilan API-nya (belum tersambung):
+ *
+ * - `commission_fee`: komisi dasar, persentase dari omzet transaksi ini
+ *   (subtotal - diskon). BISA DIEDIT kasir -- Shopee kadang menjalankan
+ *   promo yang mengubah persennya. `SHOPEE_COMMISSION_PERSEN_DEFAULT` cuma
+ *   nilai awal yang terisi di kolomnya.
+ * - `service_fee`: biaya program tambahan yang OPSIONAL (mis. Gratis Ongkir
+ *   Xtra, Star+). BISA DIEDIT juga, defaultnya NOL -- kita tidak tahu toko
+ *   ini ikut program berbayar yang mana.
+ * - `withholding_tax`: PPh final UMKM, 0,5% dari omzet yang sama. Tetap,
+ *   tidak bisa diedit.
+ * - `seller_order_processing_fee`: Rp1.250 tetap, SEKALI per pesanan
+ *   Shopee.
+ *
+ * Ongkir TIDAK ikut basis maupun total Shopee sama sekali -- logistiknya di
+ * luar sistem ini, kolom "Ongkos kirim" disembunyikan untuk kanal ini.
+ *
+ * Dihitung ulang di sini (bukan dibaca dari backend) supaya kasir melihat
+ * potongannya SEBELUM transaksi disimpan. Berbeda dari sebelumnya: kanal
+ * Shopee di kasir ini cuma untuk MENCATAT pesanan yang uangnya sudah
+ * diterima lewat ShopeePay, jadi keempatnya benar-benar MENGURANGI angka
+ * yang dicatat -- bukan cuma baris informasi di sebelah Total.
+ */
+const SHOPEE_COMMISSION_PERSEN_DEFAULT = 17.25;
+const SHOPEE_SERVICE_PERSEN_DEFAULT = 0;
+const SHOPEE_WITHHOLDING_TAX_PERSEN = 0.5;
+const SHOPEE_ORDER_PROCESSING_FEE = 1250;
+
+/**
+ * `basis` (SELALU rupiah bulat -- harga barang di sistem ini tidak pernah
+ * pecahan) dikali `persen`, dibulatkan ke rupiah terdekat.
+ *
+ * Sengaja BUKAN `Math.round(basis * (persen / 100))`: pembagian itu lewat
+ * floating point, dan `0,1725` (17,25%) tidak punya representasi biner yang
+ * pas -- `45000 * 0.1725` bisa jadi `7762.499999999999` alih-alih
+ * `7762.5`, lalu dibulatkan TURUN persis di titik yang seharusnya naik.
+ * Sebaliknya, `basis * basisPoin` mengalikan DUA BILANGAN BULAT (basisPoin =
+ * persen dalam satuan 1/10.000, presisi yang sama dengan kolom
+ * `platform_commission_fee_percent`/`platform_service_fee_percent` di
+ * migrasi 0018), jadi hasilnya eksak sampai langkah pembulatan terakhir --
+ * sama persis dengan `rupiah_bulat` di `backend/src/pos/service.rs`, yang
+ * juga membulatkan ,50 ke ATAS. Kalau dua tempat ini pernah berbeda arah
+ * pembulatannya, kasir melihat satu angka di layar dan struknya mencatat
+ * angka lain.
+ */
+function biayaPersenRupiah(basis: number, persen: number): number {
+  const basisPoin = Math.round(persen * 100);
+  return Math.round((basis * basisPoin) / 10000);
+}
 
 /**
  * Harga sebuah produk di satu kanal.
@@ -88,6 +146,15 @@ let galat: string | null = null;
 let sukses: string | null = null;
 let struk: Transaction | null = null;
 let keranjang: BarisKeranjang[] = [];
+/**
+ * Pelanggan yang dipilih SAAT transaksi ini berhasil, untuk nota cetak.
+ *
+ * `pelangganDipilih` sendiri tidak bisa dipakai untuk itu: ia dikosongkan
+ * begitu transaksi selesai (lihat di bawah), dan nota dirender setelahnya.
+ * Baru diubah jadi nama sesudah daftar pelanggan selesai diambil, karena
+ * daftar itu sendiri belum ada di titik transaksi berhasil.
+ */
+let strukPelangganId: string | null = null;
 
 // Nilai isian pembayaran, dibaca ulang tiap POST supaya kasir tidak perlu
 // mengetik ulang saat pembayaran ditolak.
@@ -99,6 +166,13 @@ let diskonIsi = '';
 let dibayarIsi = '';
 let cariIsi = '';
 let kategoriIsi = '';
+// Persen commission_fee/service_fee Shopee. Beda dari `ongkirIsi`/
+// `diskonIsi`: keduanya tidak direset ke kosong setiap transaksi selesai --
+// pesanan Shopee berikutnya biasanya memakai persen yang sama, sama seperti
+// kanal yang juga sengaja tidak ikut direset. Default terisi begitu kanal
+// diganti ke Shopee.
+let commissionPersenIsi = String(SHOPEE_COMMISSION_PERSEN_DEFAULT);
+let servicePersenIsi = String(SHOPEE_SERVICE_PERSEN_DEFAULT);
 
 /**
  * Keranjang dibaca dari pasangan field berulang: lima deret sejajar yang
@@ -162,9 +236,17 @@ if (Astro.request.method === 'POST') {
   // berarti apa-apa bagi kasir.
   const kanalDikirim = String(form.get('sales_channel') ?? '');
   kanalIsi = (KANAL.find((k) => k.nilai === kanalDikirim)?.nilai ?? 'toko') as Kanal;
+  // Shopee dicatat sebagai uang yang sudah pasti diterima lewat ShopeePay --
+  // bukan pilihan bebas kasir. Dipaksa di sini juga (bukan cuma di UI)
+  // supaya request rakitan tidak bisa menyelundupkan kanal Shopee dengan
+  // metode tunai, yang membuat "kembalian" tidak berarti apa-apa karena
+  // totalnya sudah bersih dari potongan Shopee.
+  if (kanalIsi === 'shopee') metode = 'ewallet';
   ongkirIsi = String(form.get('shipping_cost') ?? '').trim();
   diskonIsi = String(form.get('discount_amount') ?? '').trim();
   dibayarIsi = String(form.get('amount_paid') ?? '').trim();
+  commissionPersenIsi = String(form.get('platform_commission_fee_percent') ?? '').trim();
+  servicePersenIsi = String(form.get('platform_service_fee_percent') ?? '').trim();
 
   const angka = (kolom: string): number | undefined => {
     const mentah = String(form.get(kolom) ?? '').trim();
@@ -201,6 +283,12 @@ if (Astro.request.method === 'POST') {
       galat = 'Sesi kasir tidak valid. Muat ulang halaman.';
     } else {
       try {
+        // Dikirim sebagai pecahan (0,1725 = 17,25%), bukan angka persen
+        // mentah -- itulah bentuk yang dipakai backend. `undefined` kalau
+        // kosong: backend jatuh ke tarif bawaannya sendiri, satu-satunya
+        // tempat nilai bawaan itu perlu didefinisikan.
+        const persenKomisi = angka('platform_commission_fee_percent');
+        const persenLayanan = angka('platform_service_fee_percent');
         struk = await api<Transaction>('/transactions', {
           method: 'POST',
           token,
@@ -210,8 +298,15 @@ if (Astro.request.method === 'POST') {
             payment_method: metode,
             sales_channel: kanalIsi,
             amount_paid: metode === 'cash' ? angka('amount_paid') : undefined,
-            shipping_cost: angka('shipping_cost'),
+            // Ongkir tidak berlaku untuk Shopee -- backend mengabaikannya
+            // juga, tapi tidak dikirim sama sekali di sini supaya niatnya
+            // jelas dari isi request, bukan cuma dari validasi di sisi sana.
+            shipping_cost: kanalIsi === 'shopee' ? undefined : angka('shipping_cost'),
             discount_amount: angka('discount_amount'),
+            platform_commission_fee_percent:
+              kanalIsi === 'shopee' && persenKomisi !== undefined ? persenKomisi / 100 : undefined,
+            platform_service_fee_percent:
+              kanalIsi === 'shopee' && persenLayanan !== undefined ? persenLayanan / 100 : undefined,
             items: keranjang.map((b) => ({
               product_id: b.product_id,
               qty: b.qty,
@@ -219,6 +314,10 @@ if (Astro.request.method === 'POST') {
             })),
           },
         });
+
+        // Ditangkap SEBELUM `pelangganDipilih` dikosongkan di bawah -- lihat
+        // komentar `strukPelangganId` di atas.
+        strukPelangganId = pelangganDipilih || null;
 
         // Penjualan selesai: meja kasir dikosongkan supaya pembeli berikutnya
         // tidak ikut membayar belanjaan pembeli sebelumnya. Saringan katalog
@@ -258,6 +357,19 @@ const [produk, kategori, semuaBatch, pelanggan] = await Promise.all([
     ? api<PaginatedCustomers>('/customers?limit=200', { token }).then((h) => h.data)
     : Promise.resolve([] as Customer[]),
 ]);
+
+/**
+ * Nama pelanggan untuk nota cetak, dicari dari daftar yang sama yang mengisi
+ * pemilih pelanggan di panel kasir -- bukan permintaan kedua ke server.
+ *
+ * `undefined` (bukan cuma `strukPelangganId` kosong) kalau pelanggannya ada
+ * tapi daftar 200 ini kebetulan tidak memuatnya; nota tetap tercetak, hanya
+ * barisnya diberi label umum, bukan "Walk-in" yang berarti sesuatu yang
+ * berbeda.
+ */
+const strukPelanggan = strukPelangganId
+  ? pelanggan.find((c) => c.id === strukPelangganId)
+  : null;
 
 /** Batch bersisa per produk, urut FEFO -- urutan yang sama dengan urutan keluarnya. */
 const batchProduk = new Map<string, ProductBatch[]>();
@@ -300,12 +412,49 @@ for (const b of keranjang) {
 
 const totalItem = keranjang.reduce((n, b) => n + b.qty, 0);
 const totalBelanja = keranjang.reduce((n, b) => n + b.harga * b.qty, 0);
-const ongkirAngka = Math.max(0, Number(ongkirIsi) || 0);
+// Ongkir tidak berlaku untuk Shopee sama sekali -- lihat komentar
+// `biayaPersenRupiah` dkk. di atas. Kolomnya disembunyikan untuk kanal itu,
+// tapi kalau ada nilai lama yang masih nyangkut di form (mis. sisa dari
+// kanal Toko sebelum diganti), tetap dipaksa nol di sini juga.
+const ongkirAngka = kanalIsi === 'shopee' ? 0 : Math.max(0, Number(ongkirIsi) || 0);
 // Diskon dipotong sampai setinggi-tingginya subtotal. Backend menolak yang
 // melebihi -- di sini angkanya cuma tidak dibiarkan membuat total negatif di
 // layar sebelum penolakan itu datang.
 const diskonAngka = Math.min(totalBelanja, Math.max(0, Number(diskonIsi) || 0));
-const totalTagihan = totalBelanja - diskonAngka + ongkirAngka;
+
+// Kosong jatuh ke tarif bawaan, dan dijepit 0-100 -- sama seperti backend
+// menjepit pecahannya ke 0..1 (lihat validasi di `pos::service::checkout`).
+const jepitPersen = (isi: string, bawaan: number): number =>
+  isi.trim() === '' ? bawaan : Math.min(100, Math.max(0, Number(isi) || bawaan));
+
+const commissionPersenAngka = jepitPersen(commissionPersenIsi, SHOPEE_COMMISSION_PERSEN_DEFAULT);
+const servicePersenAngka = jepitPersen(servicePersenIsi, SHOPEE_SERVICE_PERSEN_DEFAULT);
+
+// Basis potongan Shopee: omzet SETELAH diskon. Sama dengan `basis_fee` di
+// `backend/src/pos/service.rs`.
+const basisFeeShopee = Math.max(0, totalBelanja - diskonAngka);
+const biayaKomisiAngka =
+  kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, commissionPersenAngka) : 0;
+const biayaLayananAngka =
+  kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, servicePersenAngka) : 0;
+const biayaWithholdingTaxAngka =
+  kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
+const biayaOrderProcessingAngka = kanalIsi === 'shopee' ? SHOPEE_ORDER_PROCESSING_FEE : 0;
+
+// Sejak kasir kanal Shopee cuma mencatat pesanan yang uangnya sudah diterima
+// lewat ShopeePay -- bukan menagih pembayaran baru -- angka ini BUKAN lagi
+// "yang dibayar pembeli" untuk kanal itu. Ia langsung dikurangi keempat biaya
+// platform, dan labelnya berganti jadi "Estimasi Total Penghasilan" di
+// render di bawah supaya bedanya kelihatan. `ongkirAngka` sudah nol untuk
+// Shopee, jadi rumusnya tetap satu untuk semua kanal.
+const totalTagihan =
+  totalBelanja -
+  diskonAngka +
+  ongkirAngka -
+  biayaKomisiAngka -
+  biayaLayananAngka -
+  biayaWithholdingTaxAngka -
+  biayaOrderProcessingAngka;
 const tunai = metode === 'cash';
 const dibayarAngka = Number(dibayarIsi);
 const adaDibayar = tunai && dibayarIsi !== '' && Number.isFinite(dibayarAngka);
@@ -993,9 +1142,69 @@ function ringkasBatch(p: Product): string {
             </p>
           </div>
 
+          {/* Hanya berarti untuk Shopee -- selalu dirender (bukan
+              server-only conditional) supaya berganti kanal tanpa reload
+              tetap memunculkan/menyembunyikannya, sama seperti baris biaya
+              platform di bawah.
+
+              Dua kolom, bukan satu "biaya administrasi" gabungan: API
+              Shopee (`v2.payment.get_escrow_detail`) memisahkan potongan
+              jadi `commission_fee` (komisi dasar, berlaku semua pesanan)
+              dan `service_fee` (program opsional seperti Gratis Ongkir
+              Xtra/Star+). Menggabungkannya jadi satu angka tidak bisa
+              dibandingkan field-demi-field dengan struk asli Shopee kalau
+              toko ini suatu saat tersambung sungguhan. */}
+          <div
+            class:list={['grid gap-3 sm:grid-cols-2', kanalIsi === 'shopee' ? '' : 'hidden']}
+            data-blok-commission-fee
+          >
+            <div>
+              <label class="label" for="platform_commission_fee_percent">Biaya Komisi Shopee (%)</label>
+              <input
+                class="kolom tabular-nums"
+                id="platform_commission_fee_percent"
+                name="platform_commission_fee_percent"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={commissionPersenIsi}
+                placeholder={String(SHOPEE_COMMISSION_PERSEN_DEFAULT)}
+                data-commission-fee
+              />
+              <p class="isian-bantu">
+                `commission_fee` Shopee -- komisi dasar, berlaku semua pesanan. Ganti kalau promo
+                Shopee sedang mengubah persennya.
+              </p>
+            </div>
+            <div>
+              <label class="label" for="platform_service_fee_percent">Biaya Layanan Shopee (%)</label>
+              <input
+                class="kolom tabular-nums"
+                id="platform_service_fee_percent"
+                name="platform_service_fee_percent"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={servicePersenIsi}
+                placeholder={String(SHOPEE_SERVICE_PERSEN_DEFAULT)}
+                data-service-fee
+              />
+              <p class="isian-bantu">
+                `service_fee` Shopee -- program opsional (mis. Gratis Ongkir Xtra, Star+). Biarkan 0
+                kalau toko tidak ikut program itu. PPh UMKM 0,5% dan biaya proses Rp1.250 tetap,
+                tidak ikut berubah.
+              </p>
+            </div>
+          </div>
+
           <div>
             <p class="label">Metode pembayaran</p>
-            <div class="flex flex-wrap gap-2">
+            <div
+              class:list={['flex flex-wrap gap-2', kanalIsi === 'shopee' ? 'hidden' : '']}
+              data-blok-metode-pilihan
+            >
               {METODE.map((m) => (
                 <label class="pil-diam cursor-pointer has-[:checked]:border-merah-600 has-[:checked]:bg-merah-600 has-[:checked]:text-white">
                   <input
@@ -1010,10 +1219,32 @@ function ringkasBatch(p: Product): string {
                 </label>
               ))}
             </div>
+            {/* Untuk Shopee, metode bukan pilihan -- uangnya sudah pasti
+                diterima lewat ShopeePay. Radio button di atas tetap ADA di
+                DOM (cuma disembunyikan lewat kelas), jadi cukup satu field
+                `payment_method` yang pernah terkirim; lihat `syncMetodeShopee`
+                di skrip halaman yang memaksa radio "E-wallet" tercentang.
+
+                `pil-aktif` sudah `inline-flex` lewat utility `pil`, jadi
+                jangan tambahkan `inline-block` di sini lagi -- di lapisan
+                utilities Tailwind, `.inline-block` didefinisikan SESUDAH
+                `.hidden`, jadi kalau dua-duanya dipasang, `inline-block`
+                menang dan ShopeePay tetap kelihatan di kanal Toko/Tokopedia
+                walau kelas `hidden` sudah ada. */}
+            <p
+              class:list={['pil-aktif', kanalIsi === 'shopee' ? '' : 'hidden']}
+              data-blok-metode-shopee
+            >
+              ShopeePay
+            </p>
           </div>
 
           <div class="grid gap-3 sm:grid-cols-2">
-            <div>
+            {/* Tidak berlaku untuk Shopee -- logistiknya di luar sistem ini.
+                Disembunyikan, bukan dihapus dari DOM: sama seperti blok
+                lain yang bergantung pada kanal, supaya kolomnya tetap ada
+                untuk skrip halaman membaca/mengosongkan nilainya. */}
+            <div class:list={[kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-ongkir>
               <label class="label" for="shipping_cost">Ongkos kirim (Rp)</label>
               <input
                 class="kolom tabular-nums"
@@ -1044,7 +1275,11 @@ function ringkasBatch(p: Product): string {
               <p class="isian-bantu">Potongan atas seluruh belanja, di luar ongkir.</p>
             </div>
 
-            <div>
+            {/* Shopee tidak butuh ini sama sekali -- uangnya sudah pasti
+                diterima penuh lewat ShopeePay, jadi tidak ada "uang diterima"
+                untuk dicatat maupun kembalian untuk dihitung. Disembunyikan
+                seluruhnya, bukan sekadar dimatikan seperti kanal lain. */}
+            <div class:list={[kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-dibayar>
               <label class="label" for="amount_paid">Uang diterima (tunai)</label>
               <input
                 class="kolom tabular-nums"
@@ -1058,15 +1293,18 @@ function ringkasBatch(p: Product): string {
                 disabled={!tunai}
                 data-dibayar
               />
-              
             </div>
           </div>
 
           {/* Nominal cepat hanya berguna kalau ada yang mengisikannya, jadi
               seluruh barisnya `hanya-js`. "Uang pas" mengambil total berjalan,
               bukan angka yang dirender server -- ongkir bisa sudah berubah
-              setelah halaman dimuat. */}
-          <div class="hanya-js flex flex-wrap gap-2" data-cepat>
+              setelah halaman dimuat. Disembunyikan juga untuk Shopee, dengan
+              alasan yang sama seperti "Uang diterima" di atas. */}
+          <div
+            class:list={['hanya-js flex flex-wrap gap-2', kanalIsi === 'shopee' ? 'hidden' : '']}
+            data-cepat
+          >
             <button type="button" class="pil-diam" data-uang-pas>Uang pas</button>
             {NOMINAL.map((n) => (
               <button type="button" class="pil-diam tabular-nums" data-nominal={n}>
@@ -1097,15 +1335,78 @@ function ringkasBatch(p: Product): string {
                 -{rupiah(diskonAngka)}
               </span>
             </div>
-            <div class="flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]">
+            <div
+              class:list={[
+                'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
+                kanalIsi === 'shopee' ? 'hidden' : '',
+              ]}
+              data-baris-ongkir
+            >
               <span>Ongkos kirim</span>
               <span class="tabular-nums text-[var(--color-teks)]" data-ongkir-tampil>
                 {rupiah(ongkirAngka)}
               </span>
             </div>
+            {/* Keempatnya MENGURANGI Total untuk kanal Shopee -- beda dari
+                sebelumnya. Kasir Shopee di sini cuma mencatat pesanan yang
+                uangnya sudah diterima lewat ShopeePay, jadi angka yang
+                relevan buat kasir adalah yang benar-benar cair ke toko,
+                bukan yang dibayar pembeli (pembeli sudah membayar penuh di
+                Shopee, di luar sistem ini). Nama field mengikuti
+                `get_escrow_detail` Shopee -- lihat komentar di atas. */}
+            <div
+              class:list={[
+                'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
+                kanalIsi === 'shopee' ? '' : 'hidden',
+              ]}
+              data-baris-biaya-komisi
+            >
+              <span>Biaya Komisi (<span data-biaya-komisi-persen>{commissionPersenAngka}</span>%)</span>
+              <span class="tabular-nums text-merah-700" data-biaya-komisi-tampil>
+                -{rupiah(biayaKomisiAngka)}
+              </span>
+            </div>
+            <div
+              class:list={[
+                'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
+                kanalIsi === 'shopee' ? '' : 'hidden',
+              ]}
+              data-baris-biaya-layanan
+            >
+              <span>Biaya Layanan (<span data-biaya-layanan-persen>{servicePersenAngka}</span>%)</span>
+              <span class="tabular-nums text-merah-700" data-biaya-layanan-tampil>
+                -{rupiah(biayaLayananAngka)}
+              </span>
+            </div>
+            <div
+              class:list={[
+                'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
+                kanalIsi === 'shopee' ? '' : 'hidden',
+              ]}
+              data-baris-biaya-pph
+            >
+              <span>PPh UMKM (0,5%)</span>
+              <span class="tabular-nums text-merah-700" data-biaya-pph-tampil>
+                -{rupiah(biayaWithholdingTaxAngka)}
+              </span>
+            </div>
+            <div
+              class:list={[
+                'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
+                kanalIsi === 'shopee' ? '' : 'hidden',
+              ]}
+              data-baris-biaya-proses
+            >
+              <span>Biaya proses pemesanan</span>
+              <span class="tabular-nums text-merah-700" data-biaya-proses-tampil>
+                -{rupiah(biayaOrderProcessingAngka)}
+              </span>
+            </div>
 
             <div class="kotak-total">
-              <p class="font-medium text-merah-700">Total</p>
+              <p class="font-medium text-merah-700" data-label-total>
+                {kanalIsi === 'shopee' ? 'Estimasi Total Penghasilan' : 'Total'}
+              </p>
               <p class="kotak-total-angka" data-total>{rupiah(totalTagihan)}</p>
             </div>
 
@@ -1148,6 +1449,7 @@ function ringkasBatch(p: Product): string {
         </div>
 
         {struk && (
+          <Fragment>
           <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4" role="status">
             <div class="flex items-center justify-between gap-2">
               <span class="lencana-selesai">Penjualan berhasil</span>
@@ -1197,8 +1499,51 @@ function ringkasBatch(p: Product): string {
                     <td class="py-0.5 text-right tabular-nums">{rupiah(struk.shipping_cost)}</td>
                   </tr>
                 )}
+                {/* Untuk kanal Shopee keempatnya SUDAH mengurangi Total di
+                    bawah -- lihat `platform_commission_fee` dkk. yang backend
+                    hitung dan simpan saat checkout (nama field mengikuti
+                    `get_escrow_detail` Shopee). Ditulis sebagai baris struk
+                    biasa, bukan catatan kaki terpisah, supaya penjumlahannya
+                    kelihatan sama seperti Diskon dan Ongkos kirim di
+                    atasnya. */}
+                {struk.sales_channel === 'shopee' && (
+                  <Fragment>
+                    <tr>
+                      <td class="py-0.5">
+                        Biaya Komisi ({struk.platform_commission_fee_percent * 100}%)
+                      </td>
+                      <td class="py-0.5 text-right tabular-nums">
+                        -{rupiah(struk.platform_commission_fee)}
+                      </td>
+                    </tr>
+                    {struk.platform_service_fee > 0 && (
+                      <tr>
+                        <td class="py-0.5">
+                          Biaya Layanan ({struk.platform_service_fee_percent * 100}%)
+                        </td>
+                        <td class="py-0.5 text-right tabular-nums">
+                          -{rupiah(struk.platform_service_fee)}
+                        </td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td class="py-0.5">PPh UMKM (0,5%)</td>
+                      <td class="py-0.5 text-right tabular-nums">
+                        -{rupiah(struk.platform_withholding_tax)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="py-0.5">Biaya proses pemesanan</td>
+                      <td class="py-0.5 text-right tabular-nums">
+                        -{rupiah(struk.platform_order_processing_fee)}
+                      </td>
+                    </tr>
+                  </Fragment>
+                )}
                 <tr class="font-bold">
-                  <td class="py-0.5">Total</td>
+                  <td class="py-0.5">
+                    {struk.sales_channel === 'shopee' ? 'Estimasi Total Penghasilan' : 'Total'}
+                  </td>
                   <td class="py-0.5 text-right tabular-nums">{rupiah(struk.total_amount)}</td>
                 </tr>
                 {struk.amount_paid !== null && (
@@ -1210,6 +1555,19 @@ function ringkasBatch(p: Product): string {
               </tbody>
             </table>
 
+            {/* `hanya-js`: merender nota jadi gambar lalu membuka share
+                sheet OS (supaya bisa dikirim ke app seperti OpenLabel+ untuk
+                dicetak lewat printer thermal Bluetooth) perlu JavaScript,
+                dan tanpa itu tombol ini tidak bisa berbuat apa-apa. Kasir
+                tanpa JS tetap bisa mencetak lewat Ctrl+P/Cmd+P bawaan
+                browser -- `.nota-cetak` di bawah dan blok `@media print` di
+                theme.css sudah mengisolasi nota itu sendiri di kertas,
+                terlepas dari apa yang memicu dialog cetaknya. Lihat skrip
+                module di bawah untuk perilaku tombol ini. */}
+            <button type="button" class="tombol-halus hanya-js mt-3 w-full" data-cetak-struk>
+              Cetak / bagikan nota
+            </button>
+
             {/* Tautan GET, bukan tombol: menutup struk sekalian mengembalikan
                 halaman ke keadaan bersih tanpa hasil POST yang menempel di
                 riwayat browser. Kunci idempotensi transaksi berikutnya sudah
@@ -1217,6 +1575,126 @@ function ringkasBatch(p: Product): string {
                 langsung lanjut menjual tanpa menekan apa pun di sini. */}
             <a href="/kasir" class="tombol-utama mt-3 w-full">Penjualan baru</a>
           </div>
+
+          {/*
+            Nota cetak.
+
+            Berdiri sendiri dari panel konfirmasi di atas, bukan dipakai
+            ulang lewat CSS print yang menyunting tata letaknya: yang satu
+            dibaca di layar (tabel lebar, warna, tombol), yang lain dicetak
+            di kertas struk sempit (monospace, hitam-putih, lebar tetap).
+            Mencampur keduanya lewat override print berisiko merusak salah
+            satu tanpa disadari saat yang lain diubah.
+
+            Disembunyikan di layar oleh `.nota-cetak` di theme.css, dan HANYA
+            blok `@media print` di sana yang menampilkannya kembali --
+            sekaligus menyembunyikan seluruh halaman selain blok ini, supaya
+            yang tercetak betul-betul hanya nota, bukan sidebar atau katalog
+            yang masih ada di DOM.
+          */}
+          <div class="nota-cetak" data-nota-cetak>
+            <p class="nota-toko">Toko Ayam Aneka Jaya 33</p>
+            <p class="nota-baris-pusat">Bersih dan Halal</p>
+            <p class="nota-baris-pusat">{waktu(struk.created_at)}</p>
+            <p class="nota-baris-pusat">#{struk.id.slice(0, 8)}</p>
+            <hr class="nota-garis" />
+            <p>Kasir: {user.name}</p>
+            <p>
+              Pelanggan:{' '}
+              {strukPelanggan
+                ? namaPelanggan(strukPelanggan)
+                : strukPelangganId
+                  ? 'Pelanggan terdaftar'
+                  : 'Walk-in'}
+            </p>
+            <p>Kanal: {KANAL.find((k) => k.nilai === struk.sales_channel)?.label ?? struk.sales_channel}</p>
+            <p>
+              Metode:{' '}
+              {struk.sales_channel === 'shopee'
+                ? 'ShopeePay'
+                : METODE.find((m) => m.nilai === struk.payment_method)?.label ?? struk.payment_method}
+            </p>
+            <hr class="nota-garis" />
+            <table class="nota-tabel">
+              <tbody>
+                {struk.items.map((it) => (
+                  <Fragment>
+                    <tr>
+                      <td colspan={2}>{it.product_name_snapshot}</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        {it.qty} × {rupiah(it.unit_price)}
+                      </td>
+                      <td class="nota-kanan">{rupiah(it.subtotal)}</td>
+                    </tr>
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+            <hr class="nota-garis" />
+            <table class="nota-tabel">
+              <tbody>
+                <tr>
+                  <td>Subtotal</td>
+                  <td class="nota-kanan">{rupiah(struk.subtotal)}</td>
+                </tr>
+                {struk.discount_amount > 0 && (
+                  <tr>
+                    <td>Diskon</td>
+                    <td class="nota-kanan">-{rupiah(struk.discount_amount)}</td>
+                  </tr>
+                )}
+                {struk.shipping_cost > 0 && (
+                  <tr>
+                    <td>Ongkos kirim</td>
+                    <td class="nota-kanan">{rupiah(struk.shipping_cost)}</td>
+                  </tr>
+                )}
+                {struk.sales_channel === 'shopee' && (
+                  <Fragment>
+                    <tr>
+                      <td>Biaya Komisi ({struk.platform_commission_fee_percent * 100}%)</td>
+                      <td class="nota-kanan">-{rupiah(struk.platform_commission_fee)}</td>
+                    </tr>
+                    {struk.platform_service_fee > 0 && (
+                      <tr>
+                        <td>Biaya Layanan ({struk.platform_service_fee_percent * 100}%)</td>
+                        <td class="nota-kanan">-{rupiah(struk.platform_service_fee)}</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td>PPh UMKM (0,5%)</td>
+                      <td class="nota-kanan">-{rupiah(struk.platform_withholding_tax)}</td>
+                    </tr>
+                    <tr>
+                      <td>Biaya proses pemesanan</td>
+                      <td class="nota-kanan">-{rupiah(struk.platform_order_processing_fee)}</td>
+                    </tr>
+                  </Fragment>
+                )}
+                <tr class="nota-total">
+                  <td>{struk.sales_channel === 'shopee' ? 'Estimasi Total Penghasilan' : 'Total'}</td>
+                  <td class="nota-kanan">{rupiah(struk.total_amount)}</td>
+                </tr>
+                {struk.amount_paid !== null && (
+                  <tr>
+                    <td>Dibayar</td>
+                    <td class="nota-kanan">{rupiah(struk.amount_paid)}</td>
+                  </tr>
+                )}
+                {struk.change_amount !== null && (
+                  <tr>
+                    <td>Kembalian</td>
+                    <td class="nota-kanan">{rupiah(struk.change_amount)}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <hr class="nota-garis" />
+            <p class="nota-baris-pusat">Terima kasih!</p>
+          </div>
+          </Fragment>
         )}
       </aside>
     )}
@@ -1275,6 +1753,26 @@ function ringkasBatch(p: Product): string {
       maximumFractionDigits: 0,
     });
 
+    // Sama persis dengan `SHOPEE_COMMISSION_PERSEN_DEFAULT` dkk. di
+    // frontmatter Astro dan tarif bawaan di `backend/src/pos/service.rs` --
+    // lihat komentar di sana kalau angkanya berubah, tiga tempat ini harus
+    // ikut berubah. Keduanya cuma nilai AWAL; kasir boleh menggantinya
+    // lewat kolom "Biaya Komisi Shopee (%)" / "Biaya Layanan Shopee (%)".
+    var SHOPEE_COMMISSION_PERSEN_DEFAULT = 17.25;
+    var SHOPEE_SERVICE_PERSEN_DEFAULT = 0;
+    var SHOPEE_WITHHOLDING_TAX_PERSEN = 0.5;
+    var SHOPEE_ORDER_PROCESSING_FEE = 1250;
+
+    // Sama persis dengan `biayaPersenRupiah` di frontmatter Astro dan
+    // `rupiah_bulat` di `backend/src/pos/service.rs` -- lihat komentarnya di
+    // sana. Aritmetika bilangan bulat, bukan `Math.round(basis * (persen /
+    // 100))`, supaya angka di sini tidak pernah meleset dari yang backend
+    // simpan tepat di titik pembulatan seperti ,50.
+    function biayaPersenRupiah(basis, persen) {
+      var basisPoin = Math.round(persen * 100);
+      return Math.round((basis * basisPoin) / 10000);
+    }
+
     var baris = Array.prototype.slice.call(borang.querySelectorAll('[data-produk]'));
     var barisKeranjang = Array.prototype.slice.call(
       borang.querySelectorAll('[data-baris-keranjang]')
@@ -1287,10 +1785,30 @@ function ringkasBatch(p: Product): string {
     var ongkir = borang.querySelector('[data-ongkir]');
     var diskon = borang.querySelector('[data-diskon]');
     var dibayar = borang.querySelector('[data-dibayar]');
+    var commissionFeeInput = borang.querySelector('[data-commission-fee]');
+    var serviceFeeInput = borang.querySelector('[data-service-fee]');
+    var blokCommissionFee = borang.querySelector('[data-blok-commission-fee]');
+    var blokOngkir = borang.querySelector('[data-blok-ongkir]');
+    var blokMetodePilihan = borang.querySelector('[data-blok-metode-pilihan]');
+    var blokMetodeShopee = borang.querySelector('[data-blok-metode-shopee]');
+    var blokDibayar = borang.querySelector('[data-blok-dibayar]');
+    var blokCepat = borang.querySelector('[data-cepat]');
     var selSubtotal = borang.querySelector('[data-subtotal]');
     var barisDiskon = borang.querySelector('[data-baris-diskon]');
     var selDiskon = borang.querySelector('[data-diskon-tampil]');
+    var barisOngkir = borang.querySelector('[data-baris-ongkir]');
     var selOngkir = borang.querySelector('[data-ongkir-tampil]');
+    var barisBiayaKomisi = borang.querySelector('[data-baris-biaya-komisi]');
+    var selBiayaKomisi = borang.querySelector('[data-biaya-komisi-tampil]');
+    var selBiayaKomisiPersen = borang.querySelector('[data-biaya-komisi-persen]');
+    var barisBiayaLayanan = borang.querySelector('[data-baris-biaya-layanan]');
+    var selBiayaLayanan = borang.querySelector('[data-biaya-layanan-tampil]');
+    var selBiayaLayananPersen = borang.querySelector('[data-biaya-layanan-persen]');
+    var barisBiayaPph = borang.querySelector('[data-baris-biaya-pph]');
+    var selBiayaPph = borang.querySelector('[data-biaya-pph-tampil]');
+    var barisBiayaProses = borang.querySelector('[data-baris-biaya-proses]');
+    var selBiayaProses = borang.querySelector('[data-biaya-proses-tampil]');
+    var labelTotal = borang.querySelector('[data-label-total]');
     var selTotal = borang.querySelector('[data-total]');
     var kotakKembalian = borang.querySelector('[data-kotak-kembalian]');
     var labelKembalian = borang.querySelector('[data-label-kembalian]');
@@ -1444,19 +1962,87 @@ function ringkasBatch(p: Product): string {
       }
 
       // --- Pembayaran ---------------------------------------------------
-      var biaya = Math.max(0, parseFloat(ongkir.value) || 0);
+      var isShopee = kanal() === 'shopee';
+
+      // Ongkir tidak berlaku sama sekali untuk Shopee -- kolomnya
+      // disembunyikan, dan nilainya dipaksa nol di sini juga supaya sisa
+      // angka lama dari kanal Toko tidak diam-diam ikut terhitung.
+      var biaya = isShopee ? 0 : Math.max(0, parseFloat(ongkir.value) || 0);
       // Dipotong sampai setinggi-tingginya subtotal, sama seperti yang
       // dihitung server. Backend menolak yang melebihi; di sini angkanya
       // cuma tidak dibiarkan membuat total negatif di layar.
       var potongan = Math.min(subtotal, Math.max(0, parseFloat(diskon.value) || 0));
-      var total = subtotal - potongan + biaya;
+
+      // Shopee tidak punya pilihan metode -- uangnya sudah pasti diterima
+      // lewat ShopeePay. Radio "E-wallet" dipaksa tercentang di sini (bukan
+      // cuma di render awal server) supaya kasir yang mengganti kanal tanpa
+      // reload tidak diam-diam mengirim metode lama (mis. tunai).
+      if (isShopee) {
+        var radioEwallet = borang.querySelector('[data-metode][value="ewallet"]');
+        if (radioEwallet && !radioEwallet.checked) radioEwallet.checked = true;
+      }
+      if (blokMetodePilihan) blokMetodePilihan.classList.toggle('hidden', isShopee);
+      if (blokMetodeShopee) blokMetodeShopee.classList.toggle('hidden', !isShopee);
+      if (blokCommissionFee) blokCommissionFee.classList.toggle('hidden', !isShopee);
+      if (blokOngkir) blokOngkir.classList.toggle('hidden', isShopee);
+      if (blokDibayar) blokDibayar.classList.toggle('hidden', isShopee);
+      if (blokCepat) blokCepat.classList.toggle('hidden', isShopee);
+
+      // Kosong jatuh ke tarif bawaan, dan dijepit 0-100 -- sama seperti
+      // server (lihat `jepitPersen` di frontmatter Astro).
+      function persenInput(input, bawaan) {
+        var mentah = input ? input.value.trim() : '';
+        return mentah === '' ? bawaan : Math.min(100, Math.max(0, parseFloat(mentah) || bawaan));
+      }
+      var commissionPersen = persenInput(commissionFeeInput, SHOPEE_COMMISSION_PERSEN_DEFAULT);
+      var servicePersen = persenInput(serviceFeeInput, SHOPEE_SERVICE_PERSEN_DEFAULT);
+
+      // Basis potongan Shopee: omzet SETELAH diskon. Sama dengan
+      // `basis_fee` di backend/src/pos/service.rs.
+      var basisFee = Math.max(0, subtotal - potongan);
+      var biayaKomisi = isShopee ? biayaPersenRupiah(basisFee, commissionPersen) : 0;
+      var biayaLayanan = isShopee ? biayaPersenRupiah(basisFee, servicePersen) : 0;
+      var biayaPph = isShopee ? biayaPersenRupiah(basisFee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
+      var biayaProses = isShopee ? SHOPEE_ORDER_PROCESSING_FEE : 0;
+
+      // Untuk Shopee ini BUKAN lagi "yang dibayar pembeli" -- pembeli sudah
+      // membayar penuh di Shopee. Ini estimasi yang cair ke toko setelah
+      // keempat potongan di atas, dan itulah kenapa labelnya berganti jadi
+      // "Estimasi Total Penghasilan" di bawah. `biaya` (ongkir) sudah nol
+      // untuk Shopee, jadi rumusnya tetap satu untuk semua kanal.
+      var total = subtotal - potongan + biaya - biayaKomisi - biayaLayanan - biayaPph - biayaProses;
       var adaTunai = tunai();
 
       selSubtotal.textContent = rupiah.format(subtotal);
       barisDiskon.classList.toggle('hidden', potongan <= 0);
       selDiskon.textContent = '-' + rupiah.format(potongan);
+      if (barisOngkir) barisOngkir.classList.toggle('hidden', isShopee);
       selOngkir.textContent = rupiah.format(biaya);
+      if (labelTotal) labelTotal.textContent = isShopee ? 'Estimasi Total Penghasilan' : 'Total';
       selTotal.textContent = rupiah.format(total);
+
+      if (barisBiayaKomisi && selBiayaKomisi) {
+        barisBiayaKomisi.classList.toggle('hidden', !isShopee);
+        if (isShopee) {
+          if (selBiayaKomisiPersen) selBiayaKomisiPersen.textContent = String(commissionPersen);
+          selBiayaKomisi.textContent = '-' + rupiah.format(biayaKomisi);
+        }
+      }
+      if (barisBiayaLayanan && selBiayaLayanan) {
+        barisBiayaLayanan.classList.toggle('hidden', !isShopee);
+        if (isShopee) {
+          if (selBiayaLayananPersen) selBiayaLayananPersen.textContent = String(servicePersen);
+          selBiayaLayanan.textContent = '-' + rupiah.format(biayaLayanan);
+        }
+      }
+      if (barisBiayaPph && selBiayaPph) {
+        barisBiayaPph.classList.toggle('hidden', !isShopee);
+        if (isShopee) selBiayaPph.textContent = '-' + rupiah.format(biayaPph);
+      }
+      if (barisBiayaProses && selBiayaProses) {
+        barisBiayaProses.classList.toggle('hidden', !isShopee);
+        if (isShopee) selBiayaProses.textContent = '-' + rupiah.format(biayaProses);
+      }
 
       // Kolom uang diterima hanya berlaku untuk tunai; dimatikan supaya
       // angkanya tidak ikut terkirim sebagai pembayaran yang tidak pernah
@@ -1513,6 +2099,10 @@ function ringkasBatch(p: Product): string {
     }
 
     borang.addEventListener('click', function (e) {
+      // `[data-cetak-struk]` ditangani skrip module terpisah di bawah
+      // (butuh `import` untuk merender nota jadi gambar, yang tidak bisa
+      // dilakukan di sini -- lihat catatan `is:inline` di atas skrip ini).
+
       var buka = e.target.closest('[data-buka-batch]');
       if (buka) {
         var panel = buka.closest('[data-produk]').querySelector('[data-panel-batch]');
@@ -1606,7 +2196,11 @@ function ringkasBatch(p: Product): string {
     });
 
     borang.addEventListener('input', function (e) {
-      if (e.target.matches('[data-qty], [data-qty-luar], [data-ongkir], [data-diskon], [data-dibayar]'))
+      if (
+        e.target.matches(
+          '[data-qty], [data-qty-luar], [data-ongkir], [data-diskon], [data-dibayar], [data-commission-fee], [data-service-fee]'
+        )
+      )
         hitung();
       if (e.target === kotakCari) saring();
     });
@@ -1658,4 +2252,89 @@ function ringkasBatch(p: Product): string {
 
     hitung();
   })();
+</script>
+
+{/*
+  Cetak/bagikan nota lewat share sheet OS.
+
+  Terpisah dari skrip `is:inline` di atas karena ini satu-satunya bagian
+  halaman kasir yang butuh `import` (`html-to-image`, untuk merender
+  `.nota-cetak` jadi PNG) -- Astro membundel skrip module lewat Vite,
+  bukan skrip `is:inline`.
+
+  Alurnya: render `.nota-cetak` (nota yang sama yang dipakai `@media print`)
+  jadi gambar PNG dari klon off-screen, lalu:
+    1. Kalau `navigator.share` bisa menerima file (Web Share API level 2 --
+       Android Chrome, iOS Safari, dan Chromium desktop), buka share sheet
+       supaya kasir bisa memilih app seperti OpenLabel+ untuk mencetak lewat
+       printer thermal Bluetooth.
+    2. Kalau tidak didukung (mis. Firefox desktop) atau kasir membatalkan
+       pemilihan app lalu batal, unduh PNG-nya supaya tetap bisa dibuka
+       manual dari OpenLabel+.
+    3. Kalau perenderan gambarnya sendiri gagal (mis. galat tak terduga dari
+       library), jatuh ke `window.print()` bawaan browser supaya kasir tidak
+       pernah mentok tanpa cara mencetak sama sekali.
+*/}
+<script>
+  import { toBlob } from 'html-to-image';
+
+  const tombolCetak = document.querySelector('[data-cetak-struk]');
+  const nota = document.querySelector<HTMLElement>('[data-nota-cetak]');
+
+  if (tombolCetak && nota) {
+    tombolCetak.addEventListener('click', async () => {
+      let file;
+      try {
+        file = await notaKeFile(nota);
+      } catch {
+        window.print();
+        return;
+      }
+
+      const bisaBagikan =
+        typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+      if (bisaBagikan) {
+        try {
+          await navigator.share({ files: [file], title: 'Nota' });
+          return;
+        } catch (err) {
+          // AbortError: kasir menutup share sheet sendiri -- bukan galat,
+          // jangan lanjut ke unduhan supaya tidak mengejutkan.
+          if (err instanceof Error && err.name === 'AbortError') return;
+        }
+      }
+
+      unduh(file);
+    });
+  }
+
+  async function notaKeFile(nota: HTMLElement) {
+    const klon = nota.cloneNode(true) as HTMLElement;
+    // `.nota-cetak` sendiri `display: none` di layar (lihat theme.css) --
+    // style inline di sini menang atas itu tanpa mengubah elemen aslinya.
+    klon.style.display = 'block';
+    klon.style.position = 'fixed';
+    klon.style.left = '-9999px';
+    klon.style.top = '0';
+    klon.style.background = '#ffffff';
+    document.body.appendChild(klon);
+    try {
+      const blob = await toBlob(klon, { backgroundColor: '#ffffff', pixelRatio: 3 });
+      if (!blob) throw new Error('toBlob mengembalikan kosong');
+      return new File([blob], 'nota-' + Date.now() + '.png', { type: 'image/png' });
+    } finally {
+      klon.remove();
+    }
+  }
+
+  function unduh(file: File) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 </script>
