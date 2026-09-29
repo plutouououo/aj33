@@ -1,5 +1,7 @@
+-- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
+-- CreateTable
 CREATE TABLE "categories" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" VARCHAR(150) NOT NULL,
@@ -9,6 +11,7 @@ CREATE TABLE "categories" (
     CONSTRAINT "categories_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "channel_attribute_def_values" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "attribute_def_id" UUID NOT NULL,
@@ -19,6 +22,7 @@ CREATE TABLE "channel_attribute_def_values" (
     CONSTRAINT "channel_attribute_def_values_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "channel_attribute_defs" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "platform_id" UUID NOT NULL,
@@ -33,6 +37,7 @@ CREATE TABLE "channel_attribute_defs" (
     CONSTRAINT "channel_attribute_defs_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "channel_categories" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "platform_id" UUID NOT NULL,
@@ -46,6 +51,7 @@ CREATE TABLE "channel_categories" (
     CONSTRAINT "channel_categories_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "channel_listings" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "platform_id" UUID NOT NULL,
@@ -72,6 +78,7 @@ CREATE TABLE "channel_listings" (
     CONSTRAINT "channel_listings_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "channel_status_mapping" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "platform_id" UUID NOT NULL,
@@ -82,6 +89,7 @@ CREATE TABLE "channel_status_mapping" (
     CONSTRAINT "channel_status_mapping_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "customers" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" VARCHAR(150),
@@ -96,6 +104,7 @@ CREATE TABLE "customers" (
     CONSTRAINT "customers_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "expenses" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "category" VARCHAR(100),
@@ -108,6 +117,7 @@ CREATE TABLE "expenses" (
     CONSTRAINT "expenses_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "external_order_items" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "external_order_id" UUID NOT NULL,
@@ -132,6 +142,7 @@ CREATE TABLE "external_order_items" (
     CONSTRAINT "external_order_items_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "external_orders" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "platform_id" UUID NOT NULL,
@@ -165,6 +176,7 @@ CREATE TABLE "external_orders" (
     CONSTRAINT "external_orders_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "notifications" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "user_id" UUID NOT NULL,
@@ -179,6 +191,7 @@ CREATE TABLE "notifications" (
     CONSTRAINT "notifications_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "order_packages" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "external_order_id" UUID NOT NULL,
@@ -191,6 +204,7 @@ CREATE TABLE "order_packages" (
     CONSTRAINT "order_packages_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "order_shipping_address" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "external_order_id" UUID NOT NULL,
@@ -209,6 +223,7 @@ CREATE TABLE "order_shipping_address" (
     CONSTRAINT "order_shipping_address_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "platforms" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "platform_name" VARCHAR(30) NOT NULL,
@@ -225,6 +240,7 @@ CREATE TABLE "platforms" (
     CONSTRAINT "platforms_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "product_batches" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "product_id" UUID NOT NULL,
@@ -237,6 +253,7 @@ CREATE TABLE "product_batches" (
     CONSTRAINT "product_batches_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "product_channel_attribute_values" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "product_channel_attribute_id" UUID NOT NULL,
@@ -247,6 +264,7 @@ CREATE TABLE "product_channel_attribute_values" (
     CONSTRAINT "product_channel_attribute_values_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "product_channel_attributes" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "channel_listing_id" UUID NOT NULL,
@@ -256,6 +274,7 @@ CREATE TABLE "product_channel_attributes" (
     CONSTRAINT "product_channel_attributes_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "product_channel_logistics" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "channel_listing_id" UUID NOT NULL,
@@ -270,6 +289,7 @@ CREATE TABLE "product_channel_logistics" (
     CONSTRAINT "product_channel_logistics_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "product_images" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "channel_listing_id" UUID NOT NULL,
@@ -282,6 +302,7 @@ CREATE TABLE "product_images" (
     CONSTRAINT "product_images_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "product_stock_locations" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "channel_listing_id" UUID NOT NULL,
@@ -294,6 +315,7 @@ CREATE TABLE "product_stock_locations" (
     CONSTRAINT "product_stock_locations_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "product_wholesale_tiers" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "channel_listing_id" UUID NOT NULL,
@@ -304,6 +326,7 @@ CREATE TABLE "product_wholesale_tiers" (
     CONSTRAINT "product_wholesale_tiers_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "products" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "category_id" UUID,
@@ -336,6 +359,7 @@ CREATE TABLE "products" (
     CONSTRAINT "products_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "shopping_list_items" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "product_id" UUID NOT NULL,
@@ -347,6 +371,7 @@ CREATE TABLE "shopping_list_items" (
     CONSTRAINT "shopping_list_items_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "stock_adjustments" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "product_id" UUID NOT NULL,
@@ -362,6 +387,7 @@ CREATE TABLE "stock_adjustments" (
     CONSTRAINT "stock_adjustments_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "store_settings" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "business_name" VARCHAR(200) NOT NULL,
@@ -375,6 +401,7 @@ CREATE TABLE "store_settings" (
     CONSTRAINT "store_settings_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "ticket_items" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "ticket_id" UUID NOT NULL,
@@ -387,6 +414,7 @@ CREATE TABLE "ticket_items" (
     CONSTRAINT "ticket_items_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "tickets" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "external_order_id" UUID NOT NULL,
@@ -402,6 +430,7 @@ CREATE TABLE "tickets" (
     CONSTRAINT "tickets_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "transaction_items" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "transaction_id" UUID NOT NULL,
@@ -415,6 +444,7 @@ CREATE TABLE "transaction_items" (
     CONSTRAINT "transaction_items_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "transactions" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "idempotency_key" VARCHAR(100) NOT NULL,
@@ -436,6 +466,7 @@ CREATE TABLE "transactions" (
     CONSTRAINT "transactions_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
 CREATE TABLE "users" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" VARCHAR(150) NOT NULL,
@@ -451,141 +482,210 @@ CREATE TABLE "users" (
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateIndex
 CREATE UNIQUE INDEX "categories_name_key" ON "categories"("name");
 
+-- CreateIndex
 CREATE INDEX "idx_channel_attribute_def_values_def" ON "channel_attribute_def_values"("attribute_def_id");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_channel_attribute_defs_cat_attr" ON "channel_attribute_defs"("platform_id", "external_category_id", "attribute_id");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_channel_categories_platform_extid" ON "channel_categories"("platform_id", "external_category_id");
 
+-- CreateIndex
 CREATE INDEX "idx_channel_listings_product" ON "channel_listings"("product_id", "platform_id");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_channel_listings_platform_extid" ON "channel_listings"("platform_id", "external_item_id");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_channel_status_mapping_platform_status" ON "channel_status_mapping"("platform_id", "external_status");
 
+-- CreateIndex
 CREATE INDEX "idx_customers_phone" ON "customers"("phone");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_external_order_items_order_line" ON "external_order_items"("external_order_id", "order_item_id") WHERE (order_item_id IS NOT NULL);
 
+-- CreateIndex
 CREATE INDEX "idx_external_orders_status_deadline" ON "external_orders"("status", "sla_deadline");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_external_orders_platform_extid" ON "external_orders"("platform_id", "external_order_id");
 
+-- CreateIndex
 CREATE INDEX "idx_notifications_user_unread" ON "notifications"("user_id", "is_read");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_order_packages_order_number" ON "order_packages"("external_order_id", "package_number");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_order_shipping_address_order" ON "order_shipping_address"("external_order_id");
 
+-- CreateIndex
 CREATE INDEX "idx_product_batches_expiry" ON "product_batches"("expiry_date");
 
+-- CreateIndex
 CREATE INDEX "idx_product_batches_product" ON "product_batches"("product_id");
 
+-- CreateIndex
 CREATE INDEX "idx_product_channel_attributes_listing" ON "product_channel_attributes"("channel_listing_id");
 
+-- CreateIndex
 CREATE INDEX "idx_product_channel_logistics_listing" ON "product_channel_logistics"("channel_listing_id");
 
+-- CreateIndex
 CREATE INDEX "idx_product_images_listing" ON "product_images"("channel_listing_id");
 
+-- CreateIndex
 CREATE INDEX "idx_product_stock_locations_listing" ON "product_stock_locations"("channel_listing_id");
 
+-- CreateIndex
 CREATE INDEX "idx_product_wholesale_tiers_listing" ON "product_wholesale_tiers"("channel_listing_id");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "products_sku_key" ON "products"("sku");
 
+-- CreateIndex
 CREATE INDEX "idx_products_low_stock" ON "products"("id") WHERE (stock_qty <= low_stock_threshold);
 
+-- CreateIndex
 CREATE INDEX "idx_tickets_assignee_status" ON "tickets"("assigned_to_user_id", "status");
 
+-- CreateIndex
 CREATE INDEX "idx_transaction_items_product_id" ON "transaction_items"("product_id");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "transactions_idempotency_key_key" ON "transactions"("idempotency_key");
 
+-- CreateIndex
 CREATE INDEX "idx_transactions_created_at" ON "transactions"("created_at");
 
+-- CreateIndex
 CREATE UNIQUE INDEX "users_email_or_username_key" ON "users"("email_or_username");
 
+-- CreateIndex
 CREATE INDEX "idx_users_role" ON "users"("role");
 
+-- AddForeignKey
 ALTER TABLE "categories" ADD CONSTRAINT "categories_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "channel_attribute_def_values" ADD CONSTRAINT "channel_attribute_def_values_attribute_def_id_fkey" FOREIGN KEY ("attribute_def_id") REFERENCES "channel_attribute_defs"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "channel_attribute_defs" ADD CONSTRAINT "channel_attribute_defs_platform_id_fkey" FOREIGN KEY ("platform_id") REFERENCES "platforms"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "channel_categories" ADD CONSTRAINT "channel_categories_platform_id_fkey" FOREIGN KEY ("platform_id") REFERENCES "platforms"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "channel_listings" ADD CONSTRAINT "channel_listings_platform_id_fkey" FOREIGN KEY ("platform_id") REFERENCES "platforms"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "channel_listings" ADD CONSTRAINT "channel_listings_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "channel_status_mapping" ADD CONSTRAINT "channel_status_mapping_platform_id_fkey" FOREIGN KEY ("platform_id") REFERENCES "platforms"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "expenses" ADD CONSTRAINT "expenses_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "external_order_items" ADD CONSTRAINT "external_order_items_external_order_id_fkey" FOREIGN KEY ("external_order_id") REFERENCES "external_orders"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "external_order_items" ADD CONSTRAINT "external_order_items_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "external_orders" ADD CONSTRAINT "external_orders_customer_id_fkey" FOREIGN KEY ("customer_id") REFERENCES "customers"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "external_orders" ADD CONSTRAINT "external_orders_platform_id_fkey" FOREIGN KEY ("platform_id") REFERENCES "platforms"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "order_packages" ADD CONSTRAINT "order_packages_external_order_id_fkey" FOREIGN KEY ("external_order_id") REFERENCES "external_orders"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "order_shipping_address" ADD CONSTRAINT "order_shipping_address_external_order_id_fkey" FOREIGN KEY ("external_order_id") REFERENCES "external_orders"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "product_batches" ADD CONSTRAINT "product_batches_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "product_batches" ADD CONSTRAINT "product_batches_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "product_channel_attribute_values" ADD CONSTRAINT "product_channel_attribute_val_product_channel_attribute_id_fkey" FOREIGN KEY ("product_channel_attribute_id") REFERENCES "product_channel_attributes"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "product_channel_attributes" ADD CONSTRAINT "product_channel_attributes_channel_listing_id_fkey" FOREIGN KEY ("channel_listing_id") REFERENCES "channel_listings"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "product_channel_logistics" ADD CONSTRAINT "product_channel_logistics_channel_listing_id_fkey" FOREIGN KEY ("channel_listing_id") REFERENCES "channel_listings"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "product_images" ADD CONSTRAINT "product_images_channel_listing_id_fkey" FOREIGN KEY ("channel_listing_id") REFERENCES "channel_listings"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "product_stock_locations" ADD CONSTRAINT "product_stock_locations_channel_listing_id_fkey" FOREIGN KEY ("channel_listing_id") REFERENCES "channel_listings"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "product_wholesale_tiers" ADD CONSTRAINT "product_wholesale_tiers_channel_listing_id_fkey" FOREIGN KEY ("channel_listing_id") REFERENCES "channel_listings"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "products" ADD CONSTRAINT "products_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "categories"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "products" ADD CONSTRAINT "products_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "shopping_list_items" ADD CONSTRAINT "shopping_list_items_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "stock_adjustments" ADD CONSTRAINT "stock_adjustments_adjusted_by_user_id_fkey" FOREIGN KEY ("adjusted_by_user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "stock_adjustments" ADD CONSTRAINT "stock_adjustments_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "store_settings" ADD CONSTRAINT "store_settings_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "ticket_items" ADD CONSTRAINT "ticket_items_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "ticket_items" ADD CONSTRAINT "ticket_items_ticket_id_fkey" FOREIGN KEY ("ticket_id") REFERENCES "tickets"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "tickets" ADD CONSTRAINT "tickets_assigned_by_fkey" FOREIGN KEY ("assigned_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "tickets" ADD CONSTRAINT "tickets_assigned_to_user_id_fkey" FOREIGN KEY ("assigned_to_user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "tickets" ADD CONSTRAINT "tickets_external_order_id_fkey" FOREIGN KEY ("external_order_id") REFERENCES "external_orders"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "transaction_items" ADD CONSTRAINT "transaction_items_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "transaction_items" ADD CONSTRAINT "transaction_items_transaction_id_fkey" FOREIGN KEY ("transaction_id") REFERENCES "transactions"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "transactions" ADD CONSTRAINT "transactions_cashier_user_id_fkey" FOREIGN KEY ("cashier_user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "transactions" ADD CONSTRAINT "transactions_customer_id_fkey" FOREIGN KEY ("customer_id") REFERENCES "customers"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "transactions" ADD CONSTRAINT "transactions_voided_by_fkey" FOREIGN KEY ("voided_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
