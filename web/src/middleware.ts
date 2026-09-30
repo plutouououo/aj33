@@ -56,7 +56,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Sebelum pemeriksaan peran: akun berpassword sementara tidak boleh
   // mengerjakan apa pun, termasuk halaman yang perannya memang berhak.
   if (harusGantiPassword(user, pathname)) {
-    return context.redirect('/ganti-password', 302);
+    return context.redirect('/pengaturan/akun', 302);
   }
 
   // Pembatasan peran ditegakkan DI SINI, bukan di tiap halaman. Menu yang

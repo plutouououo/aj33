@@ -157,7 +157,7 @@ pub async fn list_products(
     // `$1 IS NULL OR ...` membuat satu query melayani semua kombinasi filter.
     // Alternatifnya merangkai SQL sebagai string, yang menutup pintu bagi
     // pemeriksaan query saat compile.
-    let rows = sqlx::query_as!(
+    let baris = sqlx::query_as!(
         Product,
         r#"
         SELECT
@@ -200,10 +200,9 @@ pub async fn list_products(
         filter.limit,
         filter.offset
     )
-    .fetch_all(pool)
-    .await?;
+    .fetch_all(pool);
 
-    let total = sqlx::query_scalar!(
+    let hitung = sqlx::query_scalar!(
         r#"
         SELECT count(*) AS "count!"
         FROM products p
@@ -225,8 +224,11 @@ pub async fn list_products(
         filter.parent_id,
         filter.scope.as_str()
     )
-    .fetch_one(pool)
-    .await?;
+    .fetch_one(pool);
+
+    // Dua query independen -- dijalankan bersamaan, bukan bergiliran, supaya
+    // latensi totalnya sebesar yang paling lambat, bukan jumlah keduanya.
+    let (rows, total) = tokio::try_join!(baris, hitung)?;
 
     Ok((rows, total))
 }
@@ -306,6 +308,10 @@ pub struct NewProduct {
     pub cost_price: Option<Decimal>,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
+    /// Endpoint HTTP manual selalu mengirim `true` (produk langsung
+    /// terbit); impor massal yang butuh mengontrolnya lewat toggle
+    /// "terbitkan setelah commit".
+    pub is_active: bool,
     pub created_by: Uuid,
 }
 
@@ -321,9 +327,9 @@ pub async fn insert_product(
         INSERT INTO products
             (name, seo_name, sku, brand_name, product_type, variant_grade, variant_size,
              parent_id, category_id, price, price_shopee, price_tiktok,
-             cost_price, stock_qty, low_stock_threshold, image_url, created_by)
+             cost_price, stock_qty, low_stock_threshold, image_url, is_active, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0,
-                $14, $15, $16)
+                $14, $15, $16, $17)
         RETURNING id
         "#,
         input.name,
@@ -341,6 +347,7 @@ pub async fn insert_product(
         input.cost_price,
         input.low_stock_threshold,
         input.image_url,
+        input.is_active,
         input.created_by
     )
     .fetch_one(&mut **tx)

@@ -1,0 +1,16 @@
+---
+import PengaturanShell from '../../layouts/PengaturanShell.astro';
+
+const user = Astro.locals.user!;
+---
+
+<PengaturanShell judul="Platform" user={user}>
+  <div class="kartu max-w-prose">
+    <h2 class="mb-2 font-semibold">Segera hadir</h2>
+    <p class="text-sm text-[var(--color-teks-lembut)]">
+      Menghubungkan toko Shopee dan TikTok Shop langsung dari sini akan
+      menyusul. Untuk sekarang, koneksi platform masih dikelola manual di
+      belakang layar.
+    </p>
+  </div>
+</PengaturanShell>

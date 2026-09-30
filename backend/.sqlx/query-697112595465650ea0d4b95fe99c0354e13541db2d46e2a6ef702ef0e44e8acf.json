@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE import_rows\n        SET category_id = $3,\n            issues = COALESCE(\n                (SELECT jsonb_agg(e) FROM jsonb_array_elements(issues) e\n                 WHERE e->>'field' <> 'category_text'),\n                '[]'::jsonb\n            )\n        WHERE batch_id = $1 AND lower(trim(category_text)) = lower(trim($2))\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "697112595465650ea0d4b95fe99c0354e13541db2d46e2a6ef702ef0e44e8acf"
+}

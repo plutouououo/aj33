@@ -310,8 +310,10 @@ prepared statement, dan sqlx memakainya untuk tiap query.
   upload multipart dan isian file di form. Catatan: tabel `product_images`
   **bukan** untuk ini (terikat `channel_listing_id`, isinya gambar listing
   marketplace).
-- Halaman `/pesanan` dan `/pengaturan/platform` ada di menu tapi belum dibuat —
-  tautan mati.
+- Halaman `/pesanan` ada di menu tapi belum dibuat — tautan mati.
+- `/pengaturan/platform` sekarang sudah ada halamannya, tapi masih placeholder
+  "segera hadir" — belum ada endpoint backend untuk connect/disconnect
+  Shopee/TikTok Shop maupun baca status koneksinya dari tabel `platforms`.
 - Import dan Mapping produk belum punya endpoint.
 - **Kasir belum layak di ponsel.** Sidebar selalu memakan 15rem dan `AppShell`
   tidak punya tombol hamburger maupun breakpoint, jadi di layar 360px hanya

@@ -1,6 +1,7 @@
 //! Akses tabel `transactions` dan `transaction_items`.
 
 use crate::error::AppResult;
+use crate::stock::StockLine;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -318,4 +319,89 @@ pub async fn list_transactions(pool: &PgPool, limit: i64) -> AppResult<Vec<Trans
     }
 
     Ok(hasil)
+}
+
+/// Transaksi yang statusnya sedang terkunci untuk void.
+pub struct TransaksiTerkunci {
+    pub status: String,
+}
+
+/// Membaca status transaksi sambil menguncinya sampai transaksi pemanggil
+/// selesai -- sama pola dengan `tickets::repo::kunci`. Tanpa kunci ini, dua
+/// permintaan "batalkan" yang datang bersamaan sama-sama membaca status
+/// `completed`, sama-sama lolos pemeriksaan, dan stok dikembalikan dua kali.
+pub async fn kunci_transaksi(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    id: Uuid,
+) -> AppResult<Option<TransaksiTerkunci>> {
+    let row = sqlx::query_as!(
+        TransaksiTerkunci,
+        r#"SELECT status FROM transactions WHERE id = $1 FOR UPDATE"#,
+        id
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    Ok(row)
+}
+
+/// Baris `stock_adjustments` yang ditulis penjualan aslinya -- satu per
+/// (produk, batch) yang tersentuh. Void memutar ulang baris-baris ini lewat
+/// `stock::tambah`, bukan menghitung ulang dari `transaction_items`, supaya
+/// stok kembali persis ke batch asalnya walau FEFO batch lain sudah berubah
+/// sejak penjualan terjadi.
+struct PenyesuaianPenjualan {
+    product_id: Uuid,
+    batch_id: Option<Uuid>,
+    change_qty: i32,
+}
+
+pub async fn penyesuaian_penjualan(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    transaction_id: Uuid,
+) -> AppResult<Vec<StockLine>> {
+    let baris = sqlx::query_as!(
+        PenyesuaianPenjualan,
+        r#"
+        SELECT product_id, batch_id, change_qty
+        FROM stock_adjustments
+        WHERE reference_type = 'transaction' AND reference_id = $1 AND reason = 'sale'
+        "#,
+        transaction_id
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    // `change_qty` penjualan selalu negatif (lihat stock::kurangi) --
+    // `StockLine::qty` selalu positif, jadi dibalik di sini.
+    Ok(baris
+        .into_iter()
+        .map(|b| StockLine {
+            product_id: b.product_id,
+            qty: -b.change_qty,
+            batch_id: b.batch_id,
+        })
+        .collect())
+}
+
+pub async fn set_voided(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    id: Uuid,
+    voided_by: Uuid,
+    reason: &str,
+) -> AppResult<()> {
+    sqlx::query!(
+        r#"
+        UPDATE transactions
+        SET status = 'voided', voided_at = now(), voided_by = $2, void_reason = $3
+        WHERE id = $1
+        "#,
+        id,
+        voided_by,
+        reason
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }

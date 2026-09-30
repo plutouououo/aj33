@@ -1,9 +1,10 @@
 //! Endpoint produk, varian, batch, kategori, dan riwayat ledger stok.
 
 use super::repo::{
-    self, BatchPatch, Category, NewBatch, NewProduct, Product, ProductBatch, ProductFilter,
-    ProductPatch, Scope, StockAdjustment, Ubah,
+    self, BatchPatch, Category, NewBatch, Product, ProductBatch, ProductFilter, ProductPatch,
+    Scope, StockAdjustment, Ubah,
 };
+use super::service;
 use super::sku;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
@@ -93,7 +94,7 @@ async fn list_products(
     };
 
     let filter = ProductFilter {
-        search: bersihkan(q.search),
+        search: service::bersihkan(q.search),
         category_id: q.category_id,
         parent_id: q.parent_id,
         scope,
@@ -128,7 +129,7 @@ async fn get_product(
     _user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<ProductDetail>> {
-    let product = ambil_produk(&state, id).await?;
+    let product = service::ambil_produk(&state, id).await?;
     let variants = repo::list_variants(&state.pool, id).await?;
     let batches = repo::list_batches(&state.pool, id).await?;
 
@@ -183,100 +184,37 @@ async fn create_product(
 ) -> AppResult<(axum::http::StatusCode, Json<Product>)> {
     user.require(&[Role::Owner])?;
 
-    let name = body.name.trim();
-    if name.is_empty() {
-        return Err(AppError::bad_request("Nama produk wajib diisi."));
-    }
-    periksa_harga(body.price, body.price_shopee, body.price_tiktok)?;
-    if body.stock_qty < 0 {
-        return Err(AppError::bad_request("Stok awal tidak boleh negatif."));
-    }
-
-    // Varian menempel pada induk yang harus benar-benar ada, dan induk itu
-    // tidak boleh varian: katalog bertingkat-tingkat tidak punya wujud yang
-    // masuk akal di layar kasir maupun di marketplace.
-    //
-    // Hasilnya tidak ditahan: sejak SKU varian dirakit dari atribut varian
-    // itu sendiri (lihat `rakit_sku`), induknya tidak dibutuhkan lagi
-    // sesudah pemeriksaan ini.
-    if let Some(parent_id) = body.parent_id {
-        let induk = ambil_produk(&state, parent_id).await?;
-        if induk.parent_id.is_some() {
-            return Err(AppError::bad_request(
-                "Varian tidak bisa punya varian lagi.",
-            ));
-        }
-    }
-
-    if let Some(category_id) = body.category_id {
-        if !repo::category_ada(&state.pool, category_id).await? {
-            return Err(AppError::bad_request("Kategori tidak ditemukan."));
-        }
-    }
-
-    let brand_name = bersihkan(body.brand_name);
-    let product_type = bersihkan(body.product_type);
-    let variant_grade = bersihkan(body.variant_grade);
-    let variant_size = bersihkan(body.variant_size);
-
-    let sku = rakit_sku(
+    let id = service::create_product(
         &state,
-        &brand_name,
-        &product_type,
-        &variant_grade,
-        &variant_size,
-    )
-    .await?;
-
-    let batch_number = bersihkan(body.batch_number);
-
-    // Produk, batch pertamanya, dan baris ledger stok ditulis dalam satu
-    // transaksi: produk yang tersimpan tanpa stok awalnya akan tampil habis
-    // padahal barangnya ada di rak.
-    let mut tx = state.pool.begin().await?;
-
-    let id = repo::insert_product(
-        &mut tx,
-        &NewProduct {
-            name: name.to_string(),
-            seo_name: bersihkan(body.seo_name),
-            sku: Some(sku),
-            brand_name,
-            product_type,
-            variant_grade,
-            variant_size,
+        user.id,
+        service::CreateProductInput {
+            name: body.name,
+            seo_name: body.seo_name,
+            brand_name: body.brand_name,
+            product_type: body.product_type,
+            variant_grade: body.variant_grade,
+            variant_size: body.variant_size,
             parent_id: body.parent_id,
             category_id: body.category_id,
             price: body.price,
             price_shopee: body.price_shopee,
             price_tiktok: body.price_tiktok,
             cost_price: None,
-            low_stock_threshold: body.low_stock_threshold.unwrap_or(5),
-            image_url: bersihkan(body.image_url),
-            created_by: user.id,
+            // Endpoint HTTP manual selalu menerbitkan produk langsung --
+            // toggle terbit/tidak hanya ada di jalur impor massal.
+            is_active: true,
+            low_stock_threshold: body.low_stock_threshold,
+            image_url: body.image_url,
+            stock_qty: body.stock_qty,
+            purchase_price: body.purchase_price,
+            batch_number: body.batch_number,
+            expiry_date: body.expiry_date,
+            storage_location: body.storage_location,
         },
     )
     .await?;
 
-    if body.stock_qty > 0 {
-        catat_batch(
-            &mut tx,
-            &NewBatch {
-                product_id: id,
-                batch_number,
-                purchase_price: body.purchase_price,
-                quantity: body.stock_qty,
-                expiry_date: body.expiry_date,
-                storage_location: bersihkan(body.storage_location),
-                created_by: user.id,
-            },
-        )
-        .await?;
-    }
-
-    tx.commit().await?;
-
-    let product = ambil_produk(&state, id).await?;
+    let product = service::ambil_produk(&state, id).await?;
     Ok((axum::http::StatusCode::CREATED, Json(product)))
 }
 
@@ -324,19 +262,10 @@ async fn update_product(
 ) -> AppResult<Json<Product>> {
     user.require(&[Role::Owner])?;
 
-    let sekarang = ambil_produk(&state, id).await?;
-
-    periksa_harga(
-        body.price.unwrap_or(sekarang.price),
-        body.price_shopee.flatten(),
-        body.price_tiktok.flatten(),
-    )?;
-
-    if let Some(Some(category_id)) = body.category_id {
-        if !repo::category_ada(&state.pool, category_id).await? {
-            return Err(AppError::bad_request("Kategori tidak ditemukan."));
-        }
-    }
+    // Cuma dibutuhkan `koreksi_sku` di bawah (butuh tahu SKU & status
+    // sekarang) -- validasi harga/kategori sudah jadi tanggung jawab
+    // `service::update_product`, tidak diulang di sini.
+    let sekarang = service::ambil_produk(&state, id).await?;
 
     let name = body
         .name
@@ -379,11 +308,11 @@ async fn update_product(
         is_active: body.is_active,
     };
 
-    if !repo::update_product(&state.pool, id, &patch).await? {
+    if !service::update_product(&state, id, patch).await? {
         return Err(AppError::not_found("Produk tidak ditemukan."));
     }
 
-    Ok(Json(ambil_produk(&state, id).await?))
+    Ok(Json(service::ambil_produk(&state, id).await?))
 }
 
 /// Menghapus produk sungguhan, bukan menonaktifkannya. Hanya mungkin selama
@@ -397,7 +326,7 @@ async fn delete_product(
 ) -> AppResult<axum::http::StatusCode> {
     user.require(&[Role::Owner])?;
 
-    let produk = ambil_produk(&state, id).await?;
+    let produk = service::ambil_produk(&state, id).await?;
 
     if let Some(penahan) = repo::penahan_hapus(&state.pool, id).await? {
         return Err(AppError::conflict(format!(
@@ -460,14 +389,14 @@ async fn create_batch(
         return Err(AppError::bad_request("Jumlah batch harus lebih dari nol."));
     }
 
-    let produk = ambil_produk(&state, id).await?;
+    let produk = service::ambil_produk(&state, id).await?;
     if produk.variant_count > 0 {
         return Err(AppError::bad_request(
             "Produk ini punya varian. Catat batch pada variannya, bukan di induk.",
         ));
     }
 
-    let batch_number = bersihkan(body.batch_number);
+    let batch_number = service::bersihkan(body.batch_number);
     if let Some(nomor) = &batch_number {
         if repo::list_batches(&state.pool, id)
             .await?
@@ -481,7 +410,7 @@ async fn create_batch(
     }
 
     let mut tx = state.pool.begin().await?;
-    let batch_id = catat_batch(
+    let batch_id = service::catat_batch(
         &mut tx,
         &NewBatch {
             product_id: id,
@@ -489,7 +418,7 @@ async fn create_batch(
             purchase_price: body.purchase_price,
             quantity: body.quantity,
             expiry_date: body.expiry_date,
-            storage_location: bersihkan(body.storage_location),
+            storage_location: service::bersihkan(body.storage_location),
             created_by: user.id,
         },
     )
@@ -668,7 +597,7 @@ async fn adjust_stock(
 
     tx.commit().await?;
 
-    Ok(Json(ambil_produk(&state, id).await?))
+    Ok(Json(service::ambil_produk(&state, id).await?))
 }
 
 // --- Kategori ---
@@ -709,34 +638,10 @@ async fn create_category(
 }
 
 // --- Perkakas bersama ---
-
-async fn ambil_produk(state: &AppState, id: Uuid) -> AppResult<Product> {
-    repo::find_product(&state.pool, id)
-        .await?
-        .ok_or_else(|| AppError::not_found("Produk tidak ditemukan."))
-}
-
-/// Harga diperiksa di sini supaya pesannya menyebut marketplace mana yang
-/// salah. CHECK constraint di database tetap ada sebagai jaring terakhir,
-/// tapi galatnya tidak bisa menyebutkan itu.
-fn periksa_harga(
-    price: Decimal,
-    price_shopee: Option<Decimal>,
-    price_tiktok: Option<Decimal>,
-) -> AppResult<()> {
-    if price.is_sign_negative() {
-        return Err(AppError::bad_request("Harga tidak boleh negatif."));
-    }
-    if price_shopee.is_some_and(|h| h.is_sign_negative()) {
-        return Err(AppError::bad_request("Harga Shopee tidak boleh negatif."));
-    }
-    if price_tiktok.is_some_and(|h| h.is_sign_negative()) {
-        return Err(AppError::bad_request(
-            "Harga Tokopedia/TikTok Shop tidak boleh negatif.",
-        ));
-    }
-    Ok(())
-}
+//
+// `ambil_produk`, `periksa_harga`, `rakit_sku`, `catat_batch`, dan
+// `bersihkan` pindah ke `service.rs` supaya proses commit impor massal
+// memakai persis aturan yang sama dengan handler di sini -- lihat modul itu.
 
 /// SKU hasil koreksi manual, setelah dipastikan produknya memang masih boleh
 /// dikoreksi.
@@ -769,44 +674,6 @@ async fn koreksi_sku(state: &AppState, sekarang: &Product, diminta: &str) -> App
     let kode = sku::normalkan(diminta).map_err(|err| AppError::bad_request(err.to_string()))?;
 
     repo::sku_harus_bebas(&state.pool, &kode, Some(sekarang.id)).await?;
-    Ok(kode)
-}
-
-/// SKU untuk produk yang baru dibuat, dipastikan belum dipakai produk lain.
-/// Dipanggil sekali seumur produk: menyunting atribut tidak merakit ulang
-/// SKU-nya (lihat dokumentasi modul `sku`).
-///
-/// Varian dirakit dengan aturan yang sama persis dengan induknya, bukan
-/// ditempelkan di belakang SKU induk. Bentuk `[JENIS][GRADE]-[MEREK]-[UKURAN]`
-/// hanya punya tiga bagian, dan menambahkan bagian keempat akan melewati 12
-/// karakter hampir selalu. Sifat "satu pencarian menemukan seluruh ukuran"
-/// tetap terjaga tanpa aturan khusus: ukuran adalah bagian TERAKHIR, jadi
-/// varian yang cuma beda ukuran otomatis berbagi awalan -- `CBSB-AFC-2KG`
-/// dan `CBSB-AFC-5KG` sama-sama diawali `CBSB-AFC`.
-///
-/// `name` tidak lagi dipakai sebagai cadangan. SKU dari nama produk akan
-/// berubah artinya tiap kali namanya diperbaiki, dan nama bebas hampir tidak
-/// pernah menghasilkan kode 6-12 karakter yang masuk akal. Produk tanpa
-/// atribut yang cukup ditolak, dengan pesan yang menyebut apa yang kurang.
-async fn rakit_sku(
-    state: &AppState,
-    brand_name: &Option<String>,
-    product_type: &Option<String>,
-    variant_grade: &Option<String>,
-    variant_size: &Option<String>,
-) -> AppResult<String> {
-    let kamus = repo::kamus_sku(&state.pool).await?;
-
-    let kode = sku::rakit(
-        &kamus,
-        product_type.as_deref(),
-        variant_grade.as_deref(),
-        brand_name.as_deref(),
-        variant_size.as_deref(),
-    )
-    .map_err(|err| AppError::bad_request(err.to_string()))?;
-
-    repo::sku_harus_bebas(&state.pool, &kode, None).await?;
     Ok(kode)
 }
 
@@ -884,47 +751,9 @@ async fn delete_sku_code(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// Menulis satu batch sekaligus menambah stoknya lewat ledger. Keduanya
-/// selalu terjadi bersama, jadi disatukan di sini supaya tidak ada pemanggil
-/// yang lupa salah satunya.
-async fn catat_batch(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    input: &NewBatch,
-) -> AppResult<Uuid> {
-    // Batch lahir dengan sisa nol; `stock::tambah` yang menaikkannya ke
-    // `quantity`. Dengan begitu `remaining_qty` hanya punya satu penulis,
-    // dan baris ledger barang masuk menyebut batch mana yang datang.
-    let id = repo::insert_batch(tx, input).await?;
-
-    stock::tambah(
-        tx,
-        &[StockLine {
-            product_id: input.product_id,
-            qty: input.quantity,
-            batch_id: Some(id),
-        }],
-        StockReason::Restock,
-        input.product_id,
-        Some(input.created_by),
-    )
-    .await?;
-
-    Ok(id)
-}
-
-/// Teks opsional dari form: spasi di tepi dibuang, dan yang tersisa kosong
-/// diperlakukan sebagai tidak diisi. Tanpa ini, field yang dikosongkan
-/// pengguna tersimpan sebagai string kosong dan tampil sebagai nilai yang
-/// "ada" tapi tidak menunjukkan apa pun.
-fn bersihkan(nilai: Option<String>) -> Option<String> {
-    nilai
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
 /// `bersihkan` untuk kolom yang boleh dikosongkan: "" dari form dibaca
 /// sebagai permintaan mengosongkan, bukan sebagai nilai kosong yang
 /// tersimpan apa adanya.
 fn ubah_teks(nilai: Ubah<String>) -> Ubah<String> {
-    nilai.map(bersihkan)
+    nilai.map(service::bersihkan)
 }

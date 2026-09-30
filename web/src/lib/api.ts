@@ -71,17 +71,29 @@ interface ApiOptions {
   headers?: Record<string, string>;
 }
 
+/**
+ * Byte mentah (unggahan impor produk) dikirim apa adanya -- tanpa
+ * `JSON.stringify` dan tanpa `Content-Type: application/json` otomatis.
+ * Pemanggil menyetel `Content-Type`-nya sendiri lewat `headers` kalau perlu.
+ */
+function isBodyMentah(body: unknown): body is BodyInit {
+  return (
+    body instanceof ArrayBuffer || body instanceof Uint8Array || body instanceof Blob
+  );
+}
+
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { token, method = 'GET', body, headers = {} } = options;
+  const mentah = isBodyMentah(body);
 
   const res = await fetch(`${BACKEND_URL}/api${path}`, {
     method,
     headers: {
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(body !== undefined && !mentah ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : mentah ? body : JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -109,7 +121,7 @@ export interface User {
   /**
    * Password akun ini dipasang orang lain dan belum pernah diganti
    * pemiliknya. Selama true, middleware menahan pengguna di
-   * `/ganti-password` -- lihat `bolehAkses` di `session.ts`.
+   * `/pengaturan/akun` -- lihat `bolehAkses` di `session.ts`.
    */
   must_change_password: boolean;
 }
@@ -475,6 +487,13 @@ export interface TopProduct {
   revenue: number;
 }
 
+export interface StockValue {
+  /** Σ sisa stok × harga beli batch (cadangan: harga modal produk). */
+  value: number;
+  /** Batch bersisa tanpa harga beli; selama bukan nol, `value` adalah batas bawah. */
+  batches_without_cost: number;
+}
+
 export interface SalesReport {
   summary: SalesSummary;
   /**
@@ -488,6 +507,8 @@ export interface SalesReport {
   expense_breakdown: ExpenseSlice[];
   top_products: TopProduct[];
   sales: SaleRow[];
+  /** Potret stok hari ini; tidak ikut saringan periode. */
+  stock_value: StockValue;
   sales_limit: number;
 }
 
@@ -539,4 +560,85 @@ export interface TransactionDetail {
    */
   net_profit: number;
   items: TransactionDetailItem[];
+}
+
+// --- Impor produk massal ---
+
+export type ImportStatus =
+  | 'draft'
+  | 'pending_review'
+  | 'approved'
+  | 'committing'
+  | 'committed'
+  | 'cancelled';
+
+export type ImportRowAction = 'create' | 'update' | 'skip';
+export type ImportCommitState = 'pending' | 'ok' | 'failed';
+
+export interface ImportIssue {
+  level: 'error' | 'warn';
+  field: string;
+  msg: string;
+}
+
+export interface ImportBatch {
+  id: string;
+  file_name: string;
+  status: ImportStatus;
+  total_rows: number;
+  publish_on_commit: boolean;
+  uploaded_at: string;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  committed_at: string | null;
+  ok_count: number;
+  fail_count: number;
+}
+
+/** Bentuk `GET /imports/{id}`: batch beserta ringkasan barisnya. */
+export interface ImportBatchDetail extends ImportBatch {
+  create_count: number;
+  update_count: number;
+  skip_count: number;
+  error_count: number;
+  warn_count: number;
+}
+
+export interface PaginatedImportBatches {
+  data: ImportBatch[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export interface ImportRow {
+  id: string;
+  row_no: number;
+  name: string | null;
+  sku: string | null;
+  category_text: string | null;
+  brand_text: string | null;
+  product_type: string | null;
+  variant_grade: string | null;
+  variant_size: string | null;
+  category_id: string | null;
+  lowest_price: number | null;
+  cost: number | null;
+  margin_pct: number | null;
+  stock: number | null;
+  published: boolean | null;
+  action: ImportRowAction;
+  match_product_id: string | null;
+  issues: ImportIssue[];
+  commit_state: ImportCommitState;
+  commit_product_id: string | null;
+  commit_error: string | null;
+}
+
+export interface PaginatedImportRows {
+  data: ImportRow[];
+  page: number;
+  limit: number;
+  total: number;
 }

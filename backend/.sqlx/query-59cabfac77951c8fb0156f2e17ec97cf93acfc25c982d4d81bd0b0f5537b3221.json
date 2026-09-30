@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE import_rows SET commit_state = 'pending', commit_error = NULL\n        WHERE batch_id = $1 AND commit_state = 'failed'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "59cabfac77951c8fb0156f2e17ec97cf93acfc25c982d4d81bd0b0f5537b3221"
+}

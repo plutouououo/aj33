@@ -7,7 +7,7 @@
 
 use super::repo::{
     self, Counts, ExpenseSlice, LowStockProduct, MonthlyPoint, SaleRow, SalesFilter, SalesSummary,
-    TopProduct, TransactionDetail,
+    StockValue, TopProduct, TransactionDetail,
 };
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
@@ -214,6 +214,8 @@ struct SalesReport {
     expense_breakdown: Vec<ExpenseSlice>,
     top_products: Vec<TopProduct>,
     sales: Vec<SaleRow>,
+    /// Nilai persediaan sekarang; tidak ikut saringan periode.
+    stock_value: StockValue,
     /// Banyaknya baris yang terbawa di `sales`, dibandingkan batas yang
     /// diminta. Halaman memakainya untuk mengatakan bahwa daftarnya
     /// dipotong, bukan bahwa hanya segitu penjualannya.
@@ -236,6 +238,7 @@ async fn sales_report(
         expense_breakdown: repo::expense_breakdown(&state.pool, filter.period).await?,
         top_products: repo::top_products(&state.pool, &top_filter, TERLARIS).await?,
         sales: repo::recent_sales(&state.pool, &filter, sales_limit).await?,
+        stock_value: repo::stock_value(&state.pool).await?,
         sales_limit,
     }))
 }

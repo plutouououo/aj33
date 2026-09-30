@@ -97,17 +97,14 @@ const ASAL: Record<string, string> = {
     <div class="kartu-angka">
       <span class="kartu-angka-label">Pelanggan Tercatat</span>
       <span class="kartu-angka-nilai">{daftar.total}</span>
-      <span class="kartu-angka-bantu">cocok dengan saringan saat ini</span>
     </div>
     <div class="kartu-angka">
       <span class="kartu-angka-label">Belanja di Halaman Ini</span>
       <span class="kartu-angka-nilai">{rupiah(belanjaHalaman)}</span>
-      <span class="kartu-angka-bantu">{pernahBelanja} pelanggan pernah belanja</span>
     </div>
     <div class="kartu-angka">
       <span class="kartu-angka-label">Rata-rata per Pelanggan</span>
       <span class="kartu-angka-nilai">{rupiah(rataRata)}</span>
-      <span class="kartu-angka-bantu">dari yang pernah belanja saja</span>
     </div>
   </div>
 
@@ -128,9 +125,6 @@ const ASAL: Record<string, string> = {
       <div>
         <label class="label" for="phone">Telepon</label>
         <input class="kolom" id="phone" name="phone" type="tel" maxlength="30" />
-        <p class="isian-bantu">
-          Nomor yang sudah terdaftar dipakai ulang, tidak membuat baris baru.
-        </p>
       </div>
 
       <div>

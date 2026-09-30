@@ -1,0 +1,366 @@
+---
+import AppShell from '../../../../layouts/AppShell.astro';
+import {
+  api,
+  ApiRequestError,
+  type Category,
+  type ImportBatchDetail,
+  type PaginatedImportRows,
+} from '../../../../lib/api';
+import { kelasLencanaImpor, labelStatusImpor } from '../../../../lib/impor';
+import { rupiah } from '../../../../lib/format';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+const { id } = Astro.params;
+
+const params = Astro.url.searchParams;
+const limit = 50;
+const halaman = Math.max(1, Number(params.get('halaman')) || 1);
+
+const PESAN: Record<string, string> = {
+  map: 'Pemetaan kategori disimpan dan diterapkan ke baris yang cocok.',
+  skip: 'Baris dilewati.',
+  restore: 'Baris dikembalikan.',
+  submit: 'Diajukan untuk ditinjau.',
+  approve: 'Disetujui -- commit berjalan di latar belakang.',
+  cancel: 'Batch dibatalkan.',
+  retry: 'Baris yang gagal diulang.',
+};
+let galat: string | null = null;
+const kodePesan = params.get('pesan') ?? '';
+const sukses = Object.hasOwn(PESAN, kodePesan) ? PESAN[kodePesan] : null;
+
+function tautanHalaman(ke: number, pesan?: string): string {
+  const p = new URLSearchParams();
+  if (ke !== 1) p.set('halaman', String(ke));
+  if (pesan) p.set('pesan', pesan);
+  const q = p.toString();
+  return q ? `/produk/impor/${id}?${q}` : `/produk/impor/${id}`;
+}
+
+if (Astro.request.method === 'POST') {
+  if (user.role !== 'owner') {
+    galat = 'Kamu tidak punya akses ke fitur ini.';
+  } else {
+    const form = await Astro.request.formData();
+    const aksi = String(form.get('aksi') ?? '');
+
+    try {
+      if (aksi === 'map') {
+        const category_text = String(form.get('category_text') ?? '').trim();
+        const category_id = String(form.get('category_id') ?? '').trim();
+        if (category_text && category_id) {
+          await api(`/imports/${id}/map`, { method: 'POST', token, body: { category_text, category_id } });
+        }
+        return Astro.redirect(tautanHalaman(halaman, 'map'), 303);
+      } else if (aksi === 'skip') {
+        const row_id = String(form.get('row_id') ?? '');
+        await api(`/imports/${id}/rows/${row_id}/skip`, { method: 'POST', token });
+        return Astro.redirect(tautanHalaman(halaman, 'skip'), 303);
+      } else if (aksi === 'restore') {
+        const row_id = String(form.get('row_id') ?? '');
+        await api(`/imports/${id}/rows/${row_id}/restore`, { method: 'POST', token });
+        return Astro.redirect(tautanHalaman(halaman, 'restore'), 303);
+      } else if (aksi === 'submit') {
+        const publish_on_commit = form.get('publish_on_commit') === '1';
+        await api(`/imports/${id}/submit`, { method: 'POST', token, body: { publish_on_commit } });
+        return Astro.redirect(tautanHalaman(1, 'submit'), 303);
+      } else if (aksi === 'approve') {
+        const review_note = String(form.get('review_note') ?? '').trim() || null;
+        await api(`/imports/${id}/approve`, { method: 'POST', token, body: { review_note } });
+        return Astro.redirect(tautanHalaman(1, 'approve'), 303);
+      } else if (aksi === 'cancel') {
+        await api(`/imports/${id}/cancel`, { method: 'POST', token });
+        return Astro.redirect(tautanHalaman(1, 'cancel'), 303);
+      } else if (aksi === 'retry') {
+        await api(`/imports/${id}/retry`, { method: 'POST', token });
+        return Astro.redirect(tautanHalaman(1, 'retry'), 303);
+      }
+    } catch (err) {
+      galat = err instanceof ApiRequestError ? err.message : 'Gagal memproses aksi.';
+    }
+  }
+}
+
+let batch: ImportBatchDetail | null = null;
+let rows: PaginatedImportRows | null = null;
+let kategori: Category[] = [];
+
+try {
+  [batch, rows, kategori] = await Promise.all([
+    api<ImportBatchDetail>(`/imports/${id}`, { token }),
+    api<PaginatedImportRows>(`/imports/${id}/rows?page=${halaman}&limit=${limit}`, { token }),
+    api<Category[]>('/categories', { token }),
+  ]);
+} catch (err) {
+  if (err instanceof ApiRequestError && err.status === 404) {
+    galat = 'Batch impor tidak ditemukan.';
+  } else {
+    throw err;
+  }
+}
+
+const halamanTerakhir = batch && rows ? Math.max(1, Math.ceil(rows.total / limit)) : 1;
+
+/**
+ * Grup `category_text` yang belum terselesaikan PADA HALAMAN INI -- panel
+ * pemetaan tidak memuat seluruh batch, cuma yang kelihatan. Batch besar
+ * dengan kategori tak dikenal tersebar di banyak halaman perlu dikunjungi
+ * tiap halamannya; ini simplifikasi yang disengaja, bukan lupa.
+ */
+const kategoriBelumJelas = rows
+  ? [...new Set(
+      rows.data
+        .filter((r) => r.category_id === null && r.category_text)
+        .map((r) => r.category_text as string),
+    )]
+  : [];
+---
+
+<AppShell judul="Tinjau Impor" user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/produk">Produk</a>
+    <span aria-hidden="true">›</span>
+    <a href="/produk/impor">Impor</a>
+    <span aria-current="page">Tinjau</span>
+  </nav>
+
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+
+  {batch && rows && (
+    <Fragment>
+      <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <h1 class="text-lg font-bold">{batch.file_name}</h1>
+          <span class={kelasLencanaImpor(batch.status, batch.fail_count)}>
+            {labelStatusImpor(batch.status)}
+          </span>
+        </div>
+        <a class="tombol-halus" href="/produk/impor">← Riwayat Impor</a>
+      </div>
+
+      <div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div class="kartu-rapat p-3 text-center">
+          <p class="text-2xl font-bold">{batch.create_count}</p>
+          <p class="text-xs text-[var(--color-teks-lembut)]">Baru</p>
+        </div>
+        <div class="kartu-rapat p-3 text-center">
+          <p class="text-2xl font-bold">{batch.update_count}</p>
+          <p class="text-xs text-[var(--color-teks-lembut)]">Perbarui</p>
+        </div>
+        <div class="kartu-rapat p-3 text-center">
+          <p class="text-2xl font-bold text-[var(--color-teks-lembut)]">{batch.skip_count}</p>
+          <p class="text-xs text-[var(--color-teks-lembut)]">Dilewati</p>
+        </div>
+        <div class="kartu-rapat p-3 text-center">
+          <p class="text-2xl font-bold text-red-600">{batch.error_count}</p>
+          <p class="text-xs text-[var(--color-teks-lembut)]">Error</p>
+        </div>
+        <div class="kartu-rapat p-3 text-center">
+          <p class="text-2xl font-bold text-kuning-600">{batch.warn_count}</p>
+          <p class="text-xs text-[var(--color-teks-lembut)]">Peringatan</p>
+        </div>
+      </div>
+
+      {batch.status === 'committed' && (
+        <p class="mb-5 text-sm text-[var(--color-teks-lembut)]">
+          Selesai: <strong>{batch.ok_count} berhasil</strong>, <strong>{batch.fail_count} gagal</strong>.
+          {batch.fail_count > 0 && ' Lihat kolom "Hasil commit" pada baris di bawah untuk pesan galatnya.'}
+        </p>
+      )}
+
+      {kategoriBelumJelas.length > 0 && (batch.status === 'draft' || batch.status === 'pending_review') && (
+        <section class="kartu mb-5">
+          <h2 class="mb-3 text-base font-bold">Pemetaan Kategori</h2>
+          <p class="mb-3 text-sm text-[var(--color-teks-lembut)]">
+            Kategori berikut belum dikenali. Petakan sekali, dan seluruh baris pada halaman ini yang
+            memakai teks yang sama ikut terselesaikan -- pemetaan ini juga diingat untuk unggahan
+            berikutnya.
+          </p>
+          <div class="flex flex-col gap-2">
+            {kategoriBelumJelas.map((teks) => (
+              <form method="POST" class="flex flex-wrap items-center gap-2">
+                <input type="hidden" name="aksi" value="map" />
+                <input type="hidden" name="category_text" value={teks} />
+                <span class="pil-diam">{teks}</span>
+                <span aria-hidden="true">→</span>
+                <select class="kolom max-w-xs" name="category_id" required>
+                  <option value="">Pilih kategori...</option>
+                  {kategori.map((k) => (
+                    <option value={k.id}>{k.name}</option>
+                  ))}
+                </select>
+                <button class="tombol-halus" type="submit">Terapkan</button>
+              </form>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div class="kartu-rapat overflow-x-auto">
+        <table class="tabel">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Produk</th>
+              <th>Kategori</th>
+              <th class="text-right">Harga</th>
+              <th class="text-right">Stok</th>
+              <th>Aksi</th>
+              <th>Isu</th>
+              {batch.status === 'committed' && <th>Hasil Commit</th>}
+              {(batch.status === 'draft' || batch.status === 'pending_review') && (
+                <th class="text-right">Baris</th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.data.map((r) => (
+              <tr class={r.action === 'skip' ? 'opacity-50' : ''}>
+                <td class="sel-angka text-xs text-[var(--color-teks-samar)]">{r.row_no}</td>
+                <td>
+                  <span class="block font-medium">{r.name ?? '—'}</span>
+                  <span class="block font-mono text-xs text-[var(--color-teks-samar)]">{r.sku ?? '—'}</span>
+                </td>
+                <td class="text-xs">
+                  {r.category_id ? kategori.find((k) => k.id === r.category_id)?.name ?? r.category_text : (
+                    <span class="text-[var(--color-teks-samar)]">{r.category_text ?? '—'}</span>
+                  )}
+                </td>
+                <td class="sel-angka text-xs">{r.lowest_price !== null ? rupiah(r.lowest_price) : '—'}</td>
+                <td class="sel-angka text-xs">{r.stock ?? '—'}</td>
+                <td class="text-xs capitalize">
+                  {r.action === 'create' ? 'Baru' : r.action === 'update' ? 'Perbarui' : 'Dilewati'}
+                </td>
+                <td class="text-xs">
+                  <div class="flex flex-wrap gap-1">
+                    {r.issues.map((isu) => (
+                      <span
+                        class={isu.level === 'error' ? 'lencana-gagal' : 'lencana-perlu-tindakan'}
+                        title={isu.msg}
+                      >
+                        {isu.field}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                {batch.status === 'committed' && (
+                  <td class="text-xs">
+                    {r.commit_state === 'ok' && <span class="lencana-selesai">OK</span>}
+                    {r.commit_state === 'failed' && (
+                      <span class="lencana-gagal" title={r.commit_error ?? ''}>Gagal</span>
+                    )}
+                    {r.commit_state === 'pending' && <span class="lencana-berjalan">Menunggu</span>}
+                  </td>
+                )}
+                {(batch.status === 'draft' || batch.status === 'pending_review') && (
+                  <td class="whitespace-nowrap text-right">
+                    <form method="POST">
+                      <input type="hidden" name="row_id" value={r.id} />
+                      {r.action === 'skip' ? (
+                        <button class="aksi-baris" type="submit" name="aksi" value="restore">
+                          Kembalikan
+                        </button>
+                      ) : (
+                        <button class="aksi-baris" type="submit" name="aksi" value="skip">
+                          Lewati
+                        </button>
+                      )}
+                    </form>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {halamanTerakhir > 1 && (
+        <div class="mt-4 flex items-center gap-2">
+          {halaman > 1 ? (
+            <a class="tombol-halus" href={tautanHalaman(halaman - 1)}>← Sebelumnya</a>
+          ) : (
+            <span class="tombol-halus opacity-40">← Sebelumnya</span>
+          )}
+          <span class="px-2 tabular-nums text-[var(--color-teks-lembut)]">{halaman} / {halamanTerakhir}</span>
+          {halaman < halamanTerakhir ? (
+            <a class="tombol-halus" href={tautanHalaman(halaman + 1)}>Berikutnya →</a>
+          ) : (
+            <span class="tombol-halus opacity-40">Berikutnya →</span>
+          )}
+        </div>
+      )}
+
+      <div class="bilah-bawah">
+        {batch.status === 'draft' && (
+          <form method="POST" class="flex flex-wrap items-center gap-3">
+            <input type="hidden" name="aksi" value="submit" />
+            <label class="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="publish_on_commit"
+                value="1"
+                checked={batch.publish_on_commit}
+                class="h-4 w-4 accent-merah-600"
+              />
+              Terbitkan produk baru setelah commit
+            </label>
+            <button class="tombol-utama" type="submit" disabled={batch.error_count > 0}>
+              Ajukan untuk Ditinjau
+            </button>
+            {batch.error_count > 0 && (
+              <span class="text-xs text-red-600">Selesaikan atau lewati baris ERROR dulu.</span>
+            )}
+          </form>
+        )}
+
+        {batch.status === 'pending_review' && (
+          <form method="POST" class="flex flex-wrap items-center gap-3">
+            <input type="hidden" name="aksi" value="approve" />
+            <input
+              class="kolom max-w-sm"
+              type="text"
+              name="review_note"
+              placeholder="Catatan tinjauan (opsional)"
+            />
+            <button class="tombol-utama" type="submit" disabled={batch.error_count > 0}>
+              Setujui &amp; Commit
+            </button>
+          </form>
+        )}
+
+        {batch.status === 'committed' && batch.fail_count > 0 && (
+          <form method="POST">
+            <input type="hidden" name="aksi" value="retry" />
+            <button class="tombol-utama" type="submit">Ulangi Baris Gagal</button>
+          </form>
+        )}
+
+        {(batch.status === 'draft' || batch.status === 'pending_review') && (
+          <form method="POST" class="ml-auto">
+            <input type="hidden" name="aksi" value="cancel" />
+            <button class="tombol-bahaya" type="submit" data-tombol-batalkan-impor>
+              Batalkan Batch
+            </button>
+          </form>
+        )}
+      </div>
+    </Fragment>
+  )}
+</AppShell>
+
+{batch?.status === 'committing' && <meta http-equiv="refresh" content="2" />}
+
+<script is:inline>
+  (function () {
+    var tombol = document.querySelector('[data-tombol-batalkan-impor]');
+    if (!tombol) return;
+    tombol.addEventListener('click', function (e) {
+      if (!window.confirm('Batalkan batch impor ini? Baris yang sudah ditinjau tidak akan diproses.')) {
+        e.preventDefault();
+      }
+    });
+  })();
+</script>

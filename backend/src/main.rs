@@ -4,6 +4,7 @@ mod config;
 mod customers;
 mod db;
 mod error;
+mod import;
 mod marketplace;
 mod orders;
 mod pos;
@@ -85,11 +86,18 @@ async fn main() {
         throttle: std::sync::Arc::new(auth::Throttle::baru()),
     };
 
+    // Worker impor massal berjalan di sampingan, bukan di dalam request --
+    // lihat catatan desain di `import::worker`. `state` masih dipakai
+    // `.with_state(state)` di bawah, jadi ini menyalin (AppState `Clone`),
+    // bukan memindahkan.
+    tokio::spawn(import::jalankan_worker(state.clone()));
+
     let app = Router::new()
         .route("/api/health", get(health))
         .nest("/api", auth::router())
         .nest("/api", catalog::router())
         .nest("/api", customers::router())
+        .nest("/api", import::router())
         .nest("/api", orders::router())
         .nest("/api", pos::router())
         .nest("/api", reports::router())

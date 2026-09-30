@@ -272,8 +272,7 @@ const DEKAT_KEDALUWARSA = 30;
             <div class="mb-4 flex flex-wrap items-baseline justify-between gap-2">
               <h2 id="j-data" class="font-semibold">Data Produk</h2>
               <p class="text-xs text-[var(--color-teks-lembut)]">
-                SKU <span class="font-mono text-[var(--color-teks)]">{produk.sku ?? '—'}</span> —
-                dibekukan sejak produk dibuat
+                SKU <span class="font-mono text-[var(--color-teks)]">{produk.sku ?? '—'}</span>
               </p>
             </div>
 
@@ -325,13 +324,11 @@ const DEKAT_KEDALUWARSA = 30;
               <div class="isian">
                 <label class="label" for="name">Nama produk</label>
                 <input class="kolom" id="name" name="name" value={produk.name} required />
-                <p class="isian-bantu">Nama identifikasi internal.</p>
               </div>
 
               <div class="isian">
                 <label class="label" for="seo_name">Nama SEO produk</label>
                 <input class="kolom" id="seo_name" name="seo_name" value={produk.seo_name ?? ''} />
-                <p class="isian-bantu">Nama yang ditampilkan di marketplace.</p>
               </div>
 
               <div class="isian">
@@ -410,12 +407,6 @@ const DEKAT_KEDALUWARSA = 30;
                   bersama isian lain.
                 */}
                 <input type="hidden" name="sku_lama" value={produk.sku ?? ''} />
-                <p class="isian-bantu">
-                  Memperbaiki atribut di atas <strong>tidak</strong> mengubah SKU — label yang
-                  sudah tertempel di pack dan listing marketplace menunjuk kode ini. Kalau
-                  kodenya memang salah ketik sejak awal, betulkan di sini; hanya bisa selama
-                  produknya belum pernah terjual, masuk tiket, atau punya varian.
-                </p>
               </div>
 
               <div class="isian isian-pendek">
@@ -823,16 +814,6 @@ const DEKAT_KEDALUWARSA = 30;
                   </table>
                 </div>
 
-                <p class="mb-4 text-xs text-[var(--color-teks-lembut)]">
-                  Stok berjalan sekarang <strong class="tabular-nums">{produk.stock_qty}</strong>
-                  pack. Kolom "Masuk" adalah jumlah yang datang saat itu, bukan sisa yang belum
-                  terjual. Harga beli, kedaluwarsa, dan lokasi boleh dikoreksi kapan saja —
-                  satu "Simpan" menyimpan ketiganya. Jumlahnya tidak: batch yang salah jumlahnya
-                  dibatalkan lalu dicatat ulang, supaya stok tidak pernah bergerak tanpa catatan.
-                  Membatalkan batch menarik kembali stoknya, dan ditolak kalau stok yang ada
-                  sudah tidak cukup.
-                </p>
-
                 <form method="POST" class="borang-tegak mb-6">
                   <input type="hidden" name="aksi" value="batch" />
 
@@ -867,9 +848,6 @@ const DEKAT_KEDALUWARSA = 30;
                   <div class="isian">
                     <label class="label" for="b_lokasi">Lokasi penyimpanan</label>
                     <input class="kolom" id="b_lokasi" name="storage_location" placeholder="mis. Rak A3" />
-                    <p class="isian-bantu">
-                      Rak tempat kiriman ini ditaruh, dibaca pengepak di tiket packing.
-                    </p>
                   </div>
 
                   <div class="isian">
@@ -884,13 +862,12 @@ const DEKAT_KEDALUWARSA = 30;
                   <div class="isian isian-pendek">
                     <label class="label" for="koreksi">Selisih</label>
                     <input class="kolom" id="koreksi" name="change_qty" type="number" step="1" required />
+                    <p class="isian isian-bantu">
+                    Untuk selisih opname atau barang rusak — positif menambah, negatif mengurangi.
+                  </p>
                   </div>
 
-                  <p class="isian isian-bantu">
-                    Untuk selisih opname atau barang rusak — positif menambah, negatif mengurangi.
-                    Barang yang baru datang dicatat sebagai batch, bukan di sini, supaya tanggal
-                    kedaluwarsanya ikut tersimpan.
-                  </p>
+                  
 
                   <div class="isian">
                     <button class="tombol-halus" type="submit">Koreksi stok</button>

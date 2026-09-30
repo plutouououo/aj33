@@ -565,13 +565,13 @@ const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama
 /** Keterangan kedaluwarsa terdekat sebuah produk, plus apakah sudah mepet. */
 function kedaluwarsa(daftar: ProductBatch[]): { label: string; mepet: boolean } {
   const terdekat = daftar.find((b) => b.expiry_date);
-  if (!terdekat?.expiry_date) return { label: 'Tanpa tanggal kedaluwarsa', mepet: false };
+  if (!terdekat?.expiry_date) return { label: 'Tanpa expired date', mepet: false };
   const hari = sisaHari(terdekat.expiry_date);
   return {
     label:
       hari <= 30
-        ? `Kedaluwarsa terdekat ${tanggal(terdekat.expiry_date)} · ${hari} hari`
-        : `Kedaluwarsa terdekat ${tanggal(terdekat.expiry_date)}`,
+        ? `Expired terdekat ${tanggal(terdekat.expiry_date)} · ${hari} hari`
+        : `Expired terdekat ${tanggal(terdekat.expiry_date)}`,
     mepet: hari <= 30,
   };
 }
@@ -738,9 +738,6 @@ function ringkasBatch(p: Product): string {
                 </span>
                 <span class="block px-3 py-2.5">
                   <span class="block text-sm font-medium">{p.name}</span>
-                  <span class="block text-xs text-[var(--color-teks-lembut)] tabular-nums">
-                    {p.sku ?? '—'} · stok {p.stock_qty}
-                  </span>
                   <span class="block text-sm font-semibold tabular-nums" data-harga-tampil>
                     {rupiah(hargaDi(p, kanalIsi))}
                   </span>
@@ -812,7 +809,7 @@ function ringkasBatch(p: Product): string {
                   </dd>
                 </dl>
 
-                <p class="mt-2 text-xs text-[var(--color-teks-lembut)]">Stok per batch · FEFO</p>
+                <p class="mt-2 text-xs text-[var(--color-teks-lembut)]">Stok per batch</p>
                 {batches.length > 0 ? (
                   <ul class="mt-1 space-y-0.5 text-xs">
                     {batches.map((b) => {
@@ -832,7 +829,7 @@ function ringkasBatch(p: Product): string {
                               'tabular-nums',
                               sisa.mepet ? 'font-medium text-red-600' : '',
                             ]}
-                          >
+                          >                     
                             {sisa.label}
                           </span>
                         </li>
@@ -1028,12 +1025,7 @@ function ringkasBatch(p: Product): string {
             </details>
           </div>
 
-          <p
-            class:list={['px-4 py-6 text-center text-sm text-[var(--color-teks-samar)]', barisTerpakai > 0 ? 'hidden' : '']}
-            data-keranjang-kosong
-          >
-            Ketuk produk, lalu isi jumlah pada batch yang barangnya benar-benar kamu ambil.
-          </p>
+          
 
           <div class="max-h-80 overflow-y-auto">
             {barisPanel.map((r) => (
@@ -1136,10 +1128,6 @@ function ringkasBatch(p: Product): string {
                 </label>
               ))}
             </div>
-            <p class="isian-bantu">
-              Shopee dan Tokopedia belum tersambung, jadi pesanannya dicatat di sini dengan harga
-              kanalnya. Produk yang harga kanalnya belum diatur memakai harga dasar.
-            </p>
           </div>
 
           {/* Hanya berarti untuk Shopee -- selalu dirender (bukan
@@ -1172,11 +1160,7 @@ function ringkasBatch(p: Product): string {
                 placeholder={String(SHOPEE_COMMISSION_PERSEN_DEFAULT)}
                 data-commission-fee
               />
-              <p class="isian-bantu">
-                `commission_fee` Shopee -- komisi dasar, berlaku semua pesanan. Ganti kalau promo
-                Shopee sedang mengubah persennya.
-              </p>
-            </div>
+              </div>
             <div>
               <label class="label" for="platform_service_fee_percent">Biaya Layanan Shopee (%)</label>
               <input
@@ -1191,11 +1175,6 @@ function ringkasBatch(p: Product): string {
                 placeholder={String(SHOPEE_SERVICE_PERSEN_DEFAULT)}
                 data-service-fee
               />
-              <p class="isian-bantu">
-                `service_fee` Shopee -- program opsional (mis. Gratis Ongkir Xtra, Star+). Biarkan 0
-                kalau toko tidak ikut program itu. PPh UMKM 0,5% dan biaya proses Rp1.250 tetap,
-                tidak ikut berubah.
-              </p>
             </div>
           </div>
 
@@ -1272,7 +1251,6 @@ function ringkasBatch(p: Product): string {
                 placeholder="0"
                 data-diskon
               />
-              <p class="isian-bantu">Potongan atas seluruh belanja, di luar ongkir.</p>
             </div>
 
             {/* Shopee tidak butuh ini sama sekali -- uangnya sudah pasti
@@ -2258,9 +2236,21 @@ function ringkasBatch(p: Product): string {
   Cetak/bagikan nota lewat share sheet OS.
 
   Terpisah dari skrip `is:inline` di atas karena ini satu-satunya bagian
-  halaman kasir yang butuh `import` (`html-to-image`, untuk merender
+  halaman kasir yang butuh `import` (`html2canvas-pro`, untuk merender
   `.nota-cetak` jadi PNG) -- Astro membundel skrip module lewat Vite,
   bukan skrip `is:inline`.
+
+  BUKAN `html-to-image`: library itu merender lewat trik SVG
+  `<foreignObject>` (serialisasi node jadi `<img>` bergambar SVG, lalu
+  digambar ke kanvas) yang terbukti gagal SENYAP untuk nota ini -- `toBlob`
+  selesai tanpa galat, tapi kanvas hasilnya kosong transparan, tidak cuma di
+  proyek ini (lihat isu bubkoo/html-to-image #160/#199/#449). `html2canvas-pro`
+  menggambar tiap elemen ke kanvas satu per satu, tanpa lewat `<foreignObject>`
+  sama sekali, jadi tidak kena batasan itu. Dipilih "-pro" (fork terawat dari
+  html2canvas), bukan `html2canvas` biasa, karena varian asli gagal mem-parse
+  warna `oklch()` -- dipakai luas di tema Tailwind v4 situs ini (lihat
+  `--color-stone-*`/`--color-emerald-*` di `theme.css`) walau nota sendiri
+  cuma hitam-putih; `html2canvas-pro` mendukungnya.
 
   Alurnya: render `.nota-cetak` (nota yang sama yang dipakai `@media print`)
   jadi gambar PNG dari klon off-screen, lalu:
@@ -2276,7 +2266,7 @@ function ringkasBatch(p: Product): string {
        pernah mentok tanpa cara mencetak sama sekali.
 */}
 <script>
-  import { toBlob } from 'html-to-image';
+  import html2canvas from 'html2canvas-pro';
 
   const tombolCetak = document.querySelector('[data-cetak-struk]');
   const nota = document.querySelector<HTMLElement>('[data-nota-cetak]');
@@ -2317,9 +2307,14 @@ function ringkasBatch(p: Product): string {
     klon.style.left = '-9999px';
     klon.style.top = '0';
     klon.style.background = '#ffffff';
+    // Padding di sini saja, bukan ditambahkan ke `.nota-cetak` sendiri: PNG ini
+    // dibagikan/diunduh apa adanya (jadi butuh jarak dari tepi gambar), sedangkan
+    // `@media print` mencetak ke kertas struk yang marginnya sudah urusan printer.
+    klon.style.padding = '16px';
     document.body.appendChild(klon);
     try {
-      const blob = await toBlob(klon, { backgroundColor: '#ffffff', pixelRatio: 3 });
+      const kanvas = await html2canvas(klon, { backgroundColor: '#ffffff', scale: 3 });
+      const blob = await new Promise<Blob | null>((resolve) => kanvas.toBlob(resolve));
       if (!blob) throw new Error('toBlob mengembalikan kosong');
       return new File([blob], 'nota-' + Date.now() + '.png', { type: 'image/png' });
     } finally {

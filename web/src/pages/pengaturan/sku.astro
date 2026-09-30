@@ -11,7 +11,7 @@
  * Tanpa halaman ini penolakan itu jadi jalan buntu: pemilik toko tahu apa
  * yang salah tapi tidak punya cara memperbaikinya.
  */
-import AppShell from '../../layouts/AppShell.astro';
+import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type SkuCode, type SkuKind } from '../../lib/api';
 
 const user = Astro.locals.user!;
@@ -59,7 +59,7 @@ const perBagian = BAGIAN.map((b) => ({
 }));
 ---
 
-<AppShell judul="Kamus Kode SKU" user={user}>
+<PengaturanShell judul="Kamus SKU" user={user}>
   <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
     SKU dirakit otomatis dengan bentuk <code>[JENIS][GRADE]-[MEREK]-[UKURAN]</code>, panjang
     6–12 karakter. Bagian yang belum terdaftar di sini memakai inisialnya sendiri
@@ -157,4 +157,4 @@ const perBagian = BAGIAN.map((b) => ({
       </section>
     ))
   }
-</AppShell>
+</PengaturanShell>

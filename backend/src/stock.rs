@@ -61,6 +61,10 @@ pub enum StockReason {
     /// menjawab "stok ini datang dari kiriman mana", bukan cuma "seseorang
     /// mengubahnya".
     Restock,
+    /// Pengembalian stok karena transaksi dibatalkan (void). Dibedakan dari
+    /// `ManualAdjustment` supaya ledger bisa menjawab "stok ini kembali
+    /// karena transaksi apa", bukan cuma "seseorang mengoreksinya".
+    VoidReversal,
 }
 
 impl StockReason {
@@ -70,12 +74,15 @@ impl StockReason {
             Self::ExternalOrder => "external_order",
             Self::ManualAdjustment => "manual_adjustment",
             Self::Restock => "restock",
+            Self::VoidReversal => "void_reversal",
         }
     }
 
     fn reference_type(self) -> &'static str {
         match self {
-            Self::Sale => "transaction",
+            // Void mengacu balik ke transaksi yang dibatalkan, sama seperti
+            // penjualan aslinya mengacu ke transaksi yang sama.
+            Self::Sale | Self::VoidReversal => "transaction",
             Self::ExternalOrder => "external_order",
             // Batch masuk tidak berasal dari transaksi maupun pesanan
             // marketplace; "manual" adalah satu-satunya nilai yang
@@ -719,5 +726,7 @@ mod tests {
         assert_eq!(StockReason::ManualAdjustment.reference_type(), "manual");
         assert_eq!(StockReason::Restock.as_str(), "restock");
         assert_eq!(StockReason::Restock.reference_type(), "manual");
+        assert_eq!(StockReason::VoidReversal.as_str(), "void_reversal");
+        assert_eq!(StockReason::VoidReversal.reference_type(), "transaction");
     }
 }

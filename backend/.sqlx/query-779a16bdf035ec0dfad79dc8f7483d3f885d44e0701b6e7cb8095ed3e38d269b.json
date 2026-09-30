@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE import_rows\n        SET commit_state = $2, commit_product_id = $3, commit_error = $4\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Uuid",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "779a16bdf035ec0dfad79dc8f7483d3f885d44e0701b6e7cb8095ed3e38d269b"
+}

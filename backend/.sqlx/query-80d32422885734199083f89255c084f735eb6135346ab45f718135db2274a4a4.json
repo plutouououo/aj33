@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO import_aliases (kind, alias_norm, target_id, created_by, hits)\n        VALUES ('category', $1, $2, $3, 1)\n        ON CONFLICT (kind, alias_norm)\n        DO UPDATE SET target_id = EXCLUDED.target_id, hits = import_aliases.hits + 1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "80d32422885734199083f89255c084f735eb6135346ab45f718135db2274a4a4"
+}

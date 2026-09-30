@@ -64,7 +64,14 @@ export function berandaUntuk(role: Role): string {
  * boleh membukanya. Menguncinya ke owner saja akan membuat kartu produk
  * kasir kosong -- bukan ditolak, sekadar gambar rusak tanpa penjelasan.
  */
-const HALAMAN_UMUM = ['/', '/logout', '/ganti-password', '/foto', ...HALAMAN_PUBLIK];
+const HALAMAN_UMUM = [
+  '/',
+  '/logout',
+  '/ganti-password',
+  '/pengaturan/akun',
+  '/foto',
+  ...HALAMAN_PUBLIK,
+];
 
 /**
  * Halaman yang boleh dibuka tiap peran, sebagai awalan path.
@@ -102,5 +109,10 @@ export function bolehAkses(role: Role, pathname: string): boolean {
  * harus tetap bisa keluar tanpa mengganti password siapa pun.
  */
 export function harusGantiPassword(user: User, pathname: string): boolean {
-  return user.must_change_password && pathname !== '/ganti-password' && pathname !== '/logout';
+  return (
+    user.must_change_password &&
+    pathname !== '/ganti-password' &&
+    pathname !== '/pengaturan/akun' &&
+    pathname !== '/logout'
+  );
 }

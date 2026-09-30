@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE transactions\n        SET status = 'voided', voided_at = now(), voided_by = $2, void_reason = $3\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bdccc7d6dabf5d58423231820e3a3cc3894f9af3f5fb2587ee22bb9173e93a29"
+}

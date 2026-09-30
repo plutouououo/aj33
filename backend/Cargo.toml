@@ -39,6 +39,10 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 
+# Baca berkas impor produk massal (.xlsx/.csv).
+calamine = "0.26"
+csv = "1"
+
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",

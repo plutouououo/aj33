@@ -1,0 +1,60 @@
+---
+/**
+ * Kerangka halaman Pengaturan.
+ *
+ * Sidebar aplikasi (AppShell) tetap tampil seperti biasa -- ini menambah
+ * sub-navigasi kedua khusus di dalam area kontennya, membagi Pengaturan jadi
+ * beberapa halaman (Akun, Platform, Kamus SKU). Daftar menunya sengaja
+ * ditaruh di sini, bukan di AppShell, karena hanya relevan saat berada di
+ * `/pengaturan/*`.
+ *
+ * Difilter dengan `bolehAkses` yang sama seperti menu utama, supaya
+ * kasir/pengepak yang membuka /pengaturan/akun (satu-satunya sub-halaman
+ * yang boleh mereka buka) tidak melihat tautan ke Platform/Kamus SKU yang
+ * memang akan ditolak middleware.
+ */
+import AppShell from './AppShell.astro';
+import type { User } from '../lib/api';
+import { bolehAkses } from '../lib/session';
+
+interface Props {
+  judul: string;
+  user: User;
+}
+
+const { judul, user } = Astro.props;
+const path = Astro.url.pathname;
+
+const MENU = [
+  { href: '/pengaturan/akun', label: 'Akun' },
+  { href: '/pengaturan/platform', label: 'Platform' },
+  { href: '/pengaturan/sku', label: 'Kamus SKU' },
+];
+
+const menuTampil = MENU.filter((m) => bolehAkses(user.role, m.href));
+---
+
+<AppShell judul={`Pengaturan · ${judul}`} user={user}>
+  <div class="flex flex-col gap-6 md:flex-row md:items-start">
+    <nav class="flex shrink-0 gap-1 overflow-x-auto md:w-48 md:flex-col md:overflow-visible">
+      {
+        menuTampil.map((m) => {
+          const aktif = path === m.href || path.startsWith(`${m.href}/`);
+          return (
+            <a
+              href={m.href}
+              aria-current={aktif ? 'page' : undefined}
+              class={aktif ? 'nav-tautan-aktif whitespace-nowrap' : 'nav-tautan whitespace-nowrap'}
+            >
+              {m.label}
+            </a>
+          );
+        })
+      }
+    </nav>
+
+    <div class="min-w-0 flex-1">
+      <slot />
+    </div>
+  </div>
+</AppShell>

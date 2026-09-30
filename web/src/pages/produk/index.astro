@@ -167,9 +167,17 @@ function tautanTab(t: Tab): string {
  *
  * Konsekuensinya, batas 200 baris backend sekarang dibagi antara induk DAN
  * varian, bukan induk saja -- lihat catatan "terpotong" di bawah.
+ *
+ * `cari` DIKIRIM ke backend (`search`), bukan disaring belakangan dari 200
+ * baris yang sudah terpotong. Dulu pencarian cuma menyaring di dalam 200
+ * baris yang kebetulan terambil (urut nama) -- begitu katalog tumbuh lebih
+ * dari 200 baris, kata kunci yang cocok di luar irisan itu diam-diam
+ * menghasilkan nol baris, tanpa galat apa pun. Backend yang mencocokkan
+ * name/seo_name/sku memastikan pencarian tetap menjangkau seluruh katalog.
  */
 const kueriProduk = new URLSearchParams({ include_inactive: 'true', limit: '200' });
 if (kategoriDipilih) kueriProduk.set('category_id', kategoriDipilih);
+if (cari) kueriProduk.set('search', cari);
 
 const [semuaProduk, kategori] = await Promise.all([
   api<PaginatedProducts>(`/products?${kueriProduk}`, { token }),
@@ -210,15 +218,11 @@ function kenaTab(p: Product, varian: Product[], t: Tab): boolean {
   return true;
 }
 
+// Pencarian sudah diterapkan backend (lihat `kueriProduk` di atas), jadi
+// tidak disaring ulang di sini. Baris yang muncul di daftar ini selalu baris
+// INDUK -- varian yang cocok tapi induknya tidak tetap tidak akan muncul,
+// karena filter `!p.parent_id` di bawah membuang barisnya begitu juga.
 let induk = semuaProduk.data.filter((p) => !p.parent_id);
-
-// Pencarian hanya menyentuh baris INDUK -- persis seperti daftar lama --
-// bukan nama tiap varian: varian yang cocok tapi induknya tidak tetap tidak
-// akan muncul, karena baris yang muncul di daftar ini selalu baris induk.
-const q = cari.toLowerCase();
-if (q) {
-  induk = induk.filter((p) => p.name.toLowerCase().includes(q) || (p.sku ?? '').toLowerCase().includes(q));
-}
 
 // Hitungan tab dari induk yang SUDAH disaring pencarian & kategori, TAPI
 // SEBELUM disaring tab itu sendiri -- supaya tab yang sedang tidak aktif
@@ -248,7 +252,7 @@ const sampai = Math.min(mulai + limit, total);
 
 const ringkasan = `${induk.length} produk · ${induk.filter((p) => p.is_active).length} aktif · ${
   induk.filter((p) => stokInduk(p, varianIndukPeta.get(p.id) ?? []).menipis).length
-} perlu restock`;
+} restock`;
 
 /** Titipan "dari mana" untuk halaman rincian dan halaman tambah. */
 const titipan = saringan(halaman);
@@ -261,7 +265,12 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
   <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
     <p class="text-sm text-[var(--color-teks-lembut)]">{ringkasan}</p>
-    {pemilik && <a class="tombol-utama" href={`/produk/baru${bawaSaringan}`}>+ Tambah Produk</a>}
+    {pemilik && (
+      <div class="flex gap-2">
+        <a class="tombol-halus" href="/produk/impor">Impor XLSX</a>
+        <a class="tombol-utama" href={`/produk/baru${bawaSaringan}`}>+ Tambah Produk</a>
+      </div>
+    )}
   </div>
 
   {/* Tab status, sekaligus saringan: menekannya menavigasi ke daftar yang

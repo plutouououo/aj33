@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            count(*) FILTER (WHERE commit_state = 'ok')     AS \"ok!\",\n            count(*) FILTER (WHERE commit_state = 'failed') AS \"fail!\"\n        FROM import_rows\n        WHERE batch_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ok!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "fail!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "6af8c040ae658ce1ee0c9ef2f25e05ac4d675af27e63cc0986cd53d790c261dd"
+}

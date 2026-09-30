@@ -1,0 +1,93 @@
+---
+import AppShell from '../../../layouts/AppShell.astro';
+import { api, ApiRequestError } from '../../../lib/api';
+import { BATAS_BYTE, EKSTENSI_DIIZINKAN } from '../../../lib/impor';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+let galat: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  if (user.role !== 'owner') {
+    galat = 'Kamu tidak punya akses ke fitur ini.';
+  } else {
+    const form = await Astro.request.formData();
+    const berkas = form.get('berkas');
+
+    const namaBerkas = berkas instanceof File ? berkas.name : '';
+    const ekstensiCocok = EKSTENSI_DIIZINKAN.some((e) => namaBerkas.toLowerCase().endsWith(e));
+
+    if (!(berkas instanceof File) || berkas.size === 0) {
+      galat = 'Pilih berkas .xlsx atau .csv dulu.';
+    } else if (!ekstensiCocok) {
+      galat = `Berkas harus berekstensi ${EKSTENSI_DIIZINKAN.join(' atau ')}.`;
+    } else if (berkas.size > BATAS_BYTE) {
+      galat = `Ukuran berkas maksimal ${BATAS_BYTE / (1024 * 1024)} MB.`;
+    } else {
+      try {
+        const { batch_id } = await api<{ batch_id: string }>(
+          `/imports?filename=${encodeURIComponent(namaBerkas)}`,
+          {
+            method: 'POST',
+            token,
+            body: await berkas.arrayBuffer(),
+            headers: { 'Content-Type': 'application/octet-stream' },
+          },
+        );
+        return Astro.redirect(`/produk/impor/${batch_id}`, 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal mengunggah berkas.';
+      }
+    }
+  }
+}
+---
+
+<AppShell judul="Impor Produk Baru" user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/produk">Produk</a>
+    <span aria-hidden="true">›</span>
+    <a href="/produk/impor">Impor</a>
+    <span aria-hidden="true">›</span>
+    <span aria-current="page">Baru</span>
+  </nav>
+
+  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+
+  <section class="kartu max-w-xl">
+    <h1 class="mb-1 text-lg font-bold">Unggah Berkas Produk</h1>
+    <p class="mb-5 text-sm text-[var(--color-teks-lembut)]">
+      Berkas <code>.xlsx</code> atau <code>.csv</code>, maksimal {BATAS_BYTE / (1024 * 1024)} MB.
+      Data tidak langsung masuk ke katalog -- setelah diunggah, kamu bisa meninjau tiap baris,
+      memperbaiki pemetaan kategori, dan melewati baris yang bermasalah sebelum disetujui.
+    </p>
+
+    <p class="mb-5 text-sm">
+      Belum punya berkasnya?{' '}
+      <a class="font-medium text-merah-600 hover:underline" href="/produk/impor/template.csv">
+        Unduh template
+      </a>{' '}
+      untuk melihat kolom yang dikenali.
+    </p>
+
+    <form method="POST" enctype="multipart/form-data" class="flex flex-col gap-4">
+      <div>
+        <label class="label" for="berkas">Berkas</label>
+        <input
+          class="kolom"
+          id="berkas"
+          name="berkas"
+          type="file"
+          accept=".xlsx,.csv"
+          required
+        />
+      </div>
+
+      <div class="flex gap-2">
+        <button class="tombol-utama" type="submit">Unggah</button>
+        <a class="tombol-halus" href="/produk/impor">Batal</a>
+      </div>
+    </form>
+  </section>
+</AppShell>

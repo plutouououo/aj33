@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE import_rows\n        SET action = CASE WHEN match_product_id IS NULL THEN 'create' ELSE 'update' END\n        WHERE id = $1 AND batch_id = $2 AND action = 'skip'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "df0a1c3f88f950262a2b8a65646b83a4dfe5a20622aab3d29fe25758e845cc3d"
+}

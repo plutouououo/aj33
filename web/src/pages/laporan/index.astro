@@ -30,7 +30,8 @@ const laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, BARI
 const kueri = kueriHalaman(saringan);
 const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
 
-const { summary, previous_summary, trend, expense_breakdown, top_products, sales } = laporan;
+const { summary, previous_summary, trend, expense_breakdown, top_products, sales, stock_value } =
+  laporan;
 
 // Skala grafik. Satu skala untuk omzet dan beban sekaligus supaya tinggi
 // batang keduanya bisa dibandingkan langsung; kalau masing-masing punya
@@ -114,7 +115,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       omzetnya ikut naik lebih banyak. Pil disembunyikan sama sekali kalau
       saringan "Seluruh Waktu" (tidak ada periode sebelumnya untuk
       dibandingkan) -- lihat `previous_summary` di backend. */}
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
     <div class="kartu-angka bg-merah-600 text-white">
       <div class="flex items-start justify-between gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15">
@@ -218,6 +219,22 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <span class="kartu-angka-nilai">{summary.transaction_count}</span>
       <span class="kartu-angka-bantu">Beban tercatat {rupiah(summary.expenses)}</span>
     </div>
+
+    {/* Potret stok hari ini, bukan angka periode -- makanya tanpa pil
+        naik/turun dan tidak berubah oleh saringan di atas. */}
+    <div class="kartu-angka">
+      <div class="flex items-start justify-between gap-2">
+        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m6 4.125l2.25 2.25m0 0l2.25 2.25M12 13.875l2.25-2.25M12 13.875l-2.25 2.25M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+          </svg>
+        </span>
+      </div>
+      <span class="kartu-angka-label">Nilai Stok</span>
+      <span class="kartu-angka-nilai">{rupiah(stock_value.value)}</span>
+      <span class="kartu-angka-bantu">Sisa stok × harga beli, per hari ini</span>
+    </div>
   </div>
 
   {
@@ -234,11 +251,21 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     )
   }
 
+  {
+    stock_value.batches_without_cost > 0 && (
+      <p class="mb-6 rounded-lg border border-kuning-500/40 bg-kuning-50 px-4 py-3 text-sm text-kuning-700">
+        {stock_value.batches_without_cost} batch yang masih ada stoknya belum punya harga beli.
+        Selama itu, <strong>nilai stok di atas terlalu kecil</strong>. Isi harga beli batch di
+        halaman produk.
+      </p>
+    )
+  }
+
   <div class="mb-6 grid gap-4 lg:grid-cols-2">
     <section class="kartu">
       <h2 class="mb-1 text-base font-bold">Omzet dan Beban</h2>
       <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
-        Enam bulan terakhir. Tidak ikut saringan periode.
+        Enam bulan terakhir
       </p>
 
       {/* Grafik batang tanpa JavaScript: tingginya dihitung saat render dan

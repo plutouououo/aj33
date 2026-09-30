@@ -16,6 +16,28 @@ const KANAL_LABEL: Record<string, string> = {
 };
 
 let galat: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  // Endpoint backend sudah menolak non-owner juga -- pemeriksaan di sini
+  // cuma supaya galatnya jelas tanpa perlu menunggu balasan API.
+  if (user.role !== 'owner') {
+    galat = 'Kamu tidak punya akses ke fitur ini.';
+  } else {
+    const form = await Astro.request.formData();
+    const reason = String(form.get('reason') ?? '').trim();
+    if (!reason) {
+      galat = 'Alasan pembatalan wajib diisi.';
+    } else {
+      try {
+        await api(`/transactions/${id}/void`, { method: 'POST', token, body: { reason } });
+        return Astro.redirect(`/laporan/transaksi/${id}`, 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal membatalkan transaksi.';
+      }
+    }
+  }
+}
+
 let transaksi: TransactionDetail | null = null;
 
 try {
@@ -61,6 +83,31 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
               <p class="mt-1 text-xs opacity-80">Dibatalkan {waktu(transaksi.voided_at)}</p>
             )}
           </div>
+        )}
+
+        {user.role === 'owner' && transaksi.status === 'completed' && (
+          <section class="kartu mb-6 border-red-200" id="borang-batalkan">
+            <h2 class="mb-1 text-base font-bold text-merah-700">Batalkan Transaksi</h2>
+            <p class="mb-3 text-xs text-[var(--color-teks-lembut)]">
+              Stok akan dikembalikan otomatis ke batch asalnya. Transaksi yang dibatalkan
+              hilang dari laporan omzet dan riwayat pembelian pelanggan. Tindakan ini tidak
+              bisa dibatalkan.
+            </p>
+            <form method="POST">
+              <label class="label" for="reason">Alasan pembatalan</label>
+              <textarea
+                class="kolom"
+                id="reason"
+                name="reason"
+                required
+                rows={2}
+                placeholder="Mis. salah input jumlah, salah scan produk..."
+              />
+              <button class="tombol-bahaya mt-3" type="submit" data-tombol-batalkan>
+                Batalkan Transaksi
+              </button>
+            </form>
+          </section>
         )}
 
         {transaksi.items_without_cost > 0 && (
@@ -259,3 +306,20 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
     )
   }
 </AppShell>
+
+{/* Progressive enhancement murni, pola sama seperti konfirmasi hapus di
+    produk/index.astro: form tetap berfungsi tanpa skrip ini, cuma tanpa
+    dialog konfirmasi. */}
+<script is:inline>
+  (function () {
+    var borang = document.getElementById('borang-batalkan');
+    if (!borang) return;
+    var tombol = borang.querySelector('[data-tombol-batalkan]');
+    if (!tombol) return;
+    tombol.addEventListener('click', function (e) {
+      if (!window.confirm('Yakin ingin membatalkan transaksi ini? Stok akan dikembalikan otomatis dan tindakan ini tidak bisa dibatalkan.')) {
+        e.preventDefault();
+      }
+    });
+  })();
+</script>

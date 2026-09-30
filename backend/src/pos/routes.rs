@@ -8,8 +8,8 @@ use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
-use axum::routing::get;
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/transactions", get(list_transactions).post(checkout))
         .route("/transactions/{id}", get(get_transaction))
+        .route("/transactions/{id}/void", post(void_transaction))
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,4 +121,26 @@ async fn list_transactions(
 ) -> AppResult<Json<Vec<Transaction>>> {
     let rows = repo::list_transactions(&state.pool, 100).await?;
     Ok(Json(rows))
+}
+
+#[derive(Debug, Deserialize)]
+struct VoidRequest {
+    reason: String,
+}
+
+async fn void_transaction(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<VoidRequest>,
+) -> AppResult<StatusCode> {
+    user.require(&[Role::Owner])?;
+
+    let reason = body.reason.trim();
+    if reason.is_empty() {
+        return Err(AppError::bad_request("Alasan pembatalan wajib diisi."));
+    }
+
+    service::void_transaction(&state.pool, id, user.id, reason).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

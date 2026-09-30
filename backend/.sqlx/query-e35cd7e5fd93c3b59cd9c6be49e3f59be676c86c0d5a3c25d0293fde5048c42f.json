@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE import_rows SET action = 'skip'\n        WHERE id = $1 AND batch_id = $2 AND action <> 'skip'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e35cd7e5fd93c3b59cd9c6be49e3f59be676c86c0d5a3c25d0293fde5048c42f"
+}

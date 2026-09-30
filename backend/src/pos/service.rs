@@ -569,6 +569,45 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         .ok_or_else(|| AppError::not_found("Transaksi tidak ditemukan."))
 }
 
+/// Membatalkan transaksi yang sudah tercatat: mengembalikan stok persis ke
+/// batch asalnya, lalu menandai transaksi sebagai `voided`. Transaksi yang
+/// sudah dibatalkan otomatis hilang dari laporan omzet dan riwayat
+/// pembelian pelanggan -- keduanya sudah menyaring `status = 'completed'`
+/// (lihat `reports::repo`/`customers::repo`), jadi tidak ada langkah
+/// tambahan yang perlu dilakukan di sini untuk itu.
+pub async fn void_transaction(
+    pool: &PgPool,
+    transaction_id: Uuid,
+    voided_by: Uuid,
+    reason: &str,
+) -> AppResult<()> {
+    let mut tx = pool.begin().await?;
+
+    let t = repo::kunci_transaksi(&mut tx, transaction_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Transaksi tidak ditemukan."))?;
+    if t.status != "completed" {
+        return Err(AppError::conflict("Transaksi ini sudah dibatalkan."));
+    }
+
+    let pembalikan = repo::penyesuaian_penjualan(&mut tx, transaction_id).await?;
+    if !pembalikan.is_empty() {
+        stock::tambah(
+            &mut tx,
+            &pembalikan,
+            StockReason::VoidReversal,
+            transaction_id,
+            Some(voided_by),
+        )
+        .await?;
+    }
+
+    repo::set_voided(&mut tx, transaction_id, voided_by, reason).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
 fn parse_type(raw: &str) -> AppResult<TransactionType> {
     match raw {
         "walk_in" => Ok(TransactionType::WalkIn),

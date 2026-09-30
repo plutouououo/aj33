@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE import_batches\n        SET status = 'committed', committed_at = now(), ok_count = $2, fail_count = $3\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5d29feca11ddfc1441fb28ff4c5f83b30de2c7cc71222c525f0826b469e2a5e2"
+}

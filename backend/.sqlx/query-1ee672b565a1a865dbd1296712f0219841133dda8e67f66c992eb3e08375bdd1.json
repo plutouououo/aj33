@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE import_batches\n        SET status = 'committing', reviewed_by = $2, reviewed_at = now(), review_note = $3\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1ee672b565a1a865dbd1296712f0219841133dda8e67f66c992eb3e08375bdd1"
+}

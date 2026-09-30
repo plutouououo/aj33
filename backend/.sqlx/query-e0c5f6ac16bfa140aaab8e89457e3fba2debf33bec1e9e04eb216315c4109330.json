@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO import_rows\n                (batch_id, row_no, raw, name, sku, category_text, brand_text,\n                 product_type, variant_grade, variant_size, category_id,\n                 lowest_price, cost, margin_pct, stock, published, action,\n                 match_product_id, issues)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,\n                    $14, $15, $16, $17, $18, $19)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Jsonb",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Uuid",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Int4",
+        "Bool",
+        "Varchar",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0c5f6ac16bfa140aaab8e89457e3fba2debf33bec1e9e04eb216315c4109330"
+}

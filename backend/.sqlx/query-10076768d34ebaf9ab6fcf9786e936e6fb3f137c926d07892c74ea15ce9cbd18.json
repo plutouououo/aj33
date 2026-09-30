@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT EXISTS (\n            SELECT 1 FROM import_rows r, jsonb_array_elements(r.issues) e\n            WHERE r.batch_id = $1 AND r.action <> 'skip' AND e->>'level' = 'error'\n        ) AS \"ada!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ada!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "10076768d34ebaf9ab6fcf9786e936e6fb3f137c926d07892c74ea15ce9cbd18"
+}

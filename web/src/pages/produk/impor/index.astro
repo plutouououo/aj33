@@ -1,0 +1,94 @@
+---
+import AppShell from '../../../layouts/AppShell.astro';
+import { api, type PaginatedImportBatches } from '../../../lib/api';
+import { kelasLencanaImpor, labelStatusImpor } from '../../../lib/impor';
+import { waktu } from '../../../lib/format';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const params = Astro.url.searchParams;
+const limit = 20;
+const halaman = Math.max(1, Number(params.get('halaman')) || 1);
+
+const batch = await api<PaginatedImportBatches>(
+  `/imports?page=${halaman}&limit=${limit}`,
+  { token },
+);
+
+const halamanTerakhir = Math.max(1, Math.ceil(batch.total / limit));
+
+function tautanHalaman(ke: number): string {
+  return ke === 1 ? '/produk/impor' : `/produk/impor?halaman=${ke}`;
+}
+---
+
+<AppShell judul="Impor Produk" user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/produk">Produk</a>
+    <span aria-hidden="true">›</span>
+    <span aria-current="page">Impor</span>
+  </nav>
+
+  <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <p class="text-sm text-[var(--color-teks-lembut)]">{batch.total} berkas pernah diunggah</p>
+    <a class="tombol-utama" href="/produk/impor/baru">+ Impor Baru</a>
+  </div>
+
+  <div class="kartu-rapat overflow-x-auto">
+    <table class="tabel">
+      <thead>
+        <tr>
+          <th>Berkas</th>
+          <th>Diunggah</th>
+          <th class="text-right">Baris</th>
+          <th>Status</th>
+          <th class="text-right">Hasil</th>
+        </tr>
+      </thead>
+      <tbody>
+        {batch.data.map((b) => (
+          <tr>
+            <td>
+              <a class="font-medium hover:underline" href={`/produk/impor/${b.id}`}>
+                {b.file_name}
+              </a>
+            </td>
+            <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+              {waktu(b.uploaded_at)}
+            </td>
+            <td class="sel-angka">{b.total_rows}</td>
+            <td>
+              <span class={kelasLencanaImpor(b.status, b.fail_count)}>
+                {labelStatusImpor(b.status)}
+              </span>
+            </td>
+            <td class="sel-angka text-xs text-[var(--color-teks-lembut)]">
+              {b.status === 'committed' ? `${b.ok_count} ok · ${b.fail_count} gagal` : '—'}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+
+    {batch.data.length === 0 && (
+      <p class="py-12 text-center text-[var(--color-teks-lembut)]">Belum ada berkas yang diunggah.</p>
+    )}
+  </div>
+
+  {halamanTerakhir > 1 && (
+    <div class="mt-4 flex items-center gap-2">
+      {halaman > 1 ? (
+        <a class="tombol-halus" href={tautanHalaman(halaman - 1)}>← Sebelumnya</a>
+      ) : (
+        <span class="tombol-halus opacity-40">← Sebelumnya</span>
+      )}
+      <span class="px-2 tabular-nums text-[var(--color-teks-lembut)]">{halaman} / {halamanTerakhir}</span>
+      {halaman < halamanTerakhir ? (
+        <a class="tombol-halus" href={tautanHalaman(halaman + 1)}>Berikutnya →</a>
+      ) : (
+        <span class="tombol-halus opacity-40">Berikutnya →</span>
+      )}
+    </div>
+  )}
+</AppShell>

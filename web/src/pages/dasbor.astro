@@ -16,9 +16,7 @@ const JENIS: Record<string, string> = {
 ---
 
 <AppShell judul="Dasbor" user={user}>
-  <p class="mb-5 text-sm text-[var(--color-teks-lembut)]">
-    Ringkasan toko hari ini. Angka omzet adalah harga barang, belum termasuk ongkir.
-  </p>
+  
 
   {/* Ikon, kartu pertama yang di-highlight, dan pil naik/turun -- elemen
       yang sama dengan kartu ringkasan di halaman Laporan (lihat
@@ -44,7 +42,7 @@ const JENIS: Record<string, string> = {
       <span class="kartu-angka-label !text-white/80">Omzet Hari Ini</span>
       <span class="kartu-angka-nilai">{rupiah(data.today_revenue)}</span>
       <span class="kartu-angka-bantu !text-white/70">
-        {data.today_transaction_count} transaksi · vs kemarin {rupiah(data.yesterday_revenue)}
+        vs kemarin {rupiah(data.yesterday_revenue)}
       </span>
     </div>
 

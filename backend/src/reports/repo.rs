@@ -767,6 +767,48 @@ pub async fn low_stock(pool: &PgPool, limit: i64) -> AppResult<Vec<LowStockProdu
     Ok(rows)
 }
 
+/// Nilai persediaan saat ini: sisa stok tiap batch dikali harga belinya.
+#[derive(Debug, Serialize)]
+pub struct StockValue {
+    pub value: Decimal,
+    /// Batch yang masih punya sisa tetapi harga belinya kosong di batch
+    /// maupun produk. Dihitung nol, jadi selama bukan nol `value` adalah
+    /// batas bawah.
+    pub batches_without_cost: i64,
+}
+
+/// Potret stok hari ini -- tidak ikut saringan periode. Harga beli dibaca
+/// dengan urutan yang sama seperti harga pokok di `sales_summary`: harga
+/// batch, lalu `products.cost_price` peninggalan data lama.
+///
+/// Induk yang punya varian dilewati: stok sungguhan ada di varian, dan
+/// batch induk tidak ada.
+pub async fn stock_value(pool: &PgPool) -> AppResult<StockValue> {
+    let row = sqlx::query!(
+        r#"
+        SELECT COALESCE(
+                   SUM(pb.remaining_qty * COALESCE(pb.purchase_price, p.cost_price, 0)),
+                   0
+               ) AS "value!",
+               COUNT(*) FILTER (
+                   WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL
+               ) AS "tanpa_pokok!"
+        FROM product_batches pb
+        JOIN products p ON p.id = pb.product_id
+        WHERE p.is_active
+          AND pb.remaining_qty > 0
+          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)
+        "#
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(StockValue {
+        value: row.value,
+        batches_without_cost: row.tanpa_pokok,
+    })
+}
+
 /// Cacahan yang tampil sebagai kartu di dasbor.
 #[derive(Debug, Serialize)]
 pub struct Counts {

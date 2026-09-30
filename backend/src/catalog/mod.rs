@@ -2,6 +2,7 @@
 
 mod repo;
 mod routes;
+pub(crate) mod service;
 mod sku;
 
 pub use routes::router;

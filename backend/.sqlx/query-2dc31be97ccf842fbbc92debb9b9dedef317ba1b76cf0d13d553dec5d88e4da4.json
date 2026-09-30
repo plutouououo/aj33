@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, name, brand_text, product_type, variant_grade, variant_size,\n               category_id, lowest_price, cost, margin_pct, stock, published,\n               action, match_product_id\n        FROM import_rows\n        WHERE batch_id = $1 AND commit_state = 'pending' AND action IN ('create', 'update')\n        ORDER BY row_no\n        LIMIT 1\n        FOR UPDATE SKIP LOCKED\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "brand_text",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "product_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "variant_grade",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "variant_size",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "category_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "lowest_price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "cost",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
+        "name": "margin_pct",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 10,
+        "name": "stock",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "published",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "action",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "match_product_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "2dc31be97ccf842fbbc92debb9b9dedef317ba1b76cf0d13d553dec5d88e4da4"
+}

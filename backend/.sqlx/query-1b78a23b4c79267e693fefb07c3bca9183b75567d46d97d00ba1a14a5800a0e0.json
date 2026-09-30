@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE import_batches SET status = 'pending_review', submitted_at = now() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1b78a23b4c79267e693fefb07c3bca9183b75567d46d97d00ba1a14a5800a0e0"
+}
