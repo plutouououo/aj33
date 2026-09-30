@@ -646,12 +646,13 @@ async fn create_category(
 /// SKU hasil koreksi manual, setelah dipastikan produknya memang masih boleh
 /// dikoreksi.
 ///
-/// Syaratnya sama persis dengan syarat menghapus produk, dan itu disengaja:
-/// keduanya menanyakan hal yang sama -- apakah produk ini sudah tersangkut ke
-/// tempat lain. Begitu pernah terjual, masuk tiket packing, atau terpetakan
-/// ke listing marketplace, SKU-nya sudah beredar di luar sistem ini dan
-/// mengubahnya hanya memindahkan kekacauan ke sana. Produk yang sudah punya
-/// varian juga terkunci: kode induk adalah awalan SKU seluruh variannya.
+/// Lebih longgar dari syarat hapus produk (`repo::penahan_hapus`): sudah
+/// pernah terjual di kasir, masuk tiket packing, atau tercatat di pesanan
+/// marketplace tidak lagi mengunci SKU -- itu catatan historis di dalam
+/// sistem ini sendiri, koreksi salah ketik tidak merusaknya. Yang masih
+/// mengunci hanya `repo::penahan_ubah_sku`: varian (kode induk jadi awalan
+/// SKU seluruh variannya) dan listing marketplace yang sudah memetakan SKU
+/// ini secara aktif.
 ///
 /// Pengecualiannya produk yang SKU-nya masih kosong. Mengisi lubang bukan
 /// mengubah apa pun -- tidak ada kode lama yang beredar -- dan tanpa
@@ -659,9 +660,9 @@ async fn create_category(
 /// bisa diberi SKU lagi.
 async fn koreksi_sku(state: &AppState, sekarang: &Product, diminta: &str) -> AppResult<String> {
     if sekarang.sku.is_some() {
-        if let Some(penahan) = repo::penahan_hapus(&state.pool, sekarang.id).await? {
+        if let Some(penahan) = repo::penahan_ubah_sku(&state.pool, sekarang.id).await? {
             return Err(AppError::conflict(format!(
-                "SKU tidak bisa diubah karena produk {penahan}. Nonaktifkan produknya."
+                "SKU tidak bisa diubah karena produk {penahan}."
             )));
         }
     }

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            EXISTS(SELECT 1 FROM products WHERE parent_id = $1)          AS \"varian!\",\n            EXISTS(SELECT 1 FROM channel_listings WHERE product_id = $1) AS \"listing!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "varian!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "listing!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "c40114b25cfb053dc077f1b41998e06162292c181ae26a24136d5828873cc889"
+}

@@ -565,6 +565,35 @@ pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static
     })
 }
 
+/// Apa yang menahan SKU sebuah produk supaya tidak boleh dikoreksi.
+///
+/// Lebih longgar dari `penahan_hapus`: penjualan di kasir, tiket packing, dan
+/// pesanan marketplace adalah catatan historis di dalam sistem ini sendiri --
+/// mengubah SKU produknya tidak merusak catatan itu. Yang masih menahan
+/// hanya dua hal yang benar-benar bergantung pada SKU tetap sama: varian
+/// (kode induk adalah awalan SKU seluruh variannya) dan listing marketplace
+/// (pemetaan SKU ke listing yang sudah aktif di Shopee/TikTok Shop).
+pub async fn penahan_ubah_sku(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static str>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            EXISTS(SELECT 1 FROM products WHERE parent_id = $1)          AS "varian!",
+            EXISTS(SELECT 1 FROM channel_listings WHERE product_id = $1) AS "listing!"
+        "#,
+        id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(if row.varian {
+        Some("masih punya varian")
+    } else if row.listing {
+        Some("terhubung ke listing marketplace")
+    } else {
+        None
+    })
+}
+
 /// Menghapus produk berikut catatan yang hanya berarti bersama produk itu:
 /// batch barang masuk dan baris ledger stoknya. Pemanggil wajib memeriksa
 /// `penahan_hapus` lebih dulu -- riwayat penjualan tidak pernah ikut terhapus

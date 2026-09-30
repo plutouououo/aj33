@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/cd usr/bin/env bash
 # Menjalankan backend di dalam container, terhubung ke Postgres milik
 # docker-compose. Setelan diambil dari backend/.env, kecuali DATABASE_URL
 # yang harus menunjuk ke nama service `postgres` (bukan localhost:5433,

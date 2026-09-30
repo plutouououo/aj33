@@ -36,9 +36,13 @@
 //! ikut berubah tiap kali keterangannya diperbaiki.
 //!
 //! Karena beku, harus ada jalan koreksi untuk salah ketik di awal, dan itu
-//! `normalkan`: SKU boleh diperbaiki manual selama produknya belum bergerak
-//! (penjagaannya `repo::penahan_hapus`, sama persis dengan larangan hapus).
-//! Setelah bergerak, yang tersisa adalah menonaktifkan produknya.
+//! `normalkan`: SKU boleh diperbaiki manual kapan pun, termasuk setelah
+//! produknya terjual di kasir, masuk tiket packing, atau tercatat di pesanan
+//! marketplace -- itu semua catatan historis di dalam sistem ini sendiri.
+//! Yang tetap mengunci hanya varian (kode induk jadi awalan SKU seluruh
+//! variannya) dan listing marketplace yang sudah memetakan SKU ini secara
+//! aktif (penjagaannya `repo::penahan_ubah_sku`, lebih longgar dari
+//! `repo::penahan_hapus` yang dipakai larangan hapus).
 //!
 //! # Tidak ada akhiran pembeda otomatis
 //!

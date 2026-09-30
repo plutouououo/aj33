@@ -63,11 +63,12 @@ if (Astro.request.method === 'POST') {
 
   try {
     if (aksi === 'simpan') {
-      // SKU dibekukan saat produk dibuat. Backend menolak mengubahnya begitu
-      // produknya pernah bergerak, jadi kolomnya hanya ikut terkirim kalau
-      // memang diketik berbeda -- kalau selalu ikut, menyimpan perubahan
-      // harga pada produk yang sudah terjual akan gagal tanpa sebab yang
-      // dimengerti pengguna.
+      // SKU dibekukan saat produk dibuat, dan backend hanya menolak
+      // mengubahnya kalau produknya masih punya varian atau sudah terhubung
+      // ke listing marketplace -- lihat `koreksi_sku` di catalog/routes.rs.
+      // Kolomnya tetap hanya ikut terkirim kalau memang diketik berbeda,
+      // supaya menyimpan perubahan lain (mis. harga) tidak ikut memicu
+      // pemeriksaan SKU yang tidak relevan.
       const skuBaru = teks(form, 'sku');
       const skuLama = teks(form, 'sku_lama');
 
