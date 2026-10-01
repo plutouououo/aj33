@@ -1,5 +1,6 @@
 ---
 import AppShell from '../../layouts/AppShell.astro';
+import Paginasi from '../../components/Paginasi.astro';
 import Peringatan from '../../components/Peringatan.astro';
 import { api, type SalesReport } from '../../lib/api';
 import { hitungTren, kg, labelTren, rupiah, waktu } from '../../lib/format';
@@ -21,18 +22,45 @@ const token = Astro.locals.token!;
 
 const saringan = bacaSaringan(Astro.url);
 
-/** Baris penjualan yang ditampilkan di layar. Ekspor mengambil lebih banyak. */
-const BARIS_TAMPIL = 15;
+const TERLARIS_PER_HALAMAN = 5;
+const PENJUALAN_PER_HALAMAN = 10;
 
-const laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, BARIS_TAMPIL)}`, {
-  token,
-});
+function bacaHalaman(nama: string): number {
+  return Math.max(1, Math.floor(Number(Astro.url.searchParams.get(nama))) || 1);
+}
+
+const halamanTerlaris = bacaHalaman('hal_terlaris');
+const halamanJual = bacaHalaman('hal_jual');
+
+const laporan = await api<SalesReport>(
+  `/reports/sales?${kueriApi(
+    saringan,
+    { batas: PENJUALAN_PER_HALAMAN, lewati: (halamanJual - 1) * PENJUALAN_PER_HALAMAN },
+    { batas: TERLARIS_PER_HALAMAN, lewati: (halamanTerlaris - 1) * TERLARIS_PER_HALAMAN },
+  )}`,
+  { token },
+);
 
 const kueri = kueriHalaman(saringan);
 const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
 
-const { summary, previous_summary, trend, expense_breakdown, top_products, sales } =
+const { summary, previous_summary, trend, expense_breakdown, top_products, top_products_total, sales } =
   laporan;
+
+const terlarisTerakhir = Math.max(1, Math.ceil(top_products_total / TERLARIS_PER_HALAMAN));
+const jualTerakhir = Math.max(1, Math.ceil(summary.transaction_count / PENJUALAN_PER_HALAMAN));
+
+/** Tautan ke halaman lain salah satu daftar; saringan dan halaman daftar satunya tetap terbawa. */
+function tautanHalaman(daftar: 'hal_terlaris' | 'hal_jual', ke: number, jangkar: string): string {
+  const p = new URLSearchParams(kueri);
+  const halaman = { hal_terlaris: halamanTerlaris, hal_jual: halamanJual };
+  halaman[daftar] = ke;
+  for (const [nama, nilai] of Object.entries(halaman)) {
+    if (nilai > 1) p.set(nama, String(nilai));
+  }
+  const q = p.toString();
+  return `/laporan${q ? `?${q}` : ''}#${jangkar}`;
+}
 
 // Satu skala grafik untuk omzet dan beban agar tinggi batang keduanya bisa dibandingkan langsung.
 const puncak = Math.max(1, ...trend.map((t) => Math.max(t.revenue, t.expenses)));
@@ -317,7 +345,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     </section>
   </div>
 
-  <section class="kartu-rapat mb-6 overflow-x-auto" id="produk-terlaris">
+  <section class="kartu-rapat mb-6 overflow-x-auto" id="produk-terlaris" data-daftar>
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-garis)] px-5 py-4">
       <h2 class="text-base font-bold">Produk Terlaris</h2>
 
@@ -382,17 +410,28 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         }
       </tbody>
     </table>
+    {
+      terlarisTerakhir > 1 && (
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-garis)] px-5 py-3">
+          <p class="text-xs text-[var(--color-teks-lembut)]">
+            {top_products_total} produk · halaman {halamanTerlaris} dari {terlarisTerakhir}
+          </p>
+          <Paginasi
+            ringkas
+            halaman={halamanTerlaris}
+            halamanTerakhir={terlarisTerakhir}
+            tautan={(ke) => tautanHalaman('hal_terlaris', ke, 'produk-terlaris')}
+          />
+        </div>
+      )
+    }
   </section>
 
-  <section class="kartu-rapat overflow-x-auto">
+  <section class="kartu-rapat overflow-x-auto" id="penjualan" data-daftar>
     <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
       <h2 class="text-base font-bold">Penjualan</h2>
       <p class="text-xs text-[var(--color-teks-lembut)]">
-        {
-          summary.transaction_count > sales.length
-            ? `Menampilkan ${sales.length} terbaru dari ${summary.transaction_count} transaksi. Ekspor CSV berisi seluruhnya.`
-            : `${summary.transaction_count} transaksi`
-        }
+        {summary.transaction_count} transaksi · Ekspor CSV berisi seluruhnya
       </p>
     </div>
 
@@ -447,5 +486,20 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         }
       </tbody>
     </table>
+    {
+      jualTerakhir > 1 && (
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-garis)] px-5 py-3">
+          <p class="text-xs text-[var(--color-teks-lembut)]">
+            Halaman {halamanJual} dari {jualTerakhir}
+          </p>
+          <Paginasi
+            ringkas
+            halaman={halamanJual}
+            halamanTerakhir={jualTerakhir}
+            tautan={(ke) => tautanHalaman('hal_jual', ke, 'penjualan')}
+          />
+        </div>
+      )
+    }
   </section>
 </AppShell>

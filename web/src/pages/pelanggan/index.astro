@@ -1,5 +1,6 @@
 ---
 import Galat from '../../components/Galat.astro';
+import Paginasi from '../../components/Paginasi.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type PaginatedCustomers } from '../../lib/api';
 import { rupiah, waktu } from '../../lib/format';
@@ -99,7 +100,7 @@ const ASAL: Record<string, string> = {
   <Galat pesan={galat} class="mb-4" />
   {sukses && <p class="sukses mb-4">{sukses}</p>}
 
-  <div class="mb-5 grid gap-4 sm:grid-cols-3">
+  <div class="mb-5 grid gap-4 sm:grid-cols-3" id="ringkasan-pelanggan" data-daftar>
     <div class="kartu-angka">
       <span class="kartu-angka-label">Pelanggan Tercatat</span>
       <span class="kartu-angka-nilai">{daftar.total}</span>
@@ -191,6 +192,7 @@ const ASAL: Record<string, string> = {
     </div>
   </form>
 
+  <div id="daftar-pelanggan" data-daftar>
   <div class="kartu-rapat overflow-x-auto">
     <table class="tabel">
       <thead>
@@ -265,30 +267,7 @@ const ASAL: Record<string, string> = {
       <span class="tabular-nums"> {daftar.total}</span> pelanggan
     </p>
 
-    {
-      halamanTerakhir > 1 && (
-        <div class="flex items-center gap-2">
-          {daftar.page > 1 ? (
-            <a class="tombol-halus" href={tautanHalaman(daftar.page - 1)}>
-              ← Sebelumnya
-            </a>
-          ) : (
-            <span class="tombol-halus opacity-40">← Sebelumnya</span>
-          )}
-
-          <span class="px-2 tabular-nums text-[var(--color-teks-lembut)]">
-            {daftar.page} / {halamanTerakhir}
-          </span>
-
-          {daftar.page < halamanTerakhir ? (
-            <a class="tombol-halus" href={tautanHalaman(daftar.page + 1)}>
-              Berikutnya →
-            </a>
-          ) : (
-            <span class="tombol-halus opacity-40">Berikutnya →</span>
-          )}
-        </div>
-      )
-    }
+    <Paginasi halaman={daftar.page} {halamanTerakhir} tautan={tautanHalaman} />
+  </div>
   </div>
 </AppShell>

@@ -325,6 +325,22 @@ Saringan memakai GET, bukan POST: hasilnya tercermin di URL. Ganti saringan
 selalu mengembalikan ke halaman 1 (parameter `halaman` tidak ikut dikirim form
 saringan); tautan paginasi membawa seluruh saringan yang sedang aktif.
 
+**Pindah halaman paginasi tidak boleh memuat ulang seluruh halaman.** Ini
+pengecualian JS kedua yang disetujui, dengan syarat yang sama seperti kasir:
+tanpa JS tautannya tetap memuat halaman penuh. Aturan pakainya:
+
+- Tombol halaman selalu lewat komponen `components/Paginasi.astro` (tautannya
+  membawa `data-paginasi`), jangan merakit pager sendiri.
+- Bungkus semua yang berubah saat halaman berganti (tabel, pager, dan kartu
+  ringkasan yang angkanya ikut halaman) dengan elemen ber-`id` unik dan
+  `data-daftar`. Skrip bersama di `AppShell` hanya mengganti elemen itu, jadi
+  saringan, isian, dan bagian lain yang tak berubah tidak ikut dirender ulang.
+- Skrip halaman yang terikat ke isi daftar (mis. checkbox pilih-massal di
+  `produk/index.astro`) harus bisa dipasang ulang: bungkus jadi fungsi dan
+  panggil lagi pada event `daftar-diganti`.
+- Elemen `data-daftar` yang bersyarat (mis. panel yang kadang tak muncul) harus
+  dibungkus elemen tetap, karena yang hilang di halaman baru tidak ikut diganti.
+
 ## Pola halaman formulir panjang
 
 Dipakai `/produk/baru` dan `/produk/[id]`. Urutannya tetap, dari atas ke

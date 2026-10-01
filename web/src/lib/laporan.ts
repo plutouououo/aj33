@@ -51,9 +51,23 @@ export function bacaSaringan(url: URL): Saringan {
   };
 }
 
-/** Saringan sebagai query untuk backend. `batas` = banyaknya baris penjualan. */
-export function kueriApi(s: Saringan, batas: number): string {
-  const q = new URLSearchParams({ period: s.periode, sales_limit: String(batas) });
+/** Jendela satu daftar: `batas` baris mulai dari `lewati`. */
+export interface Jendela {
+  batas: number;
+  lewati: number;
+}
+
+/** Saringan sebagai query untuk backend; tanpa `terlaris` backend memakai ukuran bakunya. */
+export function kueriApi(s: Saringan, penjualan: Jendela, terlaris?: Jendela): string {
+  const q = new URLSearchParams({
+    period: s.periode,
+    sales_limit: String(penjualan.batas),
+    sales_offset: String(penjualan.lewati),
+  });
+  if (terlaris) {
+    q.set('top_limit', String(terlaris.batas));
+    q.set('top_offset', String(terlaris.lewati));
+  }
   if (s.metode) q.set('payment_method', s.metode);
   if (s.jenis) q.set('type', s.jenis);
   // Kosong berarti "ikut periode utama", yang juga jawaban backend bila `top_period` tak dikirim.

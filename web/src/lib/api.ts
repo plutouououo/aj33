@@ -421,6 +421,8 @@ export interface SalesReport {
   trend: MonthlyPoint[];
   expense_breakdown: ExpenseSlice[];
   top_products: TopProduct[];
+  /** Seluruh produk terlaris pada periodenya, bukan hanya halaman ini. */
+  top_products_total: number;
   sales: SaleRow[];
   sales_limit: number;
 }

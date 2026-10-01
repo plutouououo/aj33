@@ -27,6 +27,10 @@ browser ──443──▶ Caddy ──▶ web :4321 (Astro SSR) ──▶ backe
 - Form pakai POST HTML biasa. JavaScript hanya untuk hal kosmetik (sidebar)
   dan halaman kasir (`web/src/pages/kasir.astro`) — yang **tetap harus
   berfungsi penuh tanpa JS**.
+- **Paginasi wajib berpindah halaman tanpa memuat ulang seluruh halaman**:
+  pakai `components/Paginasi.astro` dan bungkus daftarnya dengan `data-daftar`
+  (aturan lengkap di [`docs/panduan-ui.md`](docs/panduan-ui.md), bagian Pola
+  halaman daftar). Tanpa JS tautannya tetap harus jalan.
 
 Modul backend (`backend/src/<modul>/{mod,routes,repo,service}.rs`):
 `auth`, `catalog` (produk/SKU), `customers`, `marketplace` (Shopee/TikTok),

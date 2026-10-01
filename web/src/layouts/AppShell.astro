@@ -236,6 +236,49 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
     }
 
 
+    <script>
+      // Paginasi tanpa muat ulang: tautan `[data-paginasi]` mengambil halaman baru lalu hanya mengganti elemen `[data-daftar]` bernama sama; tanpa JS tautannya tetap memuat halaman penuh.
+      let urutan = 0;
+
+      async function ganti(url: string, dorong: boolean, asal?: Element | null) {
+        const giliran = ++urutan;
+        const lama = document.querySelectorAll<HTMLElement>('[data-daftar]');
+        lama.forEach((el) => el.classList.add('opacity-50', 'transition-opacity'));
+        try {
+          const res = await fetch(url, { headers: { Accept: 'text/html' } });
+          if (!res.ok || res.redirected) throw new Error('muat ulang penuh');
+          const html = await res.text();
+          if (giliran !== urutan) return;
+          const baru = new DOMParser().parseFromString(html, 'text/html');
+          lama.forEach((el) => {
+            const pengganti = baru.getElementById(el.id);
+            if (pengganti?.hasAttribute('data-daftar')) el.replaceWith(pengganti);
+          });
+          if (dorong) history.pushState(null, '', url);
+          const kartu = asal?.id ? document.getElementById(asal.id) : null;
+          if (kartu && kartu.getBoundingClientRect().top < 0) {
+            kartu.style.scrollMarginTop = 'calc(var(--tinggi-topbar, 0px) + 1rem)';
+            kartu.scrollIntoView({ block: 'start' });
+          }
+          document.dispatchEvent(new CustomEvent('daftar-diganti'));
+        } catch {
+          if (giliran === urutan) location.href = url;
+        }
+      }
+
+      document.addEventListener('click', (e) => {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+        const a = (e.target as Element).closest<HTMLAnchorElement>('a[data-paginasi]');
+        if (!a) return;
+        e.preventDefault();
+        ganti(a.getAttribute('href')!, true, a.closest('[data-daftar]'));
+      });
+
+      window.addEventListener('popstate', () => {
+        if (document.querySelector('[data-daftar]')) ganti(location.pathname + location.search, false);
+      });
+    </script>
+
     <script is:inline>
       // Pilihan ciut disimpan agar bertahan lintas halaman, karena tiap klik menu memuat halaman baru.
       (() => {

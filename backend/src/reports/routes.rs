@@ -22,8 +22,9 @@ pub fn router() -> Router<AppState> {
 
 /// Banyaknya baris pada daftar pendek di dasbor.
 const DASBOR_DAFTAR: i64 = 5;
-/// Produk terlaris yang ditampilkan laporan.
-const TERLARIS: i64 = 10;
+/// Produk terlaris per halaman bila tak diminta lain.
+const TERLARIS_BAKU: i64 = 5;
+const TERLARIS_MAKS: i64 = 100;
 /// Batas atas daftar penjualan di laporan: cukup untuk ekspor satu periode tapi berbatas agar satu request tak menarik seluruh tabel.
 const PENJUALAN_MAKS: i64 = 1000;
 const PENJUALAN_BAKU: i64 = 15;
@@ -39,6 +40,10 @@ struct ReportQuery {
     transaction_type: Option<String>,
     /// Banyaknya baris penjualan yang dikembalikan; halaman memakai nilai baku, ekspor meminta lebih.
     sales_limit: Option<i64>,
+    /// Banyaknya baris penjualan yang dilewati, untuk halaman berikutnya.
+    sales_offset: Option<i64>,
+    top_limit: Option<i64>,
+    top_offset: Option<i64>,
     /// Periode Produk Terlaris terpisah dari `period`; kosong = ikut `period`.
     top_period: Option<String>,
 }
@@ -76,8 +81,8 @@ fn pilihan(nilai: Option<String>, sah: &[&str], nama: &str) -> AppResult<Option<
 }
 
 impl ReportQuery {
-    /// Mengembalikan saringan utama, batas baris, dan saringan Produk Terlaris (periode boleh beda, metode bayar dan jenis transaksi ikut saringan utama).
-    fn menjadi_filter(self) -> AppResult<(SalesFilter, i64, SalesFilter)> {
+    /// Mengembalikan saringan utama, saringan Produk Terlaris (periode boleh beda, metode bayar dan jenis transaksi ikut saringan utama), dan jendela halaman kedua daftar.
+    fn menjadi_filter(self) -> AppResult<(SalesFilter, SalesFilter, Halaman)> {
         let period = satuan_periode(self.period.as_deref())?;
         let payment_method = pilihan(
             self.payment_method,
@@ -106,13 +111,28 @@ impl ReportQuery {
             transaction_type,
         };
 
-        let limit = self
-            .sales_limit
-            .unwrap_or(PENJUALAN_BAKU)
-            .clamp(1, PENJUALAN_MAKS);
+        let halaman = Halaman {
+            sales_limit: self
+                .sales_limit
+                .unwrap_or(PENJUALAN_BAKU)
+                .clamp(1, PENJUALAN_MAKS),
+            sales_offset: self.sales_offset.unwrap_or(0).max(0),
+            top_limit: self
+                .top_limit
+                .unwrap_or(TERLARIS_BAKU)
+                .clamp(1, TERLARIS_MAKS),
+            top_offset: self.top_offset.unwrap_or(0).max(0),
+        };
 
-        Ok((filter, limit, top_filter))
+        Ok((filter, top_filter, halaman))
     }
+}
+
+struct Halaman {
+    sales_limit: i64,
+    sales_offset: i64,
+    top_limit: i64,
+    top_offset: i64,
 }
 
 // --- Dasbor ---
@@ -159,7 +179,7 @@ async fn dashboard(State(state): State<AppState>, user: CurrentUser) -> AppResul
 
     // Daftar penjualan terakhir tanpa batas periode karena dasbor kosong sepanjang pagi tak memberi tahu apa pun.
     let recent_sales =
-        repo::recent_sales(&state.pool, &SalesFilter::periode(None), DASBOR_DAFTAR).await?;
+        repo::recent_sales(&state.pool, &SalesFilter::periode(None), DASBOR_DAFTAR, 0).await?;
     let low_stock_products = repo::low_stock(&state.pool, DASBOR_DAFTAR).await?;
 
     Ok(Json(Dashboard {
@@ -187,6 +207,8 @@ struct SalesReport {
     trend: Vec<MonthlyPoint>,
     expense_breakdown: Vec<ExpenseSlice>,
     top_products: Vec<TopProduct>,
+    /// Seluruh produk terlaris pada periodenya (bukan hanya halaman ini), dasar jumlah halaman.
+    top_products_total: i64,
     sales: Vec<SaleRow>,
     /// Jumlah baris di `sales` dibanding batas yang diminta, agar halaman bisa mengatakan daftar dipotong, bukan hanya segitu penjualannya.
     sales_limit: i64,
@@ -199,16 +221,29 @@ async fn sales_report(
 ) -> AppResult<Json<SalesReport>> {
     user.require(&[Role::Owner])?;
 
-    let (filter, sales_limit, top_filter) = q.menjadi_filter()?;
+    let (filter, top_filter, halaman) = q.menjadi_filter()?;
 
     Ok(Json(SalesReport {
         summary: repo::sales_summary(&state.pool, &filter).await?,
         previous_summary: repo::sales_summary_previous(&state.pool, &filter).await?,
         trend: repo::monthly_trend(&state.pool, &filter).await?,
         expense_breakdown: repo::expense_breakdown(&state.pool, &filter).await?,
-        top_products: repo::top_products(&state.pool, &top_filter, TERLARIS).await?,
-        sales: repo::recent_sales(&state.pool, &filter, sales_limit).await?,
-        sales_limit,
+        top_products: repo::top_products(
+            &state.pool,
+            &top_filter,
+            halaman.top_limit,
+            halaman.top_offset,
+        )
+        .await?,
+        top_products_total: repo::top_products_count(&state.pool, &top_filter).await?,
+        sales: repo::recent_sales(
+            &state.pool,
+            &filter,
+            halaman.sales_limit,
+            halaman.sales_offset,
+        )
+        .await?,
+        sales_limit: halaman.sales_limit,
     }))
 }
 

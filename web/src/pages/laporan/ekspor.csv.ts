@@ -34,7 +34,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
 
   let laporan: SalesReport;
   try {
-    laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, BARIS_MAKS)}`, { token });
+    laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, { batas: BARIS_MAKS, lewati: 0 })}`, { token });
   } catch (err) {
     // 401 sesi habis, 403 bukan owner; keduanya dijawab dengan mengembalikan pengguna ke aplikasi, bukan berkas berisi pesan galat.
     if (err instanceof ApiRequestError && (err.status === 401 || err.status === 403)) {

@@ -1,0 +1,38 @@
+---
+interface Props {
+  halaman: number;
+  halamanTerakhir: number;
+  tautan: (ke: number) => string;
+  /** Ukuran kecil untuk pager di kepala/kaki kartu. */
+  ringkas?: boolean;
+}
+
+const { halaman, halamanTerakhir, tautan, ringkas = false } = Astro.props;
+const kelas = ringkas ? 'tombol-halus !px-3 !py-2 !text-xs' : 'tombol-halus';
+---
+
+{
+  halamanTerakhir > 1 && (
+    <div class="flex items-center gap-2">
+      {halaman > 1 ? (
+        <a class={kelas} href={tautan(halaman - 1)} data-paginasi>
+          ← Sebelumnya
+        </a>
+      ) : (
+        <span class:list={[kelas, 'opacity-40']}>← Sebelumnya</span>
+      )}
+
+      <span class:list={['px-2 tabular-nums text-[var(--color-teks-lembut)]', ringkas && 'text-xs']}>
+        {halaman} / {halamanTerakhir}
+      </span>
+
+      {halaman < halamanTerakhir ? (
+        <a class={kelas} href={tautan(halaman + 1)} data-paginasi>
+          Berikutnya →
+        </a>
+      ) : (
+        <span class:list={[kelas, 'opacity-40']}>Berikutnya →</span>
+      )}
+    </div>
+  )
+}

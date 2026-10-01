@@ -1,5 +1,6 @@
 ---
 import Galat from '../../../../components/Galat.astro';
+import Paginasi from '../../../../components/Paginasi.astro';
 import AppShell from '../../../../layouts/AppShell.astro';
 import {
   api,
@@ -167,6 +168,7 @@ const kategoriBelumJelas = rows
         </p>
       )}
 
+      <div id="daftar-baris" data-daftar>
       {kategoriBelumJelas.length > 0 && (batch.status === 'draft' || batch.status === 'pending_review') && (
         <section class="kartu mb-5">
           <h2 class="mb-3 text-base font-bold">Pemetaan Kategori</h2>
@@ -335,21 +337,10 @@ const kategoriBelumJelas = rows
         </table>
       </div>
 
-      {halamanTerakhir > 1 && (
-        <div class="mt-4 flex items-center gap-2">
-          {halaman > 1 ? (
-            <a class="tombol-halus" href={tautanHalaman(halaman - 1)}>← Sebelumnya</a>
-          ) : (
-            <span class="tombol-halus opacity-40">← Sebelumnya</span>
-          )}
-          <span class="px-2 tabular-nums text-[var(--color-teks-lembut)]">{halaman} / {halamanTerakhir}</span>
-          {halaman < halamanTerakhir ? (
-            <a class="tombol-halus" href={tautanHalaman(halaman + 1)}>Berikutnya →</a>
-          ) : (
-            <span class="tombol-halus opacity-40">Berikutnya →</span>
-          )}
-        </div>
-      )}
+      <div class="mt-4">
+        <Paginasi {halaman} {halamanTerakhir} tautan={(ke) => tautanHalaman(ke)} />
+      </div>
+      </div>
 
       <div class="bilah-bawah">
         {batch.status === 'draft' && (

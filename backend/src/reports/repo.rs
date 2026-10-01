@@ -438,6 +438,7 @@ pub async fn top_products(
     pool: &PgPool,
     filter: &SalesFilter,
     limit: i64,
+    offset: i64,
 ) -> AppResult<Vec<TopProduct>> {
     let rows = sqlx::query!(
         r#"
@@ -456,13 +457,14 @@ pub async fn top_products(
           AND ($2::text IS NULL OR t.payment_method = $2)
           AND ($3::text IS NULL OR t.type = $3)
         GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END
-        ORDER BY "qty!" DESC, "revenue!" DESC
-        LIMIT $4
+        ORDER BY "qty!" DESC, "revenue!" DESC, 1
+        LIMIT $4 OFFSET $5
         "#,
         filter.period,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref(),
-        limit
+        limit,
+        offset
     )
     .fetch_all(pool)
     .await?;
@@ -477,6 +479,34 @@ pub async fn top_products(
             revenue: r.revenue,
         })
         .collect())
+}
+
+/// Jumlah baris produk terlaris tanpa batas, dasar jumlah halaman; harus mengelompokkan sama persis dengan `top_products`.
+pub async fn top_products_count(pool: &PgPool, filter: &SalesFilter) -> AppResult<i64> {
+    let jumlah = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "jumlah!"
+        FROM (
+            SELECT 1
+            FROM transaction_items ti
+            JOIN transactions t ON t.id = ti.transaction_id
+            WHERE t.status = 'completed'
+              AND ($1::text IS NULL
+                   OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
+                                      AT TIME ZONE 'Asia/Jakarta')
+              AND ($2::text IS NULL OR t.payment_method = $2)
+              AND ($3::text IS NULL OR t.type = $3)
+            GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END
+        ) x
+        "#,
+        filter.period,
+        filter.payment_method.as_deref(),
+        filter.transaction_type.as_deref()
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(jumlah)
 }
 
 /// Satu baris daftar penjualan, bentuk ringkas untuk tabel dan ekspor tanpa seluruh item.
@@ -499,6 +529,7 @@ pub async fn recent_sales(
     pool: &PgPool,
     filter: &SalesFilter,
     limit: i64,
+    offset: i64,
 ) -> AppResult<Vec<SaleRow>> {
     let rows = sqlx::query!(
         r#"
@@ -520,13 +551,14 @@ pub async fn recent_sales(
                                   AT TIME ZONE 'Asia/Jakarta')
           AND ($2::text IS NULL OR t.payment_method = $2)
           AND ($3::text IS NULL OR t.type = $3)
-        ORDER BY t.created_at DESC
-        LIMIT $4
+        ORDER BY t.created_at DESC, t.id
+        LIMIT $4 OFFSET $5
         "#,
         filter.period,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref(),
-        limit
+        limit,
+        offset
     )
     .fetch_all(pool)
     .await?;

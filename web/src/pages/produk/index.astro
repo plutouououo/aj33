@@ -1,5 +1,6 @@
 ---
 import Galat from '../../components/Galat.astro';
+import Paginasi from '../../components/Paginasi.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type PaginatedProducts, type Product } from '../../lib/api';
 import { fotoKecil } from '../../lib/blob';
@@ -338,7 +339,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
   )}
 
   {/* Satu form membungkus tabel dan bilah aksi massal; checkbox `pilih_id` ikut terkirim apa pun tombol yang ditekan, termasuk toggle per baris lewat kode "id:target". */}
-  <form method="POST" id="borang-produk">
+  <form method="POST" id="borang-produk" data-daftar>
   {/* Ponsel memakai daftar ringkas (foto, nama, harga · stok, "Edit") dan tanpa pilihan massal, sebab checkbox ganda di dua tata letak akan terkirim dua kali; md ke atas tetap tabel penuh. */}
   <ul class="kartu-rapat divide-y divide-[var(--color-garis-lembut)] md:hidden">
     {halamanIni.map((p) => {
@@ -584,21 +585,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
       <span class="tabular-nums"> {total}</span> produk
     </p>
 
-    {halamanTerakhir > 1 && (
-      <div class="flex items-center gap-2">
-        {halaman > 1 ? (
-          <a class="tombol-halus" href={tautanHalaman(halaman - 1)}>← Sebelumnya</a>
-        ) : (
-          <span class="tombol-halus opacity-40">← Sebelumnya</span>
-        )}
-        <span class="px-2 tabular-nums text-[var(--color-teks-lembut)]">{halaman} / {halamanTerakhir}</span>
-        {halaman < halamanTerakhir ? (
-          <a class="tombol-halus" href={tautanHalaman(halaman + 1)}>Berikutnya →</a>
-        ) : (
-          <span class="tombol-halus opacity-40">Berikutnya →</span>
-        )}
-      </div>
-    )}
+    <Paginasi {halaman} {halamanTerakhir} tautan={tautanHalaman} />
   </div>
 
   {/* Bilah aksi massal tanpa JavaScript selalu terlihat (server menolak bila tak ada yang dicentang); dengan JS hitungan terpilih hidup dan "Hapus Terpilih" minta konfirmasi. */}
@@ -621,7 +608,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
 {/* Progressive enhancement murni seperti halaman kasir: skrip hanya menghitung teks dari checkbox dan meminta konfirmasi hapus, pengiriman tetap lewat submit biasa. */}
 <script is:inline>
-  (function () {
+  function pasangPilihanProduk() {
     var borang = document.getElementById('borang-produk');
     if (!borang) return;
 
@@ -668,5 +655,8 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
     }
 
     hitungUlang();
-  })();
+  }
+
+  pasangPilihanProduk();
+  document.addEventListener('daftar-diganti', pasangPilihanProduk);
 </script>
