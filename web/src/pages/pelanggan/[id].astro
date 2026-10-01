@@ -2,6 +2,7 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type CustomerDetail } from '../../lib/api';
 import { rupiah, waktu } from '../../lib/format';
+import { pesanDari, sesudahAksi } from '../../lib/pesan';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -11,11 +12,7 @@ const { id } = Astro.params;
 let galat: string | null = null;
 let sukses: string | null = null;
 
-/**
- * Nilai teks dari form. Kosong dikirim sebagai `null` supaya backend
- * benar-benar mengosongkan kolomnya — alamat yang salah isi harus bisa
- * dikembalikan ke "belum diisi", bukan menempel selamanya.
- */
+/** Nilai teks form; kosong dikirim `null` agar backend benar-benar mengosongkan kolom dan alamat salah isi bisa dikembalikan ke "belum diisi". */
 function teks(form: FormData, kolom: string): string | null {
   return String(form.get(kolom) ?? '').trim() || null;
 }
@@ -23,7 +20,9 @@ function teks(form: FormData, kolom: string): string | null {
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
 
-  if (String(form.get('aksi') ?? '') === 'simpan') {
+  const aksi = String(form.get('aksi') ?? '');
+
+  if (aksi === 'simpan') {
     try {
       await api(`/customers/${id}`, {
         method: 'PATCH',
@@ -34,15 +33,20 @@ if (Astro.request.method === 'POST') {
           address: teks(form, 'address'),
         },
       });
-      sukses = 'Data pelanggan disimpan.';
+      return Astro.redirect(sesudahAksi(Astro.url, 'simpan'), 303);
     } catch (err) {
       galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan pelanggan.';
     }
+  } else {
+    galat = 'Aksi tidak dikenal.';
   }
 }
 
-// Dibaca setelah POST supaya yang tampil adalah keadaan sesudah perubahan,
-// bukan keadaan sebelum form dikirim.
+if (!galat) {
+  sukses = pesanDari(Astro.url, { simpan: 'Data pelanggan disimpan.' });
+}
+
+// Dibaca setelah POST agar yang tampil keadaan sesudah perubahan.
 let pelanggan: CustomerDetail | null = null;
 try {
   pelanggan = await api<CustomerDetail>(`/customers/${id}`, { token });
@@ -142,9 +146,7 @@ const rataRata =
 
               <div class="isian">
                 <label class="label" for="address">Alamat Antar</label>
-                {/* Isi ditulis rapat pada satu baris: apa pun di antara tag
-                    <textarea> adalah nilainya, jadi indentasi yang rapi di
-                    sini akan muncul sebagai spasi di dalam kolom isian. */}
+                {/* Isi ditulis rapat satu baris karena apa pun di antara tag `<textarea>` adalah nilainya, indentasi akan jadi spasi di kolom. */}
                 <textarea class="kolom" id="address" name="address" rows="3" maxlength="500">{pelanggan.address ?? ''}</textarea>
                 <p class="isian-bantu">
                   Dikosongkan berarti pelanggan ini mengambil sendiri di toko.

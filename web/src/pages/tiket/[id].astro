@@ -12,38 +12,37 @@ const { id } = Astro.params;
 let galat: string | null = null;
 let tiket: Ticket | null = null;
 
-// Setiap aksi dijawab backend dengan tiket utuh yang baru, jadi hasilnya
-// langsung dipakai merender -- tidak ada jeda di mana layar menampilkan
-// keadaan lama karena permintaan kedua gagal.
+// Aksi berhasil dijawab redirect 303 ke tiket yang sama agar muat-ulang tak mengirim ulang aksinya (mis. "ambil tiket" kedua yang menampilkan galat).
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const aksi = String(form.get('aksi') ?? '');
 
   try {
     if (aksi === 'ambil') {
-      tiket = await api<Ticket>(`/tickets/${id}/assign`, { method: 'POST', token, body: {} });
+      await api<Ticket>(`/tickets/${id}/assign`, { method: 'POST', token, body: {} });
     } else if (aksi === 'status') {
-      tiket = await api<Ticket>(`/tickets/${id}/status`, {
+      await api<Ticket>(`/tickets/${id}/status`, {
         method: 'PATCH',
         token,
         body: { status: String(form.get('status') ?? '') },
       });
     } else if (aksi === 'item') {
       const itemId = String(form.get('item_id') ?? '');
-      tiket = await api<Ticket>(`/tickets/${id}/items/${itemId}`, {
+      await api<Ticket>(`/tickets/${id}/items/${itemId}`, {
         method: 'PATCH',
         token,
         body: { is_packed: form.get('is_packed') === '1' },
       });
+    } else {
+      galat = 'Aksi tidak dikenal.';
     }
+    if (!galat) return Astro.redirect(Astro.url.pathname + Astro.url.search, 303);
   } catch (err) {
     galat = err instanceof ApiRequestError ? err.message : 'Aksi gagal dijalankan.';
   }
 }
 
-// Aksi yang gagal menyisakan `tiket` kosong: keadaannya dibaca ulang supaya
-// galat ditampilkan di atas tiket sebagaimana adanya sekarang, bukan
-// sebagaimana dikira saat tombolnya ditekan.
+// Tiket selalu dibaca dari backend: setelah aksi berhasil lewat GET redirect, setelah gagal agar galat tampil di atas keadaan tiket sekarang.
 if (!tiket) {
   try {
     tiket = await api<Ticket>(`/tickets/${id}`, { token });
@@ -56,8 +55,7 @@ if (!tiket) {
   }
 }
 
-// Owner boleh mengerjakan tiket mana pun, pengepak hanya miliknya sendiri --
-// sama dengan `pastikan_boleh_mengerjakan` di backend.
+// Owner boleh mengerjakan tiket mana pun, pengepak hanya miliknya, sama dengan `pastikan_boleh_mengerjakan` di backend.
 const boleh = tiket !== null && (user.role === 'owner' || tiket.assigned_to_user_id === user.id);
 const lanjut = tiket && boleh ? langkahBerikutnya(tiket.status) : null;
 const bisaDiambil =
@@ -132,10 +130,7 @@ const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
                     </p>
                     <p class="text-xs text-stone-500">
                       Ambil {it.qty}
-                      {/* Lokasi ditebalkan: inilah yang dicari mata pengepak
-                          lebih dulu, sebelum nama barangnya. Daftar sudah
-                          diurutkan per rak, jadi membacanya dari atas ke
-                          bawah berarti menyusuri gudang sekali jalan. */}
+                      {/* Lokasi ditebalkan karena itu yang dicari pengepak lebih dulu, dan daftar urut per rak sehingga dibaca atas-bawah menyusuri gudang sekali jalan. */}
                       {it.storage_location ? (
                         <span class="ml-1.5 font-semibold text-merah-700">
                           · {it.storage_location}
@@ -146,9 +141,7 @@ const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
                     </p>
                   </div>
 
-                  {/* Centang hanya bisa diubah saat tiket sedang dikemas.
-                      Setelah `packed`, pemeriksaan "semua barang sudah
-                      dikemas" yang meloloskannya tidak boleh dibatalkan. */}
+                  {/* Centang hanya bisa diubah saat tiket dikemas; setelah `packed`, pemeriksaan "semua barang sudah dikemas" tak boleh dibatalkan. */}
                   {boleh && tiket.status === 'packing' && (
                     <form method="POST">
                       <input type="hidden" name="aksi" value="item" />

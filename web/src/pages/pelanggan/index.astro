@@ -2,6 +2,7 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type PaginatedCustomers } from '../../lib/api';
 import { rupiah, waktu } from '../../lib/format';
+import { pesanDari, sesudahAksi } from '../../lib/pesan';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -9,9 +10,7 @@ const token = Astro.locals.token!;
 let galat: string | null = null;
 let sukses: string | null = null;
 
-// Pelanggan baru ditambahkan lewat form biasa. Tidak ada JavaScript yang
-// terlibat: browser mengirim POST, server merender ulang halaman dengan
-// hasilnya -- pola yang sama dengan halaman produk.
+// Pelanggan baru lewat form biasa tanpa JavaScript, pola sama dengan halaman produk.
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const aksi = String(form.get('aksi') ?? '');
@@ -19,7 +18,7 @@ if (Astro.request.method === 'POST') {
   if (aksi === 'tambah') {
     const nama = String(form.get('name') ?? '').trim();
     try {
-      const baru = await api<{ name: string | null }>('/customers', {
+      await api('/customers', {
         method: 'POST',
         token,
         body: {
@@ -28,20 +27,28 @@ if (Astro.request.method === 'POST') {
           address: String(form.get('address') ?? '').trim() || undefined,
         },
       });
-      sukses = `Pelanggan "${baru.name ?? nama}" tersimpan.`;
+      return Astro.redirect(sesudahAksi(Astro.url, 'tambah'), 303);
     } catch (err) {
       galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan pelanggan.';
     }
   } else if (aksi === 'hapus') {
-    // Backend menolak menghapus pelanggan yang masih punya riwayat, dan
-    // pesannya sudah ditulis untuk dibaca manusia -- diteruskan apa adanya.
+    // Backend menolak menghapus pelanggan yang punya riwayat dengan pesan yang sudah ramah pembaca, jadi diteruskan apa adanya.
     try {
       await api(`/customers/${String(form.get('id') ?? '')}`, { method: 'DELETE', token });
-      sukses = 'Pelanggan dihapus.';
+      return Astro.redirect(sesudahAksi(Astro.url, 'hapus'), 303);
     } catch (err) {
       galat = err instanceof ApiRequestError ? err.message : 'Gagal menghapus pelanggan.';
     }
+  } else {
+    galat = 'Aksi tidak dikenal.';
   }
+}
+
+if (!galat) {
+  sukses = pesanDari(Astro.url, {
+    tambah: 'Pelanggan tersimpan.',
+    hapus: 'Pelanggan dihapus.',
+  });
 }
 
 const params = Astro.url.searchParams;
@@ -76,9 +83,7 @@ function tautanHalaman(ke: number): string {
   return q ? `/pelanggan?${q}` : '/pelanggan';
 }
 
-// Angka kartu dihitung dari halaman yang sedang tampil, jadi sengaja hanya
-// disebut sebagai ringkasan halaman ini -- menuliskannya sebagai "total
-// seluruh pelanggan" akan berbohong begitu daftarnya berpindah halaman.
+// Angka kartu dihitung dari halaman yang tampil, jadi hanya disebut ringkasan halaman ini (bukan "total seluruh pelanggan") agar tak berbohong saat pindah halaman.
 const belanjaHalaman = daftar.data.reduce((j, c) => j + c.total_spent, 0);
 const pernahBelanja = daftar.data.filter((c) => c.purchase_count > 0).length;
 const rataRata = pernahBelanja > 0 ? belanjaHalaman / pernahBelanja : 0;
@@ -108,11 +113,9 @@ const ASAL: Record<string, string> = {
     </div>
   </div>
 
-  {/* Form tambah dilipat dalam <details>: yang dibuka orang di halaman ini
-      hampir selalu daftarnya, bukan form isian. <details> bekerja tanpa
-      JavaScript, jadi melipatnya tidak menukar satu fitur dengan fitur lain. */}
+  {/* Form tambah dilipat dalam `<details>` karena yang dibuka orang di sini hampir selalu daftarnya; berfungsi tanpa JS. */}
   <details class="kartu mb-5">
-    <summary class="cursor-pointer text-sm font-semibold">+ Tambah Pelanggan</summary>
+    <summary class="cursor-pointer py-3 text-sm font-semibold">+ Tambah Pelanggan</summary>
 
     <form method="POST" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_12rem_1fr_8rem]">
       <input type="hidden" name="aksi" value="tambah" />
@@ -138,8 +141,7 @@ const ASAL: Record<string, string> = {
     </form>
   </details>
 
-  {/* Saringan dikirim sebagai GET biasa, jadi keadaan daftar selalu ada di
-      URL -- bisa di-bookmark, dibagikan, dan tombol kembali bekerja. */}
+  {/* Saringan dikirim sebagai GET agar keadaan daftar ada di URL (bisa di-bookmark, dibagikan, tombol kembali bekerja). */}
   <form method="GET" class="kartu mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_12rem_12rem_7rem_7rem]">
     <div>
       <label class="label" for="cari">Cari</label>
@@ -228,9 +230,7 @@ const ASAL: Record<string, string> = {
               {user.role === 'owner' && (
                 <td class="whitespace-nowrap text-right">
                   <a class="aksi-baris" href={`/pelanggan/${c.id}`}>Kelola</a>
-                  {/* Hanya untuk yang belum punya riwayat. Yang sudah punya
-                      ditolak backend dengan alasannya, dan tombolnya memang
-                      tidak ditampilkan supaya tidak menjanjikan apa pun. */}
+                  {/* Hanya untuk yang belum punya riwayat; yang sudah punya ditolak backend, dan tombolnya tak ditampilkan agar tak menjanjikan apa pun. */}
                   {c.purchase_count === 0 && (
                     <form method="POST" class="inline">
                       <input type="hidden" name="aksi" value="hapus" />

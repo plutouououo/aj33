@@ -1,10 +1,4 @@
-/**
- * Penjaga sesi untuk seluruh halaman.
- *
- * Pemeriksaan dilakukan di satu tempat, bukan di tiap halaman, supaya
- * halaman baru tidak bisa lupa memasangnya. Hasilnya ditaruh di
- * `context.locals` agar halaman tidak perlu memanggil /auth/me lagi.
- */
+/** Penjaga sesi untuk semua halaman di satu tempat (halaman baru tak bisa lupa memasangnya); hasilnya di `context.locals` agar tak memanggil /auth/me lagi. */
 import { defineMiddleware } from 'astro:middleware';
 import { api, ApiRequestError, type User } from './lib/api';
 import {
@@ -16,16 +10,14 @@ import {
   harusGantiPassword,
 } from './lib/session';
 
+const ASET_STATIS = /\.(?:png|svg|ico|webmanifest|js)$/;
+
 export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
 
-  // Aset statis dan service worker tidak lewat pemeriksaan sesi.
-  //
-  // Foto produk dikecualikan dari pengecualian itu: namanya berakhiran .jpg
-  // sehingga terlihat seperti aset, padahal ia diambil dari Azure Blob dan
-  // hanya boleh dibaca pengguna yang sudah masuk.
+  // Aset statis dikenali dari akhiran berkas di `public/`, bukan "ada titik" (id seperti /produk/a.b lolos dan 500); CSV sengaja lewat middleware, dan foto produk (dari Azure) tetap butuh login.
   const foto = pathname.startsWith('/foto/');
-  if (!foto && (pathname.startsWith('/_') || pathname.includes('.'))) {
+  if (!foto && (pathname.startsWith('/_') || ASET_STATIS.test(pathname))) {
     return next();
   }
 
@@ -36,9 +28,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
       context.locals.user = await api<User>('/auth/me', { token });
       context.locals.token = token;
     } catch (err) {
-      // Token kedaluwarsa atau dicabut: buang cookie-nya supaya pengguna
-      // tidak terjebak memantul antara halaman yang menganggapnya login
-      // dan backend yang menolaknya.
+      // Token kedaluwarsa atau dicabut: buang cookie agar pengguna tidak memantul antara halaman dan backend yang menolaknya.
       if (err instanceof ApiRequestError && err.status === 401) {
         hapusSesi(context.cookies);
       } else {
@@ -53,16 +43,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return bolehTanpaLogin(pathname) ? next() : context.redirect('/login', 302);
   }
 
-  // Sebelum pemeriksaan peran: akun berpassword sementara tidak boleh
-  // mengerjakan apa pun, termasuk halaman yang perannya memang berhak.
+  // Sebelum cek peran: akun berpassword sementara tidak boleh mengerjakan apa pun, termasuk halaman yang perannya berhak.
   if (harusGantiPassword(user, pathname)) {
     return context.redirect('/pengaturan/akun', 302);
   }
 
-  // Pembatasan peran ditegakkan DI SINI, bukan di tiap halaman. Menu yang
-  // disembunyikan bukan penjaga -- sampai pemeriksaan ini ada, kasir yang
-  // mengetik /produk di bilah alamat tetap mendapatkan halamannya, karena
-  // backend membiarkan siapa pun yang sudah login membaca katalog.
+  // Pembatasan peran ditegakkan di sini, bukan di tiap halaman, karena menu yang disembunyikan bukan penjaga dan backend membiarkan siapa pun yang login membaca katalog.
   if (!bolehAkses(user.role, pathname)) {
     return context.redirect(berandaUntuk(user.role), 302);
   }

@@ -1,18 +1,8 @@
 ---
-/**
- * Kamus kode SKU.
- *
- * Bentuk SKU `[JENIS][GRADE]-[MEREK]-[UKURAN]` dibatasi 12 karakter. Dengan
- * merek selalu 3 huruf dan dua pemisah, sisanya cuma 7 -- dan grade berangka
- * seperti "SP 08" sendirian sudah menghabiskan 4. Begitu sebuah kombinasi
- * tidak muat, backend menolak membuat produknya dan menyuruh mendaftarkan
- * kode pendek. Halaman inilah tempat mendaftarkannya.
- *
- * Tanpa halaman ini penolakan itu jadi jalan buntu: pemilik toko tahu apa
- * yang salah tapi tidak punya cara memperbaikinya.
- */
+/** Kamus kode SKU: SKU maksimum 12 karakter (merek 3 huruf + dua pemisah menyisakan 7), kombinasi yang tak muat ditolak backend dan kode pendeknya didaftarkan di sini. */
 import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type SkuCode, type SkuKind } from '../../lib/api';
+import { pesanDari, sesudahAksi } from '../../lib/pesan';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -34,9 +24,9 @@ if (Astro.request.method === 'POST') {
   try {
     if (aksi === 'hapus') {
       await api(`/sku-codes/${String(form.get('id') ?? '')}`, { method: 'DELETE', token });
-      sukses = 'Entri dihapus. SKU produk yang sudah ada tidak berubah.';
+      return Astro.redirect(sesudahAksi(Astro.url, 'hapus'), 303);
     } else if (aksi === 'simpan') {
-      const entri = await api<SkuCode>('/sku-codes', {
+      await api<SkuCode>('/sku-codes', {
         method: 'POST',
         token,
         body: {
@@ -45,11 +35,20 @@ if (Astro.request.method === 'POST') {
           code: String(form.get('code') ?? ''),
         },
       });
-      sukses = `"${entri.source}" sekarang berkode ${entri.code}.`;
+      return Astro.redirect(sesudahAksi(Astro.url, 'simpan'), 303);
+    } else {
+      galat = 'Aksi tidak dikenal.';
     }
   } catch (err) {
     galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan entri kamus.';
   }
+}
+
+if (!galat) {
+  sukses = pesanDari(Astro.url, {
+    hapus: 'Entri dihapus. SKU produk yang sudah ada tidak berubah.',
+    simpan: 'Entri kamus tersimpan.',
+  });
 }
 
 const daftar = await api<SkuCode[]>('/sku-codes', { token });
