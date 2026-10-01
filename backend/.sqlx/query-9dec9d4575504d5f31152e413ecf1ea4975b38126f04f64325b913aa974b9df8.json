@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id                          AS \"id!\",\n               t.created_at                  AS \"created_at!\",\n               t.status                      AS \"status!\",\n               t.voided_at,\n               t.void_reason,\n               t.type                        AS \"transaction_type!\",\n               t.sales_channel               AS \"sales_channel!\",\n               t.payment_method               AS \"payment_method!\",\n               c.name                        AS customer_name,\n               c.phone                       AS customer_phone,\n               c.email                       AS customer_email,\n               u.name                        AS \"cashier_name!\",\n               t.subtotal                    AS \"subtotal!\",\n               t.discount_amount             AS \"discount_amount!\",\n               t.shipping_cost               AS \"shipping_cost!\",\n               t.shipping_borne_by_store     AS \"shipping_borne_by_store!\",\n               t.shipping_subsidy            AS \"shipping_subsidy!\",\n               t.total_amount                AS \"total_amount!\",\n               t.amount_paid,\n               t.change_amount,\n               t.platform_commission_fee_percent AS \"platform_commission_fee_percent!\",\n               t.platform_commission_fee         AS \"platform_commission_fee!\",\n               t.platform_service_fee_percent    AS \"platform_service_fee_percent!\",\n               t.platform_service_fee            AS \"platform_service_fee!\",\n               t.platform_withholding_tax        AS \"platform_withholding_tax!\",\n               t.platform_order_processing_fee   AS \"platform_order_processing_fee!\"\n        FROM transactions t\n        LEFT JOIN customers c ON c.id = t.customer_id\n        JOIN users u ON u.id = t.cashier_user_id\n        WHERE t.id = $1\n        ",
+  "query": "\n        SELECT t.id                          AS \"id!\",\n               t.created_at                  AS \"created_at!\",\n               t.status                      AS \"status!\",\n               t.voided_at,\n               t.void_reason,\n               t.type                        AS \"transaction_type!\",\n               t.sales_channel               AS \"sales_channel!\",\n               t.payment_method               AS \"payment_method!\",\n               COALESCE(c.name, t.customer_name_snapshot) AS customer_name,\n               c.phone                       AS customer_phone,\n               c.email                       AS customer_email,\n               u.name                        AS \"cashier_name!\",\n               t.subtotal                    AS \"subtotal!\",\n               t.discount_amount             AS \"discount_amount!\",\n               t.shipping_cost               AS \"shipping_cost!\",\n               t.shipping_borne_by_store     AS \"shipping_borne_by_store!\",\n               t.shipping_subsidy            AS \"shipping_subsidy!\",\n               t.total_amount                AS \"total_amount!\",\n               t.amount_paid,\n               t.change_amount,\n               t.platform_commission_fee_percent AS \"platform_commission_fee_percent!\",\n               t.platform_commission_fee         AS \"platform_commission_fee!\",\n               t.platform_service_fee_percent    AS \"platform_service_fee_percent!\",\n               t.platform_service_fee            AS \"platform_service_fee!\",\n               t.platform_withholding_tax        AS \"platform_withholding_tax!\",\n               t.platform_order_processing_fee   AS \"platform_order_processing_fee!\"\n        FROM transactions t\n        LEFT JOIN customers c ON c.id = t.customer_id\n        JOIN users u ON u.id = t.cashier_user_id\n        WHERE t.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -148,7 +148,7 @@
       false,
       false,
       false,
-      true,
+      null,
       true,
       true,
       false,
@@ -168,5 +168,5 @@
       false
     ]
   },
-  "hash": "eb0750074e0ef82a0df1d4efe410e6233190cb1665c0090feffbe0dca64cca1a"
+  "hash": "9dec9d4575504d5f31152e413ecf1ea4975b38126f04f64325b913aa974b9df8"
 }

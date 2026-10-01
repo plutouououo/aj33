@@ -643,7 +643,7 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
                t.type                        AS "transaction_type!",
                t.sales_channel               AS "sales_channel!",
                t.payment_method               AS "payment_method!",
-               c.name                        AS customer_name,
+               COALESCE(c.name, t.customer_name_snapshot) AS customer_name,
                c.phone                       AS customer_phone,
                c.email                       AS customer_email,
                u.name                        AS "cashier_name!",

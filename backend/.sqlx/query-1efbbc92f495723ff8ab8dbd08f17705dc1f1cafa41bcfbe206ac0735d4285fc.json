@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE transactions t\n        SET customer_name_snapshot = c.name, customer_id = NULL\n        FROM customers c\n        WHERE c.id = t.customer_id AND t.customer_id = $1 AND t.status = 'voided'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1efbbc92f495723ff8ab8dbd08f17705dc1f1cafa41bcfbe206ac0735d4285fc"
+}

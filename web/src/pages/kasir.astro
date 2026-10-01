@@ -1954,6 +1954,9 @@ function ringkasBatch(p: Product): string {
 <script>
   import html2canvas from 'html2canvas-pro';
 
+  const PESAN_TERIMA_KASIH =
+    'Terima kasih banyak sudah berbelanja di Toko Ayam AJ33! Ditunggu pesanan berikutnya ya, kak! 🥰👍';
+
   const tombolCetak = document.querySelector('[data-cetak-struk]');
   const nota = document.querySelector<HTMLElement>('[data-nota-cetak]');
 
@@ -1971,7 +1974,7 @@ function ringkasBatch(p: Product): string {
         typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
       if (bisaBagikan) {
         try {
-          await navigator.share({ files: [file], title: 'Nota' });
+          await navigator.share({ files: [file], text: PESAN_TERIMA_KASIH });
           return;
         } catch (err) {
           // AbortError berarti kasir menutup share sheet sendiri, bukan galat, jadi tidak lanjut ke unduhan.
@@ -1995,7 +1998,7 @@ function ringkasBatch(p: Product): string {
     klon.style.padding = '16px';
     document.body.appendChild(klon);
     try {
-      const kanvas = await html2canvas(klon, { backgroundColor: '#ffffff', scale: 3 });
+      const kanvas = await html2canvas(klon, { backgroundColor: '#ffffff', scale: 2 });
       const blob = await new Promise<Blob | null>((resolve) => kanvas.toBlob(resolve));
       if (!blob) throw new Error('toBlob mengembalikan kosong');
       return new File([blob], 'nota-' + Date.now() + '.png', { type: 'image/png' });

@@ -246,7 +246,8 @@ impl Rujukan {
 pub async fn hitung_rujukan(pool: &PgPool, id: Uuid) -> AppResult<Rujukan> {
     let row = sqlx::query!(
         r#"
-        SELECT (SELECT count(*) FROM transactions t WHERE t.customer_id = $1)
+        SELECT (SELECT count(*) FROM transactions t
+                WHERE t.customer_id = $1 AND t.status <> 'voided')
                    AS "transactions!",
                (SELECT count(*) FROM external_orders o WHERE o.customer_id = $1)
                    AS "orders!"
@@ -262,10 +263,27 @@ pub async fn hitung_rujukan(pool: &PgPool, id: Uuid) -> AppResult<Rujukan> {
     })
 }
 
+/// Transaksi void tak ikut daftar belanja dan laporan, jadi tautannya dilepas (namanya disalin ke snapshot) agar pelanggan tanpa belanja nyata tetap bisa dihapus.
 pub async fn delete_customer(pool: &PgPool, id: Uuid) -> AppResult<bool> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query!(
+        r#"
+        UPDATE transactions t
+        SET customer_name_snapshot = c.name, customer_id = NULL
+        FROM customers c
+        WHERE c.id = t.customer_id AND t.customer_id = $1 AND t.status = 'voided'
+        "#,
+        id
+    )
+    .execute(&mut *tx)
+    .await?;
+
     let hasil = sqlx::query!("DELETE FROM customers WHERE id = $1", id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
 
     Ok(hasil.rows_affected() > 0)
 }

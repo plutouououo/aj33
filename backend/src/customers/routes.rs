@@ -251,7 +251,7 @@ async fn delete_customer(
     let rujukan = repo::hitung_rujukan(&state.pool, id).await?;
     if rujukan.ada() {
         return Err(AppError::conflict(format!(
-            "Pelanggan ini masih punya {} transaksi kasir dan {} pesanan marketplace, \
+            "Pelanggan ini masih punya {} transaksi kasir (belum void) dan {} pesanan marketplace, \
              jadi tidak bisa dihapus tanpa mengubah laporan yang sudah terbit.",
             rujukan.transactions, rujukan.orders
         )));
