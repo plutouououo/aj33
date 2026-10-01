@@ -65,9 +65,9 @@ const grupTampil = user
 const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
 ---
 
-<!-- `overflow-x-hidden` di `<html>` dan `<body>`: di Safari iOS yang di-pan adalah `<html>`, jadi konten yang melebihi layar tetap terjangkau bila hanya `body` yang ditutup. -->
+<!-- `overflow-x-clip` (bukan `hidden`) di `<html>` dan `<body>`: `hidden` menjadikan body scroll container sehingga seluruh `position: sticky` mati, dan Safari iOS meman `<html>` jadi keduanya ditutup. -->
 <!doctype html>
-<html lang="id" class="overflow-x-hidden">
+<html lang="id" class="overflow-x-clip">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -94,7 +94,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
     </script>
   </head>
 
-  <body class="min-h-screen overflow-x-hidden">
+  <body class="min-h-screen overflow-x-clip">
     {
       user ? (
         <div class="flex min-h-screen">
