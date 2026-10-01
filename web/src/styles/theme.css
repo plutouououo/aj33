@@ -323,12 +323,12 @@
 
   /* Satu kartu = satu barang yang bisa dijual; seluruh blok infonya adalah target ketuk "pilih batch", tanpa aksi lain selain detail dan panel batch. */
   .kartu-produk {
-    @apply flex flex-col overflow-hidden rounded-xl border
+    @apply relative flex flex-col overflow-hidden rounded-xl border
            border-[var(--color-garis)] bg-[var(--color-permukaan)] shadow-sm
            transition-colors;
   }
   .kartu-produk-terpilih {
-    @apply flex flex-col overflow-hidden rounded-xl border-2 border-merah-600
+    @apply relative flex flex-col overflow-hidden rounded-xl border-2 border-merah-600
            bg-merah-50 shadow-sm transition-colors;
   }
 
@@ -352,12 +352,31 @@
            text-white;
   }
 
+  /* Satu-satunya jalan ke detail dan batch untuk barang yang sekali ketuk langsung masuk keranjang; 44 px agar tak salah ketuk dengan kartunya. */
+  .tombol-info {
+    @apply absolute left-0 top-0 grid h-11 w-11 place-items-center;
+  }
+  .tombol-info > span {
+    @apply grid h-6 w-6 place-items-center rounded-full bg-white/90 text-xs
+           font-bold text-stone-700 shadow transition-colors;
+  }
+  .tombol-info:hover > span {
+    @apply bg-merah-50;
+  }
+
   /* --- Panel keranjang kasir --------------------------------------------- */
 
-  /* Keranjang, pembayaran, dan struk satu kolom menempel di samping katalog; di bawah `lg` turun ke bawah katalog dan `.bilah-bawah` jadi jalan ke sana. */
+  /* Keranjang, pembayaran, dan struk satu kolom menempel di samping katalog dan menggulung sendiri; 6.5rem = tinggi topbar + padding, supaya dasarnya muat di layar sebelum halaman digulir. */
   .panel-kasir {
     @apply flex w-full flex-col gap-3 lg:sticky lg:top-4 lg:w-96 lg:shrink-0
-           lg:self-start;
+           lg:self-start lg:max-h-[calc(100dvh-6.5rem)] lg:overflow-y-auto
+           lg:pb-1 lg:*:shrink-0;
+  }
+  /* Tombol bayar menempel di dasar panel yang menggulung supaya selalu terjangkau walau isi panel lebih tinggi dari layar. */
+  .bilah-bayar {
+    @apply sticky bottom-0 -mx-4 -mb-4 flex flex-col gap-2 border-t
+           border-[var(--color-garis-lembut)] bg-[var(--color-permukaan)] px-4
+           pb-3 pt-3;
   }
   .kepala-panel {
     @apply flex items-center justify-between gap-2 bg-merah-600 px-4 py-2.5
@@ -391,15 +410,6 @@
            text-[var(--color-teks)] shadow-lg;
   }
   .panel-batch::backdrop {
-    background: rgb(0 0 0 / 0.45);
-  }
-  /* Dialog detail produk: satu untuk seluruh katalog, selalu modal. */
-  .panel-detail {
-    @apply m-auto w-[min(26rem,calc(100vw-2rem))] rounded-xl border
-           border-[var(--color-garis)] bg-[var(--color-permukaan)] p-0
-           text-[var(--color-teks)] shadow-lg;
-  }
-  .panel-detail::backdrop {
     background: rgb(0 0 0 / 0.45);
   }
   /* Baris pil menggulung mendatar: scrollbar disembunyikan, diganti tepi memudar (skrip mengatur --pudar-kiri/--pudar-kanan); tanpa JS tepi kanan tetap memudar. */

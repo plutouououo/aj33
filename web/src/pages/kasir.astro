@@ -1,4 +1,5 @@
 ---
+import Galat from '../components/Galat.astro';
 import AppShell from '../layouts/AppShell.astro';
 import {
   api,
@@ -367,20 +368,6 @@ const NOMINAL = [50000, 100000, 200000, 500000];
 /** Nama yang bisa dibaca untuk pelanggan yang namanya kosong di database. */
 const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama)';
 
-/** Keterangan kedaluwarsa terdekat sebuah produk, plus apakah sudah mepet. */
-function kedaluwarsa(daftar: ProductBatch[]): { label: string; mepet: boolean } {
-  const terdekat = daftar.find((b) => b.expiry_date);
-  if (!terdekat?.expiry_date) return { label: 'Tanpa expired date', mepet: false };
-  const hari = sisaHari(terdekat.expiry_date);
-  return {
-    label:
-      hari <= 30
-        ? `Expired terdekat ${tanggal(terdekat.expiry_date)} · ${hari} hari`
-        : `Expired terdekat ${tanggal(terdekat.expiry_date)}`,
-    mepet: hari <= 30,
-  };
-}
-
 /** Sisa satu batch beserta peringatan kedaluwarsanya. */
 function sisaBatch(b: ProductBatch): { label: string; mepet: boolean } {
   if (!b.expiry_date) return { label: `sisa ${b.remaining_qty} · tanpa tanggal`, mepet: false };
@@ -408,7 +395,7 @@ function ringkasBatch(p: Product): string {
 ---
 
 <AppShell judul="Kasir" user={user}>
-  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  <Galat pesan={galat} class="mb-4" />
   {sukses && <p class="sukses mb-4">{sukses}</p>}
 
   {/* Satu layar satu form: katalog di kiri, keranjang dan pembayaran di kanan, sehingga isian yang dipakai menjual sama dengan yang dikirim dan tidak ada hidden field antar-langkah. */}
@@ -422,8 +409,9 @@ function ringkasBatch(p: Product): string {
     <input type="hidden" name="idempotency_key" value={kunci} />
 
     <section class="min-w-0 flex-1">
-      <div class="kartu mb-4">
-        <label class="label" for="cari">Cari produk</label>
+      {/* Menempel di atas daftar supaya pencarian dan kategori tetap terjangkau saat katalog digulung; labelnya sr-only agar bilahnya ringkas. */}
+      <div class="kartu sticky top-2 z-10 mb-3 p-3!">
+        <label class="sr-only" for="cari">Cari produk</label>
         <div class="flex flex-wrap gap-2">
           {/* Tombol submit pertama di form ini disengaja: Enter di kolom mana pun jatuh ke "terapkan saringan", satu-satunya aksi yang aman dipicu tak sengaja. */}
           <input
@@ -432,7 +420,8 @@ function ringkasBatch(p: Product): string {
             type="search"
             name="cari"
             value={cariIsi}
-            placeholder="Nama atau SKU..."
+            placeholder="Cari nama atau SKU (tekan / )"
+            aria-keyshortcuts="/"
             data-cari
           />
           <button class="tombol-halus tanpa-js" type="submit" name="aksi" value="saring">
@@ -461,15 +450,13 @@ function ringkasBatch(p: Product): string {
           </div>
         )}
 
-        {bolehTransaksi ? (
-          <p class="isian-bantu"></p>
-        ) : (
-          <p class="isian-bantu">
-            Mode lihat saja. Buka "Detail" pada tiap barang untuk melihat ukuran, harga,
-            lokasi rak, dan sisa tiap batch.
-          </p>
-        )}
       </div>
+
+      {!bolehTransaksi && (
+        <p class="isian-bantu mb-3">
+          Mode lihat saja. Ukuran, lokasi rak, dan sisa tiap batch tampil di setiap barang.
+        </p>
+      )}
 
       {adaYangTerpotong && (
         <p class="mb-3 text-xs text-[var(--color-teks-lembut)]">
@@ -477,16 +464,18 @@ function ringkasBatch(p: Product): string {
         </p>
       )}
 
-      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4" data-daftar>
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" data-daftar>
         {barang.map((p) => {
           const jumlah = jumlahProduk.get(p.id) ?? 0;
           const batches = batchProduk.get(p.id) ?? [];
-          const exp = kedaluwarsa(batches);
           const ringkas = ringkasBatch(p);
+          // Satu batch bersisa berarti tak ada yang perlu dipilih, jadi satu ketukan kartu langsung menambah 1 pack; pengepak tak berjualan dan tetap membuka dialog.
+          const satuBatch = bolehTransaksi && batches.filter((b) => b.remaining_qty > 0).length === 1;
           return (
             <div
               class={jumlah > 0 ? 'kartu-produk-terpilih' : 'kartu-produk'}
               data-produk
+              data-satu-batch={satuBatch ? '' : undefined}
               data-harga={hargaDi(p, kanalIsi)}
               data-harga-toko={hargaDi(p, 'toko')}
               data-harga-shopee={hargaDi(p, 'shopee')}
@@ -499,17 +488,17 @@ function ringkasBatch(p: Product): string {
               <button
                 type="button"
                 class="hanya-js block w-full text-left"
-                data-buka-batch
-                aria-haspopup="dialog"
+                data-ketuk-kartu
+                aria-haspopup={satuBatch ? undefined : 'dialog'}
               >
-                <span class="foto-produk aspect-square h-auto">
-                  {/* `aspect-square h-auto` menjaga kartu persegi di semua lebar; `loading="lazy"` karena seluruh katalog dirender sekaligus dan penyaringan terjadi di browser. */}
+                <span class="foto-produk aspect-[4/3] h-auto">
+                  {/* `aspect-[4/3] h-auto` menjaga tinggi kartu seragam di semua lebar; `loading="lazy"` karena seluruh katalog dirender sekaligus dan penyaringan terjadi di browser. */}
                   {p.image_url && (
                     <img
                       src={fotoKecil(p.image_url)}
                       alt=""
                       width="480"
-                      height="480"
+                      height="360"
                       loading="lazy"
                       decoding="async"
                       class="h-full w-full object-cover"
@@ -520,20 +509,12 @@ function ringkasBatch(p: Product): string {
                     {jumlah}
                   </span>
                 </span>
-                <span class="block px-3 py-2.5">
+                <span class="block px-2.5 py-2">
                   <span class="block text-sm font-medium">
-                    <span class="sr-only">Pilih batch untuk </span>{p.name}
+                    <span class="sr-only">{satuBatch ? 'Tambah 1 pack ' : 'Pilih batch untuk '}</span>{p.name}
                   </span>
                   <span class="block text-sm font-semibold tabular-nums" data-harga-tampil>
                     {rupiah(hargaDi(p, kanalIsi))}
-                  </span>
-                  <span
-                    class:list={[
-                      'block text-xs font-medium tabular-nums',
-                      exp.mepet ? 'text-red-600' : 'text-[var(--color-teks-lembut)]',
-                    ]}
-                  >
-                    {exp.label}
                   </span>
                   {/* Diisi ulang skrip tiap jumlah berubah, supaya kartu dengan panel tertutup menunjukkan batch yang barusan dipilih. */}
                   <span class="block text-xs font-medium text-merah-700" data-ringkas-baris>
@@ -541,6 +522,18 @@ function ringkasBatch(p: Product): string {
                   </span>
                 </span>
               </button>
+
+              {satuBatch && (
+                <button
+                  type="button"
+                  class="hanya-js tombol-info"
+                  data-buka-batch
+                  aria-haspopup="dialog"
+                  aria-label={`Detail dan batch ${p.name}`}
+                >
+                  <span aria-hidden="true">i</span>
+                </button>
+              )}
 
               <div class="tanpa-js px-3 py-2.5">
                 <span class="block text-sm font-medium">{p.name}</span>
@@ -550,24 +543,13 @@ function ringkasBatch(p: Product): string {
                 <span class="block text-sm font-semibold tabular-nums" data-harga-tampil>
                   {rupiah(hargaDi(p, kanalIsi))}
                 </span>
-                <span
-                  class:list={[
-                    'block text-xs font-medium tabular-nums',
-                    exp.mepet ? 'text-red-600' : 'text-[var(--color-teks-lembut)]',
-                  ]}
-                >
-                  {exp.label}
-                </span>
               </div>
 
-              {/* Detail produk punya dua wajah dari satu isi (`data-detail-isi`): `<details>` tanpa JS, dan dengan JS tombol "Detail" menyalin isinya ke satu dialog bersama. */}
-              <details class="tanpa-js border-t border-[var(--color-garis-lembut)] px-3">
-                <summary class="flex min-h-11 cursor-pointer items-center text-xs font-medium text-[var(--color-teks-lembut)] hover:text-merah-700">
-                  Detail
-                </summary>
+              {/* Satu dialog per kartu: atas detail produk, bawah batch yang diambil; tanpa JS tampil inline di kartu, dan pengepak (tanpa hak jual) hanya melihat stok per batch. */}
+              <dialog class="panel-batch" data-panel-batch>
+                <p class="hanya-js mb-2 text-sm font-semibold">{p.name}</p>
 
-                <div data-detail-isi data-judul={p.name}>
-                <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                   <dt class="text-[var(--color-teks-lembut)]">Ukuran</dt>
                   <dd>{p.variant_size ?? '—'}</dd>
 
@@ -586,65 +568,21 @@ function ringkasBatch(p: Product): string {
                   </dd>
                 </dl>
 
-                <p class="mt-2 text-xs text-[var(--color-teks-lembut)]">Stok per batch</p>
-                {batches.length > 0 ? (
-                  <ul class="mt-1 space-y-0.5 text-xs">
-                    {batches.map((b) => {
-                      const sisa = sisaBatch(b);
-                      return (
-                        <li class="flex flex-wrap justify-between gap-x-2">
-                          <span>
-                            {b.batch_number ?? 'Tanpa nomor'}
-                            {b.storage_location && (
-                              <span class="text-[var(--color-teks-lembut)]">
-                                {' '}· {b.storage_location}
-                              </span>
-                            )}
-                          </span>
-                          <span
-                            class:list={[
-                              'tabular-nums',
-                              sisa.mepet ? 'font-medium text-red-600' : '',
-                            ]}
-                          >                     
-                            {sisa.label}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p class="mt-1 text-xs">Tidak ada batch bersisa.</p>
-                )}
-                </div>
-              </details>
+                <p class="mb-1 mt-3 border-t border-[var(--color-garis-lembut)] pt-2 text-xs font-medium">
+                  {bolehTransaksi ? 'Batch yang diambil' : 'Stok per batch'}
+                </p>
 
-              <button
-                type="button"
-                class="hanya-js flex min-h-11 w-full items-center border-t border-[var(--color-garis-lembut)] px-3 text-left text-xs font-medium text-[var(--color-teks-lembut)] hover:text-merah-700"
-                data-buka-detail
-                aria-haspopup="dialog"
-              >
-                Detail
-                <span class="sr-only"> {p.name}</span>
-              </button>
-
-              {/* Pemilih batch: kasir menyebut batch sendiri (FEFO di gudang bercampur tak bisa dipercaya); `product_id`/`nama`/`harga` ikut di tiap baris batch agar deret sejajar tak bergeser. */}
-              {bolehTransaksi && (
-                <dialog class="panel-batch" data-panel-batch>
-                  <p class="mb-1 text-xs font-medium">
-                    Batch yang diambil
-                    <span class="hanya-js"> — {p.name}</span>
+                {batches.length === 0 && (
+                  <p class="text-xs text-red-600">
+                    {bolehTransaksi
+                      ? 'Tidak ada batch bersisa. Barang ini tidak bisa dijual sampai kiriman barunya dicatat.'
+                      : 'Tidak ada batch bersisa.'}
                   </p>
+                )}
 
-                  {batches.length === 0 && (
-                    <p class="text-xs text-red-600">
-                      Tidak ada batch bersisa. Barang ini tidak bisa dijual sampai kiriman
-                      barunya dicatat.
-                    </p>
-                  )}
-
-                  {batches.map((b) => {
+                {/* Kasir menyebut batch sendiri (FEFO di gudang bercampur tak bisa dipercaya); `product_id`/`nama`/`harga` ikut di tiap baris batch agar deret sejajar tak bergeser. */}
+                {bolehTransaksi &&
+                  batches.map((b) => {
                     const sisa = sisaBatch(b);
                     return (
                       <div class="baris-batch" data-baris-batch>
@@ -703,17 +641,39 @@ function ringkasBatch(p: Product): string {
                     );
                   })}
 
-                  {/* Hanya berarti saat panel jadi pop up, karena kartu beserta ringkasannya tertutup di belakang backdrop. */}
-                  <div class="hanya-js mt-3 flex items-center gap-3">
+                {!bolehTransaksi && batches.length > 0 && (
+                  <ul class="space-y-0.5 text-xs">
+                    {batches.map((b) => {
+                      const sisa = sisaBatch(b);
+                      return (
+                        <li class="flex flex-wrap justify-between gap-x-2">
+                          <span>
+                            {b.batch_number ?? 'Tanpa nomor'}
+                            {b.storage_location && (
+                              <span class="text-[var(--color-teks-lembut)]"> · {b.storage_location}</span>
+                            )}
+                          </span>
+                          <span class:list={['tabular-nums', sisa.mepet ? 'font-medium text-red-600' : '']}>
+                            {sisa.label}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {/* Hanya berarti saat panel jadi pop up, karena kartu beserta ringkasannya tertutup di belakang backdrop. */}
+                <div class="hanya-js mt-3 flex items-center gap-3">
+                  {bolehTransaksi && (
                     <span class="text-sm text-[var(--color-teks-lembut)]">
                       Total <span class="font-semibold tabular-nums" data-total-batch>0</span>
                     </span>
-                    <button type="button" class="tombol-utama ml-auto" data-tutup-batch>
-                      Selesai
-                    </button>
-                  </div>
-                </dialog>
-              )}
+                  )}
+                  <button type="button" class="tombol-utama ml-auto" data-tutup-batch>
+                    {bolehTransaksi ? 'Selesai' : 'Tutup'}
+                  </button>
+                </div>
+              </dialog>
             </div>
           );
         })}
@@ -729,14 +689,6 @@ function ringkasBatch(p: Product): string {
         Tidak ada produk yang cocok dengan pencarian ini.
       </p>
 
-      {/* Satu dialog untuk semua kartu tanpa kolom isian; padding ada di div dalam supaya ketukan di latar menutupnya. */}
-      <dialog class="panel-detail" data-dialog-detail aria-labelledby="judul-detail">
-        <div class="max-h-[85vh] overflow-y-auto p-4">
-          <h2 class="text-sm font-semibold" id="judul-detail" data-detail-judul></h2>
-          <div class="mt-3" data-detail-badan></div>
-          <button type="button" class="tombol-utama mt-4 w-full" data-tutup-detail>Tutup</button>
-        </div>
-      </dialog>
     </section>
 
     {bolehTransaksi && (
@@ -961,7 +913,12 @@ function ringkasBatch(p: Product): string {
             </p>
           </div>
 
-          <div class="grid gap-3 sm:grid-cols-2">
+          {/* Ongkir dan diskon jarang dipakai di penjualan toko, jadi dilipat; tetap di DOM (ikut terkirim) dan terbuka sendiri bila sudah terisi. */}
+          <details open={Boolean(ongkirIsi || diskonIsi)}>
+            <summary class="flex min-h-11 cursor-pointer list-none items-center text-xs font-semibold text-merah-700">
+              ＋ Ongkos kirim dan diskon
+            </summary>
+            <div class="grid gap-3 pb-1 sm:grid-cols-2">
             {/* Tidak berlaku untuk Shopee; disembunyikan, bukan dihapus dari DOM, supaya skrip tetap bisa membaca atau mengosongkan nilainya. */}
             <div class:list={[kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-ongkir>
               <label class="label" for="shipping_cost">Ongkos kirim (Rp)</label>
@@ -992,8 +949,11 @@ function ringkasBatch(p: Product): string {
                 data-diskon
               />
             </div>
+            </div>
+          </details>
 
-            {/* Shopee tidak butuh ini karena uangnya sudah diterima penuh lewat ShopeePay, jadi disembunyikan seluruhnya. */}
+          {/* Shopee tidak butuh ini karena uangnya sudah diterima penuh lewat ShopeePay, jadi disembunyikan seluruhnya. */}
+          <div>
             <div class:list={[kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-dibayar>
               <label class="label" for="amount_paid">Uang diterima (tunai)</label>
               <input
@@ -1127,6 +1087,7 @@ function ringkasBatch(p: Product): string {
             </div>
           </div>
 
+          <div class="bilah-bayar">
           <button class="tombol-utama w-full py-4 text-base" type="submit" name="aksi" value="bayar" data-bayar>
             {barisTerpakai > 0 ? `Selesaikan · ${rupiah(totalTagihan)}` : 'Keranjang masih kosong'}
           </button>
@@ -1144,6 +1105,7 @@ function ringkasBatch(p: Product): string {
             <button class="tombol-halus tanpa-js ml-auto" type="submit" name="aksi" value="hitung">
               Perbarui keranjang
             </button>
+          </div>
           </div>
         </div>
 
@@ -1689,35 +1651,39 @@ function ringkasBatch(p: Product): string {
       return barisBatch ? barisBatch.querySelector('[data-qty]') : null;
     }
 
+    /** Barang dengan satu batch bersisa langsung bertambah 1 pack; yang lain, atau yang jatahnya sudah habis, membuka dialog agar kasir melihat sisa batchnya. */
+    function ketukKartu(row) {
+      var kolom = row.hasAttribute('data-satu-batch')
+        ? kolomQty(row).filter(function (k) {
+            return parseInt(k.dataset.sisa || '0', 10) > 0;
+          })[0]
+        : null;
+      if (kolom && nilai(kolom) < parseInt(kolom.dataset.sisa, 10)) {
+        ubah(kolom, 1);
+        return;
+      }
+      var panel = row.querySelector('[data-panel-batch]');
+      if (panel) panel.showModal();
+    }
+
     function kolomKeranjang(el) {
       var row = el.closest('[data-baris-keranjang]');
       return row ? document.getElementById(row.dataset.kolom) : null;
     }
 
-    var dialogDetail = borang.querySelector('[data-dialog-detail]');
-
     borang.addEventListener('click', function (e) {
-      var bukaDetail = e.target.closest('[data-buka-detail]');
-      if (bukaDetail && dialogDetail) {
-        var isi = bukaDetail.closest('[data-produk]').querySelector('[data-detail-isi]');
-        dialogDetail.querySelector('[data-detail-judul]').textContent = isi.dataset.judul;
-        dialogDetail.querySelector('[data-detail-badan]').replaceChildren(isi.cloneNode(true));
-        dialogDetail.showModal();
-        return;
-      }
-
-      // Ketukan di latar (di luar kotak isi) menutup dialog detail.
-      if (e.target === dialogDetail || e.target.closest('[data-tutup-detail]')) {
-        dialogDetail.close();
-        return;
-      }
-
       // `[data-cetak-struk]` ditangani skrip module terpisah di bawah karena butuh `import` untuk merender nota jadi gambar.
 
       var buka = e.target.closest('[data-buka-batch]');
       if (buka) {
         var panel = buka.closest('[data-produk]').querySelector('[data-panel-batch]');
         if (panel) panel.showModal();
+        return;
+      }
+
+      var ketuk = e.target.closest('[data-ketuk-kartu]');
+      if (ketuk) {
+        ketukKartu(ketuk.closest('[data-produk]'));
         return;
       }
 
@@ -1792,15 +1758,30 @@ function ringkasBatch(p: Product): string {
       }
 
       if (e.target === kotakCari) {
+        // Barang yang hanya tampil karena sudah di keranjang (`data-cocok="tidak"`) bukan hasil pencarian, jadi dilewati.
         var teratas = baris.filter(function (row) {
-          return !row.hidden;
+          return !row.hidden && row.dataset.cocok !== 'tidak';
         })[0];
         if (!teratas) return;
         e.preventDefault();
-        var panelTeratas = teratas.querySelector('[data-panel-batch]');
-        if (panelTeratas) panelTeratas.showModal();
+        ketukKartu(teratas);
+        // Teks pencarian diblok supaya pindai/ketik SKU berikutnya langsung menimpanya.
+        if (!teratas.querySelector('[data-panel-batch]').open) kotakCari.select();
       }
     });
+
+    // "/" melompat ke pencarian dari mana saja (kecuali sedang mengetik), dan layar dengan mouse langsung siap mengetik.
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || !kotakCari) return;
+      var tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+      e.preventDefault();
+      kotakCari.focus();
+      kotakCari.select();
+    });
+    if (kotakCari && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+      kotakCari.focus({ preventScroll: true });
+    }
 
     borang.addEventListener('input', function (e) {
       if (
@@ -1872,6 +1853,7 @@ function ringkasBatch(p: Product): string {
         // Barang yang sudah masuk keranjang tidak pernah disembunyikan, kalau hilang kasir tak bisa membatalkannya.
         var diKeranjang = jumlahBaris(row) > 0;
         var tampil = diKeranjang || (cocokKata && cocokKategori);
+        row.dataset.cocok = cocokKata && cocokKategori ? 'ya' : 'tidak';
         row.hidden = !tampil;
         if (tampil) terlihat += 1;
       });

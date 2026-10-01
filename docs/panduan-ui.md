@@ -228,8 +228,23 @@ angka itulah yang sedang ditunggu pembeli di depan meja.
 | `.kartu-produk` / `.kartu-produk-terpilih` | Satu barang yang bisa dijual; seluruh blok informasinya target ketuk "pilih batch" |
 | `.foto-produk` + `.foto-sku` | Jendela foto kartu. Tanpa `image_url` yang tampil garis miring samar, jadi tinggi kartu tetap sama |
 | `.lencana-jumlah` | Berapa pack barang itu yang sudah masuk keranjang, ditempel di fotonya |
-| `.panel-batch` + `.baris-batch` | Pemilih batch per barang; satu kolom jumlah untuk tiap batch |
-| `.panel-kasir` + `.kepala-panel` | Kolom keranjang/pembayaran/struk yang menempel di samping katalog |
+| `.tombol-info` | Satu-satunya jalan ke dialog detail/batch pada barang yang sekali ketuk langsung masuk keranjang; area ketuk 44 px, lingkaran tampak 24 px |
+| `.panel-batch` + `.baris-batch` | Dialog per barang: atas detail produk, bawah pemilih batch dengan satu kolom jumlah per batch |
+| `.panel-kasir` + `.kepala-panel` | Kolom keranjang/pembayaran/struk yang menempel di samping katalog dan menggulung sendiri bila lebih tinggi dari layar |
+| `.bilah-bayar` | Tombol "Selesaikan" yang menempel di dasar `.panel-kasir`, supaya terjangkau walau isi panel menggulung |
+
+**Ketuk kartu.** Barang yang hanya punya satu batch bersisa (`data-satu-batch`)
+langsung bertambah 1 pack saat kartunya diketuk; barang dengan dua batch atau
+lebih, atau yang jatahnya sudah habis, membuka dialog. Enter di kolom cari
+memakai aturan yang sama pada hasil pencarian pertama (barang yang hanya
+tampil karena sudah di keranjang dilewati) dan memblok teksnya, supaya
+pindai/ketik SKU berikutnya menimpanya. Kolom cari menempel di atas daftar,
+mendapat fokus di perangkat bermouse, dan `/` melompat ke sana.
+
+**Jangan kembalikan `overflow-x-hidden` ke `<html>`/`<body>`.** Itu menjadikan
+body scroll container dan mematikan seluruh `position: sticky` (panel
+keranjang, bilah bawah, bilah tab); `overflow-x-clip` menutup luapan tanpa efek
+itu.
 | `.baris-keranjang` | Satu (produk, batch) di panel keranjang — bentuk yang sama dengan satu baris `POST /transactions` |
 | `.tombol-bulat` | Tombol −/+, 36px — target sentuh terkecil yang masih bisa dikenai jempol tanpa melihat |
 | `.kotak-total` + `-angka` | Total yang ditagih, tepat di bawah kolom ongkir dan uang diterima |
