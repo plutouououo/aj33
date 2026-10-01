@@ -1,6 +1,7 @@
 ---
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type PaginatedProducts, type Product } from '../../lib/api';
+import { fotoKecil } from '../../lib/blob';
 import { rupiah, tanggal, sisaHari } from '../../lib/format';
 
 const user = Astro.locals.user!;
@@ -30,25 +31,14 @@ type Urut = (typeof URUT)[number]['nilai'];
 
 let galat: string | null = null;
 
-/**
- * Harga dan stok TIDAK bisa disunting di sini -- lihat "Kelola" pada tiap
- * baris, yang membuka `/produk/{id}` dan formulir simpan/koreksinya sendiri.
- * Daftar ini murni menampilkan, supaya angka yang terlihat sambil memindai
- * banyak produk tidak bisa diam-diam berubah lewat form yang salah pencet.
- *
- * Aksi yang tersedia dari sini cuma yang menyentuh STATUS baris, bukan
- * isinya: toggle aktif/nonaktif satu baris (`toggle`), dan tiga aksi massal
- * (aktifkan, nonaktifkan, hapus) atas produk yang dicentang lewat `pilih_id`
- * (`aksi`).
- */
+/** Harga dan stok tak bisa disunting di daftar (lihat "Kelola" di `/produk/{id}`); aksi dari sini hanya status baris: `toggle` aktif/nonaktif dan tiga aksi massal atas `pilih_id`. */
 if (Astro.request.method === 'POST') {
   if (!pemilik) {
     galat = 'Kamu tidak punya akses ke fitur ini.';
   } else {
     const form = await Astro.request.formData();
     const aksi = String(form.get('aksi') ?? '');
-    // Dikodekan sebagai "id:target" pada satu tombol per baris -- lihat
-    // komentar di baris tombolnya sendiri soal alasannya.
+    // Dikodekan "id:target" pada satu tombol per baris; alasannya di komentar tombolnya.
     const toggle = String(form.get('toggle') ?? '');
 
     if (toggle) {
@@ -66,10 +56,7 @@ if (Astro.request.method === 'POST') {
       if (dipilih.length === 0) {
         galat = 'Pilih dulu produk yang mau diubah.';
       } else {
-        // Satu per satu, bukan Promise.all: produk yang ditolak backend
-        // (mis. masih punya varian, atau sudah pernah terjual -- lihat
-        // `penahan_hapus` di backend) tidak boleh menghentikan baris lain
-        // yang sebetulnya bisa berhasil.
+        // Satu per satu, bukan Promise.all, agar produk yang ditolak backend (punya varian, sudah terjual; `penahan_hapus`) tak menghentikan baris lain yang bisa berhasil.
         let berhasil = 0;
         const pesanGalat: string[] = [];
         for (const idBaris of dipilih) {
@@ -90,12 +77,7 @@ if (Astro.request.method === 'POST') {
         }
 
         if (pesanGalat.length > 0) {
-          // Semua pesan ditampilkan, bukan cuma yang pertama -- pada
-          // "Hapus Terpilih" khususnya, produk yang gagal (mis. sudah
-          // pernah terjual) TETAP ada di database walau baris lain
-          // berhasil. Kalau cuma pesan pertama yang tampil, sisanya
-          // terlihat seperti berhasil padahal tidak -- dan baru ketahuan
-          // saat baris itu "muncul lagi" pada kunjungan berikutnya.
+          // Semua pesan galat ditampilkan, bukan hanya yang pertama, karena pada hapus massal produk yang gagal tetap ada di DB dan akan terlihat seperti berhasil bila pesannya hilang.
           galat =
             berhasil > 0
               ? `${berhasil} produk berhasil. ${pesanGalat.length} gagal: ${pesanGalat.join(' | ')}`
@@ -131,12 +113,7 @@ const PESAN: Record<string, string> = {
 const kodePesan = params.get('pesan') ?? '';
 const sukses = Object.hasOwn(PESAN, kodePesan) ? PESAN[kodePesan] : null;
 
-/**
- * Seluruh saringan yang sedang aktif sebagai query string. Satu sumber untuk
- * tautan tab, tautan halaman, dan titipan `?dari=` ke halaman rincian --
- * lihat `SARINGAN_DAFTAR` di `lib/produk.ts`, yang harus disebut ulang di
- * sini setiap kali daftar kunci ini berubah.
- */
+/** Seluruh saringan aktif sebagai query string, satu sumber untuk tautan tab, halaman, dan `?dari=`; sebut ulang di sini bila `SARINGAN_DAFTAR` di `lib/produk.ts` berubah. */
 function saringan(ke: number, override: Partial<{ tab: Tab }> = {}): string {
   const p = new URLSearchParams();
   if (cari) p.set('cari', cari);
@@ -158,23 +135,7 @@ function tautanTab(t: Tab): string {
   return q ? `/produk?${q}` : '/produk';
 }
 
-/**
- * Satu permintaan untuk induk MAUPUN varian sekaligus (`scope` dikosongkan
- * -- lihat komentar "Kosong berarti semua baris" di `catalog/repo.rs`),
- * dikelompokkan di sini jadi varian-per-induk. Alternatifnya, satu permintaan
- * tambahan per induk yang punya varian, gampang jadi puluhan permintaan pada
- * daftar yang panjang.
- *
- * Konsekuensinya, batas 200 baris backend sekarang dibagi antara induk DAN
- * varian, bukan induk saja -- lihat catatan "terpotong" di bawah.
- *
- * `cari` DIKIRIM ke backend (`search`), bukan disaring belakangan dari 200
- * baris yang sudah terpotong. Dulu pencarian cuma menyaring di dalam 200
- * baris yang kebetulan terambil (urut nama) -- begitu katalog tumbuh lebih
- * dari 200 baris, kata kunci yang cocok di luar irisan itu diam-diam
- * menghasilkan nol baris, tanpa galat apa pun. Backend yang mencocokkan
- * name/seo_name/sku memastikan pencarian tetap menjangkau seluruh katalog.
- */
+/** Satu permintaan untuk induk dan varian (dikelompokkan di sini), sehingga batas 200 baris dibagi keduanya; `cari` dikirim ke backend (`search`) agar menjangkau seluruh katalog. */
 const kueriProduk = new URLSearchParams({ include_inactive: 'true', limit: '200' });
 if (kategoriDipilih) kueriProduk.set('category_id', kategoriDipilih);
 if (cari) kueriProduk.set('search', cari);
@@ -218,15 +179,10 @@ function kenaTab(p: Product, varian: Product[], t: Tab): boolean {
   return true;
 }
 
-// Pencarian sudah diterapkan backend (lihat `kueriProduk` di atas), jadi
-// tidak disaring ulang di sini. Baris yang muncul di daftar ini selalu baris
-// INDUK -- varian yang cocok tapi induknya tidak tetap tidak akan muncul,
-// karena filter `!p.parent_id` di bawah membuang barisnya begitu juga.
+// Pencarian sudah diterapkan backend; baris di daftar selalu induk (varian yang cocok tapi induknya tidak ikut terbuang oleh filter `!p.parent_id`).
 let induk = semuaProduk.data.filter((p) => !p.parent_id);
 
-// Hitungan tab dari induk yang SUDAH disaring pencarian & kategori, TAPI
-// SEBELUM disaring tab itu sendiri -- supaya tab yang sedang tidak aktif
-// tetap menunjukkan berapa baris yang akan muncul kalau ditekan.
+// Hitungan tab dari induk yang sudah disaring pencarian dan kategori tapi sebelum disaring tab itu sendiri, agar tab nonaktif menunjukkan jumlah bila ditekan.
 const hitungTab = (t: Tab) => induk.filter((p) => kenaTab(p, varianIndukPeta.get(p.id) ?? [], t)).length;
 
 let terlihat = induk.filter((p) => kenaTab(p, varianIndukPeta.get(p.id) ?? [], tab));
@@ -273,10 +229,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
     )}
   </div>
 
-  {/* Tab status, sekaligus saringan: menekannya menavigasi ke daftar yang
-      sama dengan `tab` yang berbeda -- bukan filter sisi klien, supaya tetap
-      berfungsi tanpa JavaScript dan hitungannya selalu sinkron dengan yang
-      sungguhan dirender. */}
+  {/* Tab status sekaligus saringan lewat navigasi (bukan filter sisi klien) agar berfungsi tanpa JavaScript dan hitungan selalu sinkron. */}
   <div class="mb-4 flex gap-2 overflow-x-auto pb-1">
     {TAB.map((t) => (
       <a href={tautanTab(t.nilai)} class={t.nilai === tab ? 'pil-aktif' : 'pil-diam'}>
@@ -342,7 +295,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
       </select>
     </div>
 
-    <label class="flex items-center gap-2 self-end pb-2.5 text-sm text-stone-700">
+    <label class="flex min-h-11 items-center gap-2 self-end text-sm text-stone-700">
       <input
         type="checkbox"
         name="hanya_menipis"
@@ -365,10 +318,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
     </p>
   )}
 
-  {/* Satu form membungkus tabel dan bilah aksi massal di bawahnya: checkbox
-      pilih tiap baris (`pilih_id`) ikut terkirim apa pun tombol yang ditekan
-      -- termasuk tombol Aktifkan/Nonaktifkan per baris, yang menumpang di
-      form yang sama lewat kode "id:target" (lihat komentar di tombolnya). */}
+  {/* Satu form membungkus tabel dan bilah aksi massal; checkbox `pilih_id` ikut terkirim apa pun tombol yang ditekan, termasuk toggle per baris lewat kode "id:target". */}
   <form method="POST" id="borang-produk">
   <div class="kartu-rapat overflow-x-auto">
     <table class="tabel">
@@ -376,12 +326,14 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
         <tr>
           {pemilik && (
             <th class="w-8">
-              <input
-                type="checkbox"
-                class="hanya-js h-4 w-4 accent-white"
-                data-pilih-semua
-                aria-label="Pilih semua produk pada halaman ini"
-              />
+              <label class="kotak-sentuh hanya-js">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 accent-white"
+                  data-pilih-semua
+                  aria-label="Pilih semua produk pada halaman ini"
+                />
+              </label>
             </th>
           )}
           <th>Produk</th>
@@ -410,21 +362,23 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
               <tr>
                 {pemilik && (
                   <td>
-                    <input
-                      type="checkbox"
-                      name="pilih_id"
-                      value={p.id}
-                      class="h-4 w-4 accent-merah-600"
-                      data-pilih-baris
-                      aria-label={`Pilih ${p.name}`}
-                    />
+                    <label class="kotak-sentuh">
+                      <input
+                        type="checkbox"
+                        name="pilih_id"
+                        value={p.id}
+                        class="h-4 w-4 accent-merah-600"
+                        data-pilih-baris
+                        aria-label={`Pilih ${p.name}`}
+                      />
+                    </label>
                   </td>
                 )}
                 <td>
                   <div class="flex items-start gap-2.5">
                     <span class="foto-produk h-10 w-10 shrink-0 rounded border">
                       {p.image_url && (
-                        <img src={p.image_url} alt="" loading="lazy" class="h-full w-full rounded object-cover" />
+                        <img src={fotoKecil(p.image_url)} alt="" loading="lazy" decoding="async" class="h-full w-full rounded object-cover" />
                       )}
                     </span>
                     <div class="min-w-0">
@@ -491,18 +445,10 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
                 {pemilik && (
                   <td class="whitespace-nowrap text-right">
-                    {/* Atas-bawah, bukan berjajar: dua target sentuh sempit
-                        bersisian mengundang salah ketuk, apalagi "Nonaktifkan"
-                        yang akibatnya langsung berlaku tanpa konfirmasi. */}
+                    {/* Atas-bawah, bukan berjajar, karena dua target sentuh sempit bersisian mengundang salah ketuk (terutama "Nonaktifkan" yang langsung berlaku). */}
                     <div class="flex flex-col items-end gap-1">
                       <a class="aksi-baris" href={`/produk/${p.id}${bawaSaringan}`}>Kelola</a>
-                      {/* Kode "id:target" pada SATU tombol, bukan hidden field
-                          terpisah: tombol ini hidup di dalam form besar yang
-                          juga menampung checkbox `pilih_id` tiap baris lain,
-                          jadi hidden field bernama `id` akan tertukar antar
-                          baris. Nilai tombol yang diklik yang ikut terkirim
-                          -- tombol yang tidak diklik tidak pernah mengirim
-                          apa-apa. */}
+                      {/* Kode "id:target" pada satu tombol karena hidden field `id` akan tertukar antar baris di form besar yang menampung checkbox semua baris; hanya tombol yang diklik yang terkirim. */}
                       <button class="aksi-baris" type="submit" name="toggle" value={`${p.id}:${p.is_active ? 0 : 1}`}>
                         {p.is_active ? 'Nonaktifkan' : 'Aktifkan'}
                       </button>
@@ -511,12 +457,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
                 )}
               </tr>
 
-              {/* Baris varian selalu terbuka, tidak ada tombol lipat: pada
-                  toko sekecil ini jumlah variannya sedikit, dan lipatan
-                  yang bergantung JavaScript untuk tabel adalah kerumitan
-                  yang tidak pantas ditukar dengan sekadar sedikit baris
-                  tambahan. Harganya sendiri tidak bisa disunting di sini --
-                  tiap varian punya halaman kelolanya sendiri. */}
+              {/* Baris varian selalu terbuka tanpa tombol lipat karena variannya sedikit dan lipatan berbasis JS tak sepadan; harga disunting di halaman kelola masing-masing. */}
               {varian.map((v) => {
                 const vAtribut = [v.variant_grade, v.variant_size].filter(Boolean).join(' · ');
                 const vMenipis = v.stock_qty > 0 && v.stock_qty <= v.low_stock_threshold;
@@ -597,10 +538,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
     )}
   </div>
 
-  {/* Bilah aksi massal: tanpa JavaScript selalu terlihat (satu-satunya cara
-      menekan aksi massal), server yang menolak kalau belum ada yang
-      dicentang. Dengan JavaScript, hitungan terpilih tampil hidup dan
-      "Hapus Terpilih" minta konfirmasi -- lihat skrip di bawah. */}
+  {/* Bilah aksi massal tanpa JavaScript selalu terlihat (server menolak bila tak ada yang dicentang); dengan JS hitungan terpilih hidup dan "Hapus Terpilih" minta konfirmasi. */}
   {pemilik && (
     <div class="bilah-bawah">
       <span class="hanya-js text-sm font-medium" data-ringkas-bilah>Tidak ada produk dipilih</span>
@@ -616,14 +554,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
   </form>
 </AppShell>
 
-{/*
-  Progressive enhancement murni: skrip ini cuma menghitung ulang teks dari
-  checkbox yang sudah ada di HTML dan meminta konfirmasi sebelum menghapus,
-  persis pola yang sama dengan halaman kasir. Tidak ada baris yang dirakit,
-  tidak ada request yang dikirim dari sini -- pengiriman tetap lewat submit
-  form biasa, dan tanpa skrip ini pun aksi massal tetap bisa dipakai (cuma
-  tanpa hitungan hidup dan tanpa konfirmasi hapus).
-*/}
+{/* Progressive enhancement murni seperti halaman kasir: skrip hanya menghitung teks dari checkbox dan meminta konfirmasi hapus, pengiriman tetap lewat submit biasa. */}
 <script is:inline>
   (function () {
     var borang = document.getElementById('borang-produk');

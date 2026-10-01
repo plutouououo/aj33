@@ -11,20 +11,10 @@ import {
   type ProductBatch,
   type Transaction,
 } from '../lib/api';
+import { fotoKecil } from '../lib/blob';
 import { rupiah, sisaHari, tanggal, waktu } from '../lib/format';
 
-/**
- * Kanal tempat penjualan dicatat, dan karena itu daftar harga yang berlaku.
- *
- * Shopee dan Tokopedia belum tersambung ke sistem ini, jadi pesanan dari sana
- * dicatat manual lewat layar ini. Tanpa pilihan kanal, semuanya tercatat
- * seharga toko -- dan selisih harga marketplace muncul di laporan sebagai laba
- * yang tidak pernah ada.
- *
- * Yang benar-benar menetapkan harga tetap backend: ia membaca harga kanal dari
- * baris produk yang dikunci saat checkout. Daftar ini hanya menentukan angka
- * yang diperlihatkan ke kasir sebelum itu.
- */
+/** Kanal penjualan menentukan daftar harga; tanpa pilihan kanal, selisih harga marketplace tercatat sebagai laba palsu (yang menagih tetap backend). */
 const KANAL = [
   { nilai: 'toko', label: 'Toko', kolom: null },
   { nilai: 'shopee', label: 'Shopee', kolom: 'price_shopee' },
@@ -33,71 +23,19 @@ const KANAL = [
 
 type Kanal = (typeof KANAL)[number]['nilai'];
 
-/**
- * Biaya platform Shopee atas SATU transaksi, empat komponen yang jumlahnya
- * sama persis dengan `platform_commission_fee + platform_service_fee +
- * platform_withholding_tax + platform_order_processing_fee` yang backend
- * hitung dan simpan saat checkout (`backend/src/pos/service.rs`, migrasi
- * 0017/0018). Nama field SENGAJA mengikuti field asli
- * `v2.payment.get_escrow_detail` milik Shopee, bukan istilah rakitan
- * sendiri -- lihat `backend/src/marketplace/shopee/client.rs` untuk
- * pemanggilan API-nya (belum tersambung):
- *
- * - `commission_fee`: komisi dasar, persentase dari omzet transaksi ini
- *   (subtotal - diskon). BISA DIEDIT kasir -- Shopee kadang menjalankan
- *   promo yang mengubah persennya. `SHOPEE_COMMISSION_PERSEN_DEFAULT` cuma
- *   nilai awal yang terisi di kolomnya.
- * - `service_fee`: biaya program tambahan yang OPSIONAL (mis. Gratis Ongkir
- *   Xtra, Star+). BISA DIEDIT juga, defaultnya NOL -- kita tidak tahu toko
- *   ini ikut program berbayar yang mana.
- * - `withholding_tax`: PPh final UMKM, 0,5% dari omzet yang sama. Tetap,
- *   tidak bisa diedit.
- * - `seller_order_processing_fee`: Rp1.250 tetap, SEKALI per pesanan
- *   Shopee.
- *
- * Ongkir TIDAK ikut basis maupun total Shopee sama sekali -- logistiknya di
- * luar sistem ini, kolom "Ongkos kirim" disembunyikan untuk kanal ini.
- *
- * Dihitung ulang di sini (bukan dibaca dari backend) supaya kasir melihat
- * potongannya SEBELUM transaksi disimpan. Berbeda dari sebelumnya: kanal
- * Shopee di kasir ini cuma untuk MENCATAT pesanan yang uangnya sudah
- * diterima lewat ShopeePay, jadi keempatnya benar-benar MENGURANGI angka
- * yang dicatat -- bukan cuma baris informasi di sebelah Total.
- */
+/** Biaya Shopee satu transaksi, nama field mengikuti `get_escrow_detail` dan sama dengan hitungan `pos/service.rs`, dihitung ulang di sini agar kasir melihatnya sebelum simpan. */
 const SHOPEE_COMMISSION_PERSEN_DEFAULT = 17.25;
 const SHOPEE_SERVICE_PERSEN_DEFAULT = 0;
 const SHOPEE_WITHHOLDING_TAX_PERSEN = 0.5;
 const SHOPEE_ORDER_PROCESSING_FEE = 1250;
 
-/**
- * `basis` (SELALU rupiah bulat -- harga barang di sistem ini tidak pernah
- * pecahan) dikali `persen`, dibulatkan ke rupiah terdekat.
- *
- * Sengaja BUKAN `Math.round(basis * (persen / 100))`: pembagian itu lewat
- * floating point, dan `0,1725` (17,25%) tidak punya representasi biner yang
- * pas -- `45000 * 0.1725` bisa jadi `7762.499999999999` alih-alih
- * `7762.5`, lalu dibulatkan TURUN persis di titik yang seharusnya naik.
- * Sebaliknya, `basis * basisPoin` mengalikan DUA BILANGAN BULAT (basisPoin =
- * persen dalam satuan 1/10.000, presisi yang sama dengan kolom
- * `platform_commission_fee_percent`/`platform_service_fee_percent` di
- * migrasi 0018), jadi hasilnya eksak sampai langkah pembulatan terakhir --
- * sama persis dengan `rupiah_bulat` di `backend/src/pos/service.rs`, yang
- * juga membulatkan ,50 ke ATAS. Kalau dua tempat ini pernah berbeda arah
- * pembulatannya, kasir melihat satu angka di layar dan struknya mencatat
- * angka lain.
- */
+/** Aritmetika bilangan bulat (basis × basis poin) agar pembulatan ,50 ke atas sama persis dengan `rupiah_bulat` di `pos/service.rs`, bukan `Math.round` float. */
 function biayaPersenRupiah(basis: number, persen: number): number {
   const basisPoin = Math.round(persen * 100);
   return Math.round((basis * basisPoin) / 10000);
 }
 
-/**
- * Harga sebuah produk di satu kanal.
- *
- * Harga kanal yang belum diatur (`null`) JATUH KE HARGA DASAR, bukan ke nol --
- * sama persis dengan aturan di backend (`SalesChannel::harga`). Kalau kedua
- * tempat ini berbeda, angka di layar kasir tidak sama dengan angka di struk.
- */
+/** Harga kanal yang `null` jatuh ke harga dasar, sama dengan `SalesChannel::harga` di backend; kalau beda, layar tidak cocok dengan struk. */
 function hargaDi(p: Product, kanal: Kanal): number {
   if (kanal === 'shopee') return p.price_shopee ?? p.price;
   if (kanal === 'tiktok') return p.price_tiktok ?? p.price;
@@ -107,38 +45,16 @@ function hargaDi(p: Product, kanal: Kanal): number {
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
 
-/**
- * Pengepak membuka halaman ini untuk MEMBACA detail produk -- ukuran, harga,
- * rak, dan sisa tiap batch -- bukan untuk menjual. Seluruh kendali transaksi
- * tidak dirender untuknya.
- *
- * Yang benar-benar menahan penjualan bukan flag ini, melainkan backend:
- * `POST /transactions` menolak peran pengepak. Flag ini hanya menjaga agar
- * layarnya tidak menawarkan sesuatu yang pasti ditolak.
- */
+/** Pengepak hanya membaca detail produk; yang menolak penjualan adalah backend, flag ini cuma menyembunyikan kendali yang pasti ditolak. */
 const bolehTransaksi = user.role !== 'pengepak';
 
-/**
- * Satu baris keranjang: SATU BATCH dari satu produk.
- *
- * Membeli 5 butir yang fisiknya diambil dari dua kiriman berbeda menghasilkan
- * dua baris, dan itu memang yang benar -- backend menggabungkannya per
- * (produk, batch), lalu mencatat tiap batch yang keluar di ledger stok.
- *
- * `nama` dan `harga` ikut dibawa HANYA untuk ditampilkan tanpa query kedua.
- * Server tidak pernah mempercayainya: harga ditetapkan ulang dari baris produk
- * yang dikunci saat checkout, jadi mengubah nilai ini lewat DevTools paling
- * jauh membuat ringkasan di layar berbeda dari struknya.
- */
+/** Satu baris keranjang = satu batch satu produk; `nama` dan `harga` hanya untuk tampilan, harga ditetapkan ulang server saat checkout. */
 interface BarisKeranjang {
   product_id: string;
   qty: number;
   nama: string;
   harga: number;
-  /**
-   * Batch yang dipilih kasir. Wajib terisi: sejak kasir memilih sendiri,
-   * tidak ada lagi baris yang diserahkan ke FEFO.
-   */
+  /** Batch dipilih kasir sendiri dan wajib terisi, tidak ada lagi baris yang diserahkan ke FEFO. */
   batch_id: string;
 }
 
@@ -146,18 +62,10 @@ let galat: string | null = null;
 let sukses: string | null = null;
 let struk: Transaction | null = null;
 let keranjang: BarisKeranjang[] = [];
-/**
- * Pelanggan yang dipilih SAAT transaksi ini berhasil, untuk nota cetak.
- *
- * `pelangganDipilih` sendiri tidak bisa dipakai untuk itu: ia dikosongkan
- * begitu transaksi selesai (lihat di bawah), dan nota dirender setelahnya.
- * Baru diubah jadi nama sesudah daftar pelanggan selesai diambil, karena
- * daftar itu sendiri belum ada di titik transaksi berhasil.
- */
+/** Pelanggan saat transaksi berhasil untuk nota cetak; `pelangganDipilih` sudah dikosongkan saat nota dirender, dan namanya baru dicari setelah daftar pelanggan diambil. */
 let strukPelangganId: string | null = null;
 
-// Nilai isian pembayaran, dibaca ulang tiap POST supaya kasir tidak perlu
-// mengetik ulang saat pembayaran ditolak.
+// Isian pembayaran dibaca ulang tiap POST supaya kasir tidak mengetik ulang saat pembayaran ditolak.
 let pelangganDipilih = '';
 let metode = 'cash';
 let kanalIsi: Kanal = 'toko';
@@ -166,20 +74,11 @@ let diskonIsi = '';
 let dibayarIsi = '';
 let cariIsi = '';
 let kategoriIsi = '';
-// Persen commission_fee/service_fee Shopee. Beda dari `ongkirIsi`/
-// `diskonIsi`: keduanya tidak direset ke kosong setiap transaksi selesai --
-// pesanan Shopee berikutnya biasanya memakai persen yang sama, sama seperti
-// kanal yang juga sengaja tidak ikut direset. Default terisi begitu kanal
-// diganti ke Shopee.
+// Persen komisi/layanan Shopee tidak direset tiap transaksi selesai, karena pesanan Shopee berikutnya biasanya memakai persen yang sama.
 let commissionPersenIsi = String(SHOPEE_COMMISSION_PERSEN_DEFAULT);
 let servicePersenIsi = String(SHOPEE_SERVICE_PERSEN_DEFAULT);
 
-/**
- * Keranjang dibaca dari pasangan field berulang: lima deret sejajar yang
- * panjangnya harus sama persis. Tiap baris batch -- di katalog maupun di
- * panel keranjang -- merender kelimanya sekaligus, jadi deretnya tidak bisa
- * bergeser satu sama lain.
- */
+/** Keranjang dibaca dari lima deret field sejajar yang harus sama panjang; tiap baris batch merender kelimanya sekaligus sehingga tidak bisa bergeser. */
 function bacaKeranjang(form: FormData): BarisKeranjang[] {
   const ids = form.getAll('product_id');
   const qty = form.getAll('qty');
@@ -196,33 +95,17 @@ function bacaKeranjang(form: FormData): BarisKeranjang[] {
         harga: Number(harga[i] ?? 0),
         batch_id: String(batch[i] ?? ''),
       }))
-      // Baris tanpa batch dibuang, bukan dikirim sebagai "terserah FEFO".
-      // Halaman ini selalu merender `batch_id` bersama `qty`-nya, jadi baris
-      // begitu hanya bisa datang dari request rakitan -- dan menerimanya
-      // berarti mengeluarkan barang dari kiriman yang tidak pernah dipilih
-      // siapa pun.
+      // Baris tanpa batch dibuang karena hanya bisa datang dari request rakitan dan akan mengeluarkan barang dari kiriman yang tidak dipilih siapa pun.
       .filter((b) => Number.isFinite(b.qty) && b.qty > 0 && b.batch_id !== '')
   );
 }
 
-/**
- * Kunci idempotensi. Dibuat sekali saat halaman dibuka dan DIBACA ULANG dari
- * form di tiap POST -- tidak pernah dibuat ulang selama transaksi yang sama
- * masih berjalan. Kalau dibuat ulang tiap render, penjagaan kirim-dua-kali
- * hilang.
- *
- * Satu-satunya tempat kunci diganti adalah setelah penjualan BERHASIL: layar
- * ini tidak berpindah ke mana-mana sesudahnya, dan kasir berikutnya dilayani
- * di form yang sama, jadi kuncinya harus sudah segar sebelum barang pertama
- * diketuk. Kalau pembayaran gagal, kunci lama justru dipertahankan.
- */
+/** Kunci idempotensi dibuat sekali dan dibaca ulang dari form tiap POST; hanya diganti setelah penjualan berhasil, dan dipertahankan kalau pembayaran gagal. */
 let kunci = '';
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  // Di mode lihat-saja satu-satunya POST yang mungkin adalah tombol
-  // "Terapkan" pada saringan. Apa pun yang dikirim diperlakukan sebagai itu,
-  // jadi tidak ada aksi transaksi yang bisa masuk lewat request rakitan.
+  // Mode lihat-saja hanya punya POST "Terapkan" saringan, jadi aksi transaksi tidak bisa masuk lewat request rakitan.
   const aksi = bolehTransaksi ? String(form.get('aksi') ?? '') : 'saring';
 
   kunci = String(form.get('idempotency_key') ?? '');
@@ -231,16 +114,10 @@ if (Astro.request.method === 'POST') {
   kategoriIsi = String(form.get('kategori') ?? '');
   pelangganDipilih = String(form.get('customer_id') ?? '');
   metode = String(form.get('payment_method') ?? 'cash');
-  // Kanal asing diperlakukan sebagai toko, bukan diteruskan apa adanya:
-  // nilainya menentukan harga, dan backend menolaknya dengan galat yang tidak
-  // berarti apa-apa bagi kasir.
+  // Kanal asing diperlakukan sebagai toko karena nilainya menentukan harga dan backend menolaknya dengan galat yang tidak berarti bagi kasir.
   const kanalDikirim = String(form.get('sales_channel') ?? '');
   kanalIsi = (KANAL.find((k) => k.nilai === kanalDikirim)?.nilai ?? 'toko') as Kanal;
-  // Shopee dicatat sebagai uang yang sudah pasti diterima lewat ShopeePay --
-  // bukan pilihan bebas kasir. Dipaksa di sini juga (bukan cuma di UI)
-  // supaya request rakitan tidak bisa menyelundupkan kanal Shopee dengan
-  // metode tunai, yang membuat "kembalian" tidak berarti apa-apa karena
-  // totalnya sudah bersih dari potongan Shopee.
+  // Shopee dipaksa e-wallet di server juga, supaya request rakitan tidak menyelundupkan Shopee dengan metode tunai (kembalian jadi tak bermakna).
   if (kanalIsi === 'shopee') metode = 'ewallet';
   ongkirIsi = String(form.get('shipping_cost') ?? '').trim();
   diskonIsi = String(form.get('discount_amount') ?? '').trim();
@@ -283,10 +160,7 @@ if (Astro.request.method === 'POST') {
       galat = 'Sesi kasir tidak valid. Muat ulang halaman.';
     } else {
       try {
-        // Dikirim sebagai pecahan (0,1725 = 17,25%), bukan angka persen
-        // mentah -- itulah bentuk yang dipakai backend. `undefined` kalau
-        // kosong: backend jatuh ke tarif bawaannya sendiri, satu-satunya
-        // tempat nilai bawaan itu perlu didefinisikan.
+        // Persen dikirim sebagai pecahan (0,1725 = 17,25%) dan `undefined` bila kosong, supaya tarif bawaan hanya didefinisikan di backend.
         const persenKomisi = angka('platform_commission_fee_percent');
         const persenLayanan = angka('platform_service_fee_percent');
         struk = await api<Transaction>('/transactions', {
@@ -298,9 +172,7 @@ if (Astro.request.method === 'POST') {
             payment_method: metode,
             sales_channel: kanalIsi,
             amount_paid: metode === 'cash' ? angka('amount_paid') : undefined,
-            // Ongkir tidak berlaku untuk Shopee -- backend mengabaikannya
-            // juga, tapi tidak dikirim sama sekali di sini supaya niatnya
-            // jelas dari isi request, bukan cuma dari validasi di sisi sana.
+            // Ongkir tidak dikirim untuk Shopee agar niatnya jelas dari isi request, bukan hanya dari validasi backend.
             shipping_cost: kanalIsi === 'shopee' ? undefined : angka('shipping_cost'),
             discount_amount: angka('discount_amount'),
             platform_commission_fee_percent:
@@ -315,24 +187,17 @@ if (Astro.request.method === 'POST') {
           },
         });
 
-        // Ditangkap SEBELUM `pelangganDipilih` dikosongkan di bawah -- lihat
-        // komentar `strukPelangganId` di atas.
+        // Ditangkap sebelum `pelangganDipilih` dikosongkan di bawah; lihat `strukPelangganId`.
         strukPelangganId = pelangganDipilih || null;
 
-        // Penjualan selesai: meja kasir dikosongkan supaya pembeli berikutnya
-        // tidak ikut membayar belanjaan pembeli sebelumnya. Saringan katalog
-        // sengaja TIDAK ikut direset -- kasir biasanya melayani deretan
-        // pembeli dari rak yang sama.
+        // Penjualan selesai: meja kasir dikosongkan agar pembeli berikutnya tidak membayar belanjaan sebelumnya, saringan katalog sengaja tidak direset.
         keranjang = [];
         pelangganDipilih = '';
         ongkirIsi = '';
         diskonIsi = '';
         dibayarIsi = '';
         kunci = '';
-        // Kanal TIDAK ikut direset. Pesanan marketplace biasanya dicatat
-        // berurutan, dan kanal yang diam-diam kembali ke "Toko" setiap kali
-        // satu pesanan selesai akan mencatat pesanan berikutnya seharga toko
-        // tanpa ada yang menyadarinya.
+        // Kanal sengaja tidak direset, karena pesanan marketplace dicatat berurutan dan kembali ke "Toko" diam-diam akan salah harga.
       } catch (err) {
         galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan transaksi.';
       }
@@ -349,24 +214,14 @@ if (kategoriIsi) kueri.set('category_id', kategoriIsi);
 const [produk, kategori, semuaBatch, pelanggan] = await Promise.all([
   api<PaginatedProducts>(`/products?${kueri}`, { token }),
   api<Category[]>('/categories', { token }),
-  // Satu permintaan untuk seluruh batch yang masih bersisa, bukan satu per
-  // produk: daftar kasir bisa berisi 200 baris, dan 200 permintaan untuk
-  // mengisi 200 pemilih batch akan terasa sebelum barang pertama dipindai.
+  // Satu permintaan untuk semua batch bersisa, bukan satu per produk (200 permintaan akan terasa sebelum barang pertama dipindai).
   api<ProductBatch[]>('/batches', { token }),
   bolehTransaksi
     ? api<PaginatedCustomers>('/customers?limit=200', { token }).then((h) => h.data)
     : Promise.resolve([] as Customer[]),
 ]);
 
-/**
- * Nama pelanggan untuk nota cetak, dicari dari daftar yang sama yang mengisi
- * pemilih pelanggan di panel kasir -- bukan permintaan kedua ke server.
- *
- * `undefined` (bukan cuma `strukPelangganId` kosong) kalau pelanggannya ada
- * tapi daftar 200 ini kebetulan tidak memuatnya; nota tetap tercetak, hanya
- * barisnya diberi label umum, bukan "Walk-in" yang berarti sesuatu yang
- * berbeda.
- */
+/** Nama pelanggan untuk nota dicari dari daftar yang sama; `undefined` bila tak termuat di 200 teratas, agar nota diberi label umum, bukan "Walk-in". */
 const strukPelanggan = strukPelangganId
   ? pelanggan.find((c) => c.id === strukPelangganId)
   : null;
@@ -379,25 +234,11 @@ for (const b of semuaBatch) {
   else batchProduk.set(b.product_id, [b]);
 }
 
-// Barang habis tidak ditampilkan sama sekali: barisnya hanya memenuhi layar
-// dengan sesuatu yang tidak bisa dijual.
+// Barang habis tidak ditampilkan karena hanya memenuhi layar dengan yang tidak bisa dijual.
 const barang = produk.data.filter((p) => p.stock_qty > 0);
 const adaYangTerpotong = produk.total > produk.data.length;
 
-/**
- * Harga keranjang ditetapkan ulang dari katalog, bukan dipercaya dari form.
- *
- * `harga` yang ikut di tiap baris hanyalah angka yang dirender halaman
- * SEBELUMNYA, dan setelah kanal diganti angka itu milik daftar harga yang
- * lama. Tanpa penetapan ulang ini, mengganti kanal tanpa JavaScript akan
- * menampilkan total dengan harga kanal sebelumnya -- angka yang nanti tidak
- * cocok dengan struk, karena backend menghitung dari harga kanal yang benar.
- *
- * Baris yang produknya tersaring keluar dari katalog tidak bisa ditetapkan
- * ulang di sini: barisnya memang tidak ikut terbaca dari `/products`. Ia
- * memakai harga yang dibawanya sampai produknya terlihat lagi; yang menagih
- * tetap backend.
- */
+/** Harga keranjang ditetapkan ulang dari katalog, bukan dipercaya dari form (harga di form milik kanal lama); baris yang tersaring keluar memakai harganya sendiri dan backend yang menagih. */
 const hargaKatalog = new Map(produk.data.map((p) => [p.id, hargaDi(p, kanalIsi)]));
 keranjang = keranjang.map((b) => ({ ...b, harga: hargaKatalog.get(b.product_id) ?? b.harga }));
 
@@ -412,26 +253,19 @@ for (const b of keranjang) {
 
 const totalItem = keranjang.reduce((n, b) => n + b.qty, 0);
 const totalBelanja = keranjang.reduce((n, b) => n + b.harga * b.qty, 0);
-// Ongkir tidak berlaku untuk Shopee sama sekali -- lihat komentar
-// `biayaPersenRupiah` dkk. di atas. Kolomnya disembunyikan untuk kanal itu,
-// tapi kalau ada nilai lama yang masih nyangkut di form (mis. sisa dari
-// kanal Toko sebelum diganti), tetap dipaksa nol di sini juga.
+// Ongkir tidak berlaku untuk Shopee: kolom disembunyikan dan nilai lama yang menyangkut tetap dipaksa nol di sini.
 const ongkirAngka = kanalIsi === 'shopee' ? 0 : Math.max(0, Number(ongkirIsi) || 0);
-// Diskon dipotong sampai setinggi-tingginya subtotal. Backend menolak yang
-// melebihi -- di sini angkanya cuma tidak dibiarkan membuat total negatif di
-// layar sebelum penolakan itu datang.
+// Diskon dijepit setinggi subtotal agar total di layar tidak negatif; backend yang menolak yang melebihi.
 const diskonAngka = Math.min(totalBelanja, Math.max(0, Number(diskonIsi) || 0));
 
-// Kosong jatuh ke tarif bawaan, dan dijepit 0-100 -- sama seperti backend
-// menjepit pecahannya ke 0..1 (lihat validasi di `pos::service::checkout`).
+// Kosong jatuh ke tarif bawaan dan dijepit 0-100, sama seperti backend menjepit pecahan ke 0..1 (`pos::service::checkout`).
 const jepitPersen = (isi: string, bawaan: number): number =>
   isi.trim() === '' ? bawaan : Math.min(100, Math.max(0, Number(isi) || bawaan));
 
 const commissionPersenAngka = jepitPersen(commissionPersenIsi, SHOPEE_COMMISSION_PERSEN_DEFAULT);
 const servicePersenAngka = jepitPersen(servicePersenIsi, SHOPEE_SERVICE_PERSEN_DEFAULT);
 
-// Basis potongan Shopee: omzet SETELAH diskon. Sama dengan `basis_fee` di
-// `backend/src/pos/service.rs`.
+// Basis potongan Shopee adalah omzet setelah diskon, sama dengan `basis_fee` di `pos/service.rs`.
 const basisFeeShopee = Math.max(0, totalBelanja - diskonAngka);
 const biayaKomisiAngka =
   kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, commissionPersenAngka) : 0;
@@ -441,12 +275,7 @@ const biayaWithholdingTaxAngka =
   kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
 const biayaOrderProcessingAngka = kanalIsi === 'shopee' ? SHOPEE_ORDER_PROCESSING_FEE : 0;
 
-// Sejak kasir kanal Shopee cuma mencatat pesanan yang uangnya sudah diterima
-// lewat ShopeePay -- bukan menagih pembayaran baru -- angka ini BUKAN lagi
-// "yang dibayar pembeli" untuk kanal itu. Ia langsung dikurangi keempat biaya
-// platform, dan labelnya berganti jadi "Estimasi Total Penghasilan" di
-// render di bawah supaya bedanya kelihatan. `ongkirAngka` sudah nol untuk
-// Shopee, jadi rumusnya tetap satu untuk semua kanal.
+// Untuk Shopee angka ini bukan yang dibayar pembeli melainkan setelah empat biaya platform, labelnya berganti ke "Estimasi Total Penghasilan"; rumusnya satu untuk semua kanal.
 const totalTagihan =
   totalBelanja -
   diskonAngka +
@@ -460,35 +289,13 @@ const dibayarAngka = Number(dibayarIsi);
 const adaDibayar = tunai && dibayarIsi !== '' && Number.isFinite(dibayarAngka);
 const kurangBayar = adaDibayar && dibayarAngka < totalTagihan;
 
-/**
- * Baris panel keranjang.
- *
- * Dirender untuk SETIAP (produk, batch) yang ada di katalog, bukan hanya yang
- * jumlahnya di atas nol; barisnya disembunyikan selama masih nol. Alasannya
- * satu: kalau barisnya baru dibuat saat dibutuhkan, skrip halaman harus bisa
- * merakit baris keranjang sendiri -- jalur render kedua yang bisa menyimpang
- * dari yang dirender server, tepat di tempat yang menampilkan angka tagihan.
- *
- * `luar` menandai baris yang produknya TIDAK ada di katalog saat ini, yaitu
- * barang yang sudah masuk keranjang lalu tersaring keluar oleh pencarian.
- * Baris itu membawa sendiri isian keranjangnya; tanpa itu, menyaring tanpa
- * JavaScript akan menghapus diam-diam barang yang sudah dipilih.
- */
+/** Baris panel keranjang dirender untuk semua (produk, batch) dan disembunyikan saat nol agar skrip tak merakit baris; `luar` menandai baris yang produknya tersaring keluar. */
 interface BarisPanel {
   kunci: string;
   product_id: string;
   nama: string;
   harga: number;
-  /**
-   * Harga baris ini di tiap kanal, supaya skrip halaman bisa menghitung ulang
-   * total saat kanal diganti tanpa perjalanan ke server.
-   *
-   * `null` untuk baris yang produknya sedang tersaring keluar dari katalog:
-   * yang dibawa baris itu hanyalah harga saat ia dimasukkan ke keranjang, dan
-   * mengarang dua harga lain dari satu angka akan menampilkan angka yang tidak
-   * pernah dipakai siapa pun. Barisnya tetap memakai harga yang dibawanya
-   * sampai produknya kembali terlihat; yang menagih tetap backend.
-   */
+  /** Harga baris di tiap kanal agar skrip bisa menghitung ulang saat kanal diganti; `null` untuk baris yang tersaring keluar, yang tetap memakai harga bawaannya. */
   hargaKanal: Record<Kanal, number> | null;
   batchLabel: string;
   qty: number;
@@ -539,9 +346,7 @@ for (const b of keranjang) {
     hargaKanal: null,
     batchLabel: batch ? labelBatch(batch) : 'Batch di luar hasil saringan',
     qty: b.qty,
-    // Tanpa batch-nya di tangan, batas satu-satunya yang pasti benar adalah
-    // jumlah yang sudah diterima sebelumnya. Backend tetap menolak kalau
-    // sisanya ternyata sudah berkurang.
+    // Tanpa batch di tangan, batas yang pasti benar hanya jumlah yang sudah diterima; backend tetap menolak bila sisanya sudah berkurang.
     sisa: batch ? batch.remaining_qty : b.qty,
     luar: true,
   });
@@ -586,13 +391,7 @@ function sisaBatch(b: ProductBatch): { label: string; mepet: boolean } {
   };
 }
 
-/**
- * Rak tempat barang sebuah produk masih ada, urut FEFO dan tanpa pengulangan.
- *
- * Sejak migrasi 0016 lokasi milik batch: satu produk bisa tersebar di beberapa
- * rak, dan satu label tunggal seperti dulu akan menyuruh pengepak ke rak yang
- * salah untuk sebagian barangnya. `daftar` sudah urut FEFO dari `/batches`.
- */
+/** Rak produk urut FEFO tanpa pengulangan; sejak migrasi 0016 lokasi milik batch, jadi satu label tunggal bisa menyuruh pengepak ke rak yang salah. */
 function lokasiProduk(daftar: ProductBatch[]): string {
   const rak = daftar.map((b) => b.storage_location).filter((l): l is string => !!l);
   return [...new Set(rak)].join(', ');
@@ -612,18 +411,10 @@ function ringkasBatch(p: Product): string {
   {galat && <p class="galat mb-4" role="alert">{galat}</p>}
   {sukses && <p class="sukses mb-4">{sukses}</p>}
 
-  {/*
-    Satu layar, satu form: katalog di kiri, keranjang dan pembayaran menempel
-    di kanan. Sebelumnya halaman ini berjalan tiga langkah, dan tiap
-    perpindahan berarti satu muat ulang untuk mengetahui total -- padahal
-    angka itulah yang ditunggu pembeli di depan meja.
-
-    Karena semuanya ada di satu form, tidak ada lagi keranjang yang perlu
-    disalin sebagai hidden field antar-langkah: isian yang dipakai menjual
-    adalah isian yang sama yang dikirim saat menyelesaikan.
-  */}
+  {/* Satu layar satu form: katalog di kiri, keranjang dan pembayaran di kanan, sehingga isian yang dipakai menjual sama dengan yang dikirim dan tidak ada hidden field antar-langkah. */}
   <form
     method="POST"
+    action="#struk"
     id="borang-kasir"
     data-transaksi={bolehTransaksi ? 'ya' : 'tidak'}
     class="flex flex-col gap-4 lg:flex-row lg:items-start"
@@ -634,9 +425,7 @@ function ringkasBatch(p: Product): string {
       <div class="kartu mb-4">
         <label class="label" for="cari">Cari produk</label>
         <div class="flex flex-wrap gap-2">
-          {/* Tombol submit PERTAMA di form ini, dan itu disengaja: Enter di
-              kolom mana pun jatuh ke tombol ini, dan "terapkan saringan"
-              adalah satu-satunya aksi yang aman untuk dipicu tidak sengaja. */}
+          {/* Tombol submit pertama di form ini disengaja: Enter di kolom mana pun jatuh ke "terapkan saringan", satu-satunya aksi yang aman dipicu tak sengaja. */}
           <input
             class="kolom max-w-md flex-1"
             id="cari"
@@ -652,7 +441,7 @@ function ringkasBatch(p: Product): string {
         </div>
 
         {kategori.length > 0 && (
-          <div class="mt-3 flex gap-2 overflow-x-auto pb-1" data-pil-kategori>
+          <div class="pil-gulung mt-3 flex gap-2 overflow-x-auto pb-1" data-pil-kategori>
             <label class={kategoriIsi ? 'pil-diam' : 'pil-aktif'}>
               <input class="sr-only" type="radio" name="kategori" value="" checked={!kategoriIsi} />
               Semua
@@ -706,30 +495,25 @@ function ringkasBatch(p: Product): string {
               data-sku={(p.sku ?? '').toLowerCase()}
               data-kategori={p.category_id ?? ''}
             >
-              {/* Dua versi blok informasi. Yang bisa diketuk adalah tombol
-                  sungguhan (bisa dicapai keyboard, tidak men-submit); yang
-                  tanpa JS adalah teks biasa, karena di sana panel batch sudah
-                  terbuka di dalam kartu dan tidak ada yang perlu dibuka. */}
+              {/* Dua versi blok info: tombol sungguhan untuk JS (bisa dicapai keyboard, tidak men-submit) dan teks biasa tanpa JS karena panel batch sudah terbuka di kartu. */}
               <button
                 type="button"
                 class="hanya-js block w-full text-left"
                 data-buka-batch
                 aria-haspopup="dialog"
-                aria-label={`Pilih batch untuk ${p.name}`}
               >
                 <span class="foto-produk aspect-square h-auto">
-                  {/* `aspect-square h-auto`: rasio 1:1 seperti kartu produk
-                      Shopee, mengikuti lebar kolom grid alih-alih tinggi
-                      tetap `.foto-produk` -- supaya kartu tetap persegi di
-                      semua ukuran layar, bukan gepeng di kartu yang sempit
-                      atau lebar.
-
-                      `loading="lazy"`: seluruh katalog dirender sekaligus --
-                      penyaringannya terjadi di browser -- jadi tanpa ini
-                      membuka kasir berarti menarik foto setiap produk,
-                      termasuk yang tidak pernah tergulir ke layar. */}
+                  {/* `aspect-square h-auto` menjaga kartu persegi di semua lebar; `loading="lazy"` karena seluruh katalog dirender sekaligus dan penyaringan terjadi di browser. */}
                   {p.image_url && (
-                    <img src={p.image_url} alt="" loading="lazy" class="h-full w-full object-cover" />
+                    <img
+                      src={fotoKecil(p.image_url)}
+                      alt=""
+                      width="480"
+                      height="480"
+                      loading="lazy"
+                      decoding="async"
+                      class="h-full w-full object-cover"
+                    />
                   )}
                   <span class="foto-sku">{p.sku ?? '—'}</span>
                   <span class="lencana-jumlah" data-lencana hidden={jumlah === 0}>
@@ -737,7 +521,9 @@ function ringkasBatch(p: Product): string {
                   </span>
                 </span>
                 <span class="block px-3 py-2.5">
-                  <span class="block text-sm font-medium">{p.name}</span>
+                  <span class="block text-sm font-medium">
+                    <span class="sr-only">Pilih batch untuk </span>{p.name}
+                  </span>
                   <span class="block text-sm font-semibold tabular-nums" data-harga-tampil>
                     {rupiah(hargaDi(p, kanalIsi))}
                   </span>
@@ -749,9 +535,7 @@ function ringkasBatch(p: Product): string {
                   >
                     {exp.label}
                   </span>
-                  {/* Diisi ulang skrip tiap kali jumlah berubah. Tanpa baris
-                      ini, kartu yang panelnya tertutup tidak memberi tahu
-                      batch mana yang barusan dipilih. */}
+                  {/* Diisi ulang skrip tiap jumlah berubah, supaya kartu dengan panel tertutup menunjukkan batch yang barusan dipilih. */}
                   <span class="block text-xs font-medium text-merah-700" data-ringkas-baris>
                     {ringkas}
                   </span>
@@ -776,20 +560,13 @@ function ringkasBatch(p: Product): string {
                 </span>
               </div>
 
-              {/* Detail produk, untuk peran mana pun yang bisa membuka halaman
-                  ini. <details> native: terbuka tanpa JavaScript, dan
-                  <summary> bukan kendali submit, jadi aman berada di dalam
-                  form yang sedang memegang keranjang.
-
-                  Datanya sudah ada di halaman -- produk dari /products, batch
-                  dari /batches yang sama yang mengisi pemilih di bawah. Tidak
-                  ada permintaan tambahan per kartu, dan tidak ada daftar batch
-                  kedua yang bisa menyimpang dari yang dipakai saat menjual. */}
-              <details class="border-t border-[var(--color-garis-lembut)] px-3 py-2">
-                <summary class="cursor-pointer text-xs font-medium text-[var(--color-teks-lembut)] hover:text-merah-700">
+              {/* Detail produk punya dua wajah dari satu isi (`data-detail-isi`): `<details>` tanpa JS, dan dengan JS tombol "Detail" menyalin isinya ke satu dialog bersama. */}
+              <details class="tanpa-js border-t border-[var(--color-garis-lembut)] px-3">
+                <summary class="flex min-h-11 cursor-pointer items-center text-xs font-medium text-[var(--color-teks-lembut)] hover:text-merah-700">
                   Detail
                 </summary>
 
+                <div data-detail-isi data-judul={p.name}>
                 <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                   <dt class="text-[var(--color-teks-lembut)]">Ukuran</dt>
                   <dd>{p.variant_size ?? '—'}</dd>
@@ -839,29 +616,22 @@ function ringkasBatch(p: Product): string {
                 ) : (
                   <p class="mt-1 text-xs">Tidak ada batch bersisa.</p>
                 )}
+                </div>
               </details>
 
-              {/* Pemilih batch.
+              <button
+                type="button"
+                class="hanya-js flex min-h-11 w-full items-center border-t border-[var(--color-garis-lembut)] px-3 text-left text-xs font-medium text-[var(--color-teks-lembut)] hover:text-merah-700"
+                data-buka-detail
+                aria-haspopup="dialog"
+              >
+                Detail
+                <span class="sr-only"> {p.name}</span>
+              </button>
 
-                  FEFO tidak dipakai di kasir. Di gudang barang bercampur dan
-                  yang terambil adalah yang paling atas, jadi "kedaluwarsa
-                  terdekat keluar lebih dulu" yang diputuskan server adalah
-                  catatan yang belum tentu benar -- dan catatan stok yang salah
-                  tidak bisa diperbaiki belakangan, karena tidak ada lagi yang
-                  tahu apa yang sebenarnya diambil. Karena itu kasir yang
-                  menyebutkan, per batch.
-
-                  `product_id`, `nama`, dan `harga` ikut DI TIAP BARIS BATCH,
-                  bukan sekali di kartu: kelimanya dibaca sebagai lima deret
-                  sejajar di `bacaKeranjang`, dan deret yang panjangnya berbeda
-                  akan memasangkan batch satu produk dengan jumlah milik produk
-                  lain.
-
-                  <dialog open> dirender server supaya tanpa JavaScript isinya
-                  jadi panel biasa di dalam kartu. Skrip halaman menutupnya
-                  saat muat lalu membukanya dengan showModal(). */}
+              {/* Pemilih batch: kasir menyebut batch sendiri (FEFO di gudang bercampur tak bisa dipercaya); `product_id`/`nama`/`harga` ikut di tiap baris batch agar deret sejajar tak bergeser. */}
               {bolehTransaksi && (
-                <dialog class="panel-batch" open data-panel-batch>
+                <dialog class="panel-batch" data-panel-batch>
                   <p class="mb-1 text-xs font-medium">
                     Batch yang diambil
                     <span class="hanya-js"> — {p.name}</span>
@@ -906,10 +676,7 @@ function ringkasBatch(p: Product): string {
                           −
                         </button>
 
-                        {/* `max` = sisa BATCH INI, bukan stok produk. Dibatasi
-                            stok produk, kasir bisa mengetik 10 untuk batch
-                            yang tinggal 3 dan baru ditolak saat pembayaran --
-                            di depan pembeli yang sudah menunggu. */}
+                        {/* `max` = sisa batch ini, bukan stok produk, supaya kasir tidak mengetik jumlah yang baru ditolak saat pembayaran di depan pembeli. */}
                         <input
                           class="kolom w-16 shrink-0 text-center tabular-nums"
                           id={`qty-${p.id}-${b.id}`}
@@ -936,8 +703,7 @@ function ringkasBatch(p: Product): string {
                     );
                   })}
 
-                  {/* Hanya berarti saat panel ini jadi pop up: di sana kartu
-                      beserta ringkasannya tertutup di belakang backdrop. */}
+                  {/* Hanya berarti saat panel jadi pop up, karena kartu beserta ringkasannya tertutup di belakang backdrop. */}
                   <div class="hanya-js mt-3 flex items-center gap-3">
                     <span class="text-sm text-[var(--color-teks-lembut)]">
                       Total <span class="font-semibold tabular-nums" data-total-batch>0</span>
@@ -962,6 +728,15 @@ function ringkasBatch(p: Product): string {
       <p class="mt-4 hidden text-center text-sm text-[var(--color-teks-lembut)]" data-kosong-saringan>
         Tidak ada produk yang cocok dengan pencarian ini.
       </p>
+
+      {/* Satu dialog untuk semua kartu tanpa kolom isian; padding ada di div dalam supaya ketukan di latar menutupnya. */}
+      <dialog class="panel-detail" data-dialog-detail aria-labelledby="judul-detail">
+        <div class="max-h-[85vh] overflow-y-auto p-4">
+          <h2 class="text-sm font-semibold" id="judul-detail" data-detail-judul></h2>
+          <div class="mt-3" data-detail-badan></div>
+          <button type="button" class="tombol-utama mt-4 w-full" data-tutup-detail>Tutup</button>
+        </div>
+      </dialog>
     </section>
 
     {bolehTransaksi && (
@@ -992,13 +767,9 @@ function ringkasBatch(p: Product): string {
               </select>
             </div>
 
-            {/* Pelanggan baru dibuat lewat POST ke halaman ini juga, bukan form
-                terpisah: keranjang hidup di isian form yang sama, dan form
-                kedua berarti menyalin seluruhnya sebagai hidden field. Nama
-                sengaja tanpa `required` -- atribut itu akan ikut menahan
-                tombol "Selesaikan" yang berbagi form dengannya. */}
+            {/* Pelanggan baru dibuat lewat POST ke halaman ini (bukan form terpisah) agar keranjang di form yang sama tidak perlu disalin; nama tanpa `required` supaya tidak menahan "Selesaikan". */}
             <details>
-              <summary class="cursor-pointer list-none text-xs font-semibold text-merah-700">
+              <summary class="flex min-h-11 cursor-pointer list-none items-center text-xs font-semibold text-merah-700">
                 ＋ Tambah pelanggan baru
               </summary>
               <div class="mt-2 flex flex-col gap-2 rounded-lg border border-merah-200 bg-merah-50 p-2.5">
@@ -1046,10 +817,7 @@ function ringkasBatch(p: Product): string {
                   <span data-qty-teks>{r.qty}</span> × <span data-harga-satuan>{rupiah(r.harga)}</span>
                 </span>
                 <div class="flex flex-wrap items-center justify-end gap-2">
-                  {/* Baris yang produknya tersaring keluar dari katalog membawa
-                      sendiri isian keranjangnya -- di katalog tidak ada lagi
-                      kolom yang menahannya, dan tanpa ini barang yang sudah
-                      dipilih hilang diam-diam saat saringan dikirim ke server. */}
+                  {/* Baris yang tersaring keluar membawa isian keranjangnya sendiri, kalau tidak barang terpilih hilang diam-diam saat saringan dikirim ke server. */}
                   {r.luar && (
                     <Fragment>
                       <input type="hidden" name="product_id" value={r.product_id} />
@@ -1107,10 +875,7 @@ function ringkasBatch(p: Product): string {
         </div>
 
         <div class="kartu flex flex-col gap-4 p-4">
-          {/* Kanal ditaruh PALING ATAS di panel pembayaran, sebelum apa pun
-              yang menyebut angka: ia menentukan seluruh harga di bawahnya,
-              dan kasir yang menyadarinya belakangan harus mengulang dari
-              awal. */}
+          {/* Kanal ditaruh paling atas di panel pembayaran karena menentukan semua harga di bawahnya. */}
           <div>
             <p class="label">Kanal penjualan</p>
             <div class="flex flex-wrap gap-2">
@@ -1130,18 +895,7 @@ function ringkasBatch(p: Product): string {
             </div>
           </div>
 
-          {/* Hanya berarti untuk Shopee -- selalu dirender (bukan
-              server-only conditional) supaya berganti kanal tanpa reload
-              tetap memunculkan/menyembunyikannya, sama seperti baris biaya
-              platform di bawah.
-
-              Dua kolom, bukan satu "biaya administrasi" gabungan: API
-              Shopee (`v2.payment.get_escrow_detail`) memisahkan potongan
-              jadi `commission_fee` (komisi dasar, berlaku semua pesanan)
-              dan `service_fee` (program opsional seperti Gratis Ongkir
-              Xtra/Star+). Menggabungkannya jadi satu angka tidak bisa
-              dibandingkan field-demi-field dengan struk asli Shopee kalau
-              toko ini suatu saat tersambung sungguhan. */}
+          {/* Selalu dirender agar ganti kanal tanpa reload tetap memunculkannya; dua kolom komisi dan layanan mengikuti pemisahan `get_escrow_detail` Shopee. */}
           <div
             class:list={['grid gap-3 sm:grid-cols-2', kanalIsi === 'shopee' ? '' : 'hidden']}
             data-blok-commission-fee
@@ -1198,18 +952,7 @@ function ringkasBatch(p: Product): string {
                 </label>
               ))}
             </div>
-            {/* Untuk Shopee, metode bukan pilihan -- uangnya sudah pasti
-                diterima lewat ShopeePay. Radio button di atas tetap ADA di
-                DOM (cuma disembunyikan lewat kelas), jadi cukup satu field
-                `payment_method` yang pernah terkirim; lihat `syncMetodeShopee`
-                di skrip halaman yang memaksa radio "E-wallet" tercentang.
-
-                `pil-aktif` sudah `inline-flex` lewat utility `pil`, jadi
-                jangan tambahkan `inline-block` di sini lagi -- di lapisan
-                utilities Tailwind, `.inline-block` didefinisikan SESUDAH
-                `.hidden`, jadi kalau dua-duanya dipasang, `inline-block`
-                menang dan ShopeePay tetap kelihatan di kanal Toko/Tokopedia
-                walau kelas `hidden` sudah ada. */}
+            {/* Metode Shopee bukan pilihan: radio tetap di DOM (disembunyikan) dan `syncMetodeShopee` memaksa "E-wallet"; jangan tambah `inline-block` di `pil-aktif` karena menimpa `hidden`. */}
             <p
               class:list={['pil-aktif', kanalIsi === 'shopee' ? '' : 'hidden']}
               data-blok-metode-shopee
@@ -1219,10 +962,7 @@ function ringkasBatch(p: Product): string {
           </div>
 
           <div class="grid gap-3 sm:grid-cols-2">
-            {/* Tidak berlaku untuk Shopee -- logistiknya di luar sistem ini.
-                Disembunyikan, bukan dihapus dari DOM: sama seperti blok
-                lain yang bergantung pada kanal, supaya kolomnya tetap ada
-                untuk skrip halaman membaca/mengosongkan nilainya. */}
+            {/* Tidak berlaku untuk Shopee; disembunyikan, bukan dihapus dari DOM, supaya skrip tetap bisa membaca atau mengosongkan nilainya. */}
             <div class:list={[kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-ongkir>
               <label class="label" for="shipping_cost">Ongkos kirim (Rp)</label>
               <input
@@ -1253,10 +993,7 @@ function ringkasBatch(p: Product): string {
               />
             </div>
 
-            {/* Shopee tidak butuh ini sama sekali -- uangnya sudah pasti
-                diterima penuh lewat ShopeePay, jadi tidak ada "uang diterima"
-                untuk dicatat maupun kembalian untuk dihitung. Disembunyikan
-                seluruhnya, bukan sekadar dimatikan seperti kanal lain. */}
+            {/* Shopee tidak butuh ini karena uangnya sudah diterima penuh lewat ShopeePay, jadi disembunyikan seluruhnya. */}
             <div class:list={[kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-dibayar>
               <label class="label" for="amount_paid">Uang diterima (tunai)</label>
               <input
@@ -1274,11 +1011,7 @@ function ringkasBatch(p: Product): string {
             </div>
           </div>
 
-          {/* Nominal cepat hanya berguna kalau ada yang mengisikannya, jadi
-              seluruh barisnya `hanya-js`. "Uang pas" mengambil total berjalan,
-              bukan angka yang dirender server -- ongkir bisa sudah berubah
-              setelah halaman dimuat. Disembunyikan juga untuk Shopee, dengan
-              alasan yang sama seperti "Uang diterima" di atas. */}
+          {/* Nominal cepat hanya berguna dengan JS dan memakai total berjalan (ongkir bisa berubah setelah muat); disembunyikan juga untuk Shopee. */}
           <div
             class:list={['hanya-js flex flex-wrap gap-2', kanalIsi === 'shopee' ? 'hidden' : '']}
             data-cepat
@@ -1298,9 +1031,7 @@ function ringkasBatch(p: Product): string {
                 {rupiah(totalBelanja)}
               </span>
             </div>
-            {/* Selalu dirender, disembunyikan selama nol: baris yang baru
-                lahir saat diisi menggeser angka Total tepat ketika kasir
-                sedang membacanya. */}
+            {/* Selalu dirender dan disembunyikan saat nol, supaya baris baru tidak menggeser angka Total saat kasir membacanya. */}
             <div
               class:list={[
                 'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
@@ -1325,13 +1056,7 @@ function ringkasBatch(p: Product): string {
                 {rupiah(ongkirAngka)}
               </span>
             </div>
-            {/* Keempatnya MENGURANGI Total untuk kanal Shopee -- beda dari
-                sebelumnya. Kasir Shopee di sini cuma mencatat pesanan yang
-                uangnya sudah diterima lewat ShopeePay, jadi angka yang
-                relevan buat kasir adalah yang benar-benar cair ke toko,
-                bukan yang dibayar pembeli (pembeli sudah membayar penuh di
-                Shopee, di luar sistem ini). Nama field mengikuti
-                `get_escrow_detail` Shopee -- lihat komentar di atas. */}
+            {/* Keempat biaya mengurangi Total untuk Shopee karena kasir mencatat pesanan yang uangnya sudah diterima, jadi yang relevan adalah yang cair ke toko; nama field mengikuti `get_escrow_detail`. */}
             <div
               class:list={[
                 'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
@@ -1388,10 +1113,7 @@ function ringkasBatch(p: Product): string {
               <p class="kotak-total-angka" data-total>{rupiah(totalTagihan)}</p>
             </div>
 
-            {/* Kekurangan dan kembalian menempati kotak yang sama: keduanya
-                jawaban atas satu pertanyaan ("uangnya cukup?"), dan dua kotak
-                yang bergantian muncul membuat tingginya melompat tepat saat
-                kasir sedang membaca angkanya. */}
+            {/* Kekurangan dan kembalian memakai satu kotak karena menjawab satu pertanyaan, dan dua kotak bergantian membuat tinggi melompat saat dibaca. */}
             <div
               class:list={[kurangBayar ? 'kotak-kurang' : 'kotak-kembalian', adaDibayar ? '' : 'hidden']}
               data-kotak-kembalian
@@ -1411,15 +1133,14 @@ function ringkasBatch(p: Product): string {
 
           <div class="flex items-center gap-3">
             <button
-              class="text-xs font-semibold text-[var(--color-teks-lembut)] hover:text-merah-700"
+              class="inline-flex min-h-11 items-center text-xs font-semibold text-[var(--color-teks-lembut)] hover:text-merah-700"
               type="submit"
               name="aksi"
               value="kosongkan"
             >
               Kosongkan keranjang
             </button>
-            {/* Tanpa JavaScript, angka di panel ini baru benar setelah satu
-                perjalanan ke server. Tombol inilah perjalanannya. */}
+            {/* Tanpa JS angka panel baru benar setelah satu perjalanan ke server; tombol ini perjalanannya. */}
             <button class="tombol-halus tanpa-js ml-auto" type="submit" name="aksi" value="hitung">
               Perbarui keranjang
             </button>
@@ -1428,15 +1149,13 @@ function ringkasBatch(p: Product): string {
 
         {struk && (
           <Fragment>
-          <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4" role="status">
+          <div id="struk" class="scroll-mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4" role="status">
             <div class="flex items-center justify-between gap-2">
               <span class="lencana-selesai">Penjualan berhasil</span>
               <span class="font-mono text-xs text-emerald-800">#{struk.id.slice(0, 8)}</span>
             </div>
 
-            {/* Kanal disebut di struk, bukan cuma dipakai diam-diam: harga
-                yang tercetak di bawah hanya masuk akal kalau daftar harga
-                mana yang dipakai ikut terbaca. */}
+            {/* Kanal disebut di struk supaya harga yang tercetak jelas memakai daftar harga yang mana. */}
             <p class="mt-1 text-xs text-emerald-800">
               Kanal {KANAL.find((k) => k.nilai === struk.sales_channel)?.label ?? struk.sales_channel}
             </p>
@@ -1477,13 +1196,7 @@ function ringkasBatch(p: Product): string {
                     <td class="py-0.5 text-right tabular-nums">{rupiah(struk.shipping_cost)}</td>
                   </tr>
                 )}
-                {/* Untuk kanal Shopee keempatnya SUDAH mengurangi Total di
-                    bawah -- lihat `platform_commission_fee` dkk. yang backend
-                    hitung dan simpan saat checkout (nama field mengikuti
-                    `get_escrow_detail` Shopee). Ditulis sebagai baris struk
-                    biasa, bukan catatan kaki terpisah, supaya penjumlahannya
-                    kelihatan sama seperti Diskon dan Ongkos kirim di
-                    atasnya. */}
+                {/* Untuk Shopee keempat biaya sudah mengurangi Total; ditulis sebagai baris struk biasa supaya penjumlahannya terlihat seperti Diskon dan Ongkos kirim. */}
                 {struk.sales_channel === 'shopee' && (
                   <Fragment>
                     <tr>
@@ -1533,43 +1246,16 @@ function ringkasBatch(p: Product): string {
               </tbody>
             </table>
 
-            {/* `hanya-js`: merender nota jadi gambar lalu membuka share
-                sheet OS (supaya bisa dikirim ke app seperti OpenLabel+ untuk
-                dicetak lewat printer thermal Bluetooth) perlu JavaScript,
-                dan tanpa itu tombol ini tidak bisa berbuat apa-apa. Kasir
-                tanpa JS tetap bisa mencetak lewat Ctrl+P/Cmd+P bawaan
-                browser -- `.nota-cetak` di bawah dan blok `@media print` di
-                theme.css sudah mengisolasi nota itu sendiri di kertas,
-                terlepas dari apa yang memicu dialog cetaknya. Lihat skrip
-                module di bawah untuk perilaku tombol ini. */}
+            {/* `hanya-js` karena berbagi nota ke printer thermal butuh JavaScript; tanpa JS kasir tetap mencetak lewat Ctrl+P (`.nota-cetak` dan `@media print` di theme.css). */}
             <button type="button" class="tombol-halus hanya-js mt-3 w-full" data-cetak-struk>
               Cetak / bagikan nota
             </button>
 
-            {/* Tautan GET, bukan tombol: menutup struk sekalian mengembalikan
-                halaman ke keadaan bersih tanpa hasil POST yang menempel di
-                riwayat browser. Kunci idempotensi transaksi berikutnya sudah
-                diganti sejak penjualan ini berhasil, jadi kasir juga boleh
-                langsung lanjut menjual tanpa menekan apa pun di sini. */}
+            {/* Tautan GET, bukan tombol, agar menutup struk mengembalikan halaman bersih tanpa hasil POST di riwayat browser; kunci idempotensi berikutnya sudah baru. */}
             <a href="/kasir" class="tombol-utama mt-3 w-full">Penjualan baru</a>
           </div>
 
-          {/*
-            Nota cetak.
-
-            Berdiri sendiri dari panel konfirmasi di atas, bukan dipakai
-            ulang lewat CSS print yang menyunting tata letaknya: yang satu
-            dibaca di layar (tabel lebar, warna, tombol), yang lain dicetak
-            di kertas struk sempit (monospace, hitam-putih, lebar tetap).
-            Mencampur keduanya lewat override print berisiko merusak salah
-            satu tanpa disadari saat yang lain diubah.
-
-            Disembunyikan di layar oleh `.nota-cetak` di theme.css, dan HANYA
-            blok `@media print` di sana yang menampilkannya kembali --
-            sekaligus menyembunyikan seluruh halaman selain blok ini, supaya
-            yang tercetak betul-betul hanya nota, bukan sidebar atau katalog
-            yang masih ada di DOM.
-          */}
+          {/* Nota cetak berdiri sendiri (bukan CSS print atas panel layar) agar layar dan kertas struk tak saling merusak; hanya `@media print` yang menampilkannya. */}
           <div class="nota-cetak" data-nota-cetak>
             <p class="nota-toko">Toko Ayam Aneka Jaya 33</p>
             <p class="nota-baris-pusat">Bersih dan Halal</p>
@@ -1678,10 +1364,7 @@ function ringkasBatch(p: Product): string {
     )}
   </form>
 
-  {/* Di ponsel panel keranjang berada di BAWAH katalog yang panjangnya bisa
-      200 kartu. Bilah ini yang membuatnya tetap terjangkau: ringkasan yang
-      terbaca sekilas plus satu tautan ke panelnya. Di layar lebar panelnya
-      sudah menempel di samping, jadi bilahnya tidak dirender. */}
+  {/* Di ponsel panel keranjang ada di bawah katalog yang panjang; bilah ini memberi ringkasan dan tautan ke panelnya, tidak dirender di layar lebar. */}
   {bolehTransaksi && (
     <div class="bilah-bawah lg:hidden">
       <span class="text-sm text-[var(--color-teks-lembut)]">
@@ -1690,39 +1373,21 @@ function ringkasBatch(p: Product): string {
       <span class="ml-auto text-base font-bold tabular-nums" data-bilah-total>
         {rupiah(totalTagihan)}
       </span>
-      <a href="#keranjang" class="tombol-utama">Keranjang</a>
+      <a href="#keranjang" class="tombol-utama min-h-11">Keranjang</a>
     </div>
   )}
 </AppShell>
 
-{/*
-  Progressive enhancement.
-
-  Skrip ini HANYA menulis ke `input[name=qty]` yang sudah ada di HTML dan ke
-  teks yang ditampilkan. Ia tidak pernah merakit body request, mencegat submit,
-  atau membuat baris keranjang baru -- baris panel keranjang sudah dirender
-  server untuk tiap batch di katalog, dan yang dikerjakan di sini cuma
-  menyembunyikan yang jumlahnya nol. Karena itu server menerima bentuk data
-  yang sama persis apakah JavaScript hidup atau mati.
-
-  `is:inline` mengikuti satu-satunya pola JS yang sudah ada di proyek ini
-  (AppShell). Konsekuensinya tidak bisa meng-import, jadi pemformatan rupiah
-  ditulis ulang di sini; opsinya harus tetap sama dengan `rupiah()` di
-  web/src/lib/format.ts.
-*/}
+{/* Progressive enhancement: skrip hanya menulis ke `input[name=qty]` dan teks yang ada, tak merakit request, jadi server menerima data sama dengan atau tanpa JS; format rupiah harus sama dengan `format.ts`. */}
 <script is:inline>
   (function () {
     var borang = document.getElementById('borang-kasir');
     if (!borang) return;
 
-    // Mode lihat-saja tidak punya kendali jumlah maupun panel keranjang, dan
-    // seluruh skrip di bawah menulis ke keduanya. Berhenti di sini membuat
-    // halaman itu jatuh ke jalur tanpa-JS yang memang sudah didukung penuh:
-    // saringannya dikerjakan server lewat tombol "Terapkan".
+    // Mode lihat-saja tidak punya kendali jumlah maupun keranjang, jadi skrip berhenti dan halaman jatuh ke jalur tanpa-JS dengan saringan lewat server.
     if (borang.dataset.transaksi !== 'ya') return;
 
-    // Baris pertama: menyalakan saklar CSS supaya stepper muncul dan kolom
-    // angka di katalog menghilang. Lihat .hanya-js / .tanpa-js di theme.css.
+    // Baris pertama menyalakan saklar CSS (`.hanya-js` / `.tanpa-js` di theme.css) agar stepper muncul dan kolom angka katalog hilang.
     document.documentElement.dataset.js = 'ya';
 
     var rupiah = new Intl.NumberFormat('id-ID', {
@@ -1731,21 +1396,13 @@ function ringkasBatch(p: Product): string {
       maximumFractionDigits: 0,
     });
 
-    // Sama persis dengan `SHOPEE_COMMISSION_PERSEN_DEFAULT` dkk. di
-    // frontmatter Astro dan tarif bawaan di `backend/src/pos/service.rs` --
-    // lihat komentar di sana kalau angkanya berubah, tiga tempat ini harus
-    // ikut berubah. Keduanya cuma nilai AWAL; kasir boleh menggantinya
-    // lewat kolom "Biaya Komisi Shopee (%)" / "Biaya Layanan Shopee (%)".
+    // Sama dengan `SHOPEE_COMMISSION_PERSEN_DEFAULT` di frontmatter dan tarif di `pos/service.rs` (tiga tempat harus ikut berubah); hanya nilai awal yang boleh diganti kasir.
     var SHOPEE_COMMISSION_PERSEN_DEFAULT = 17.25;
     var SHOPEE_SERVICE_PERSEN_DEFAULT = 0;
     var SHOPEE_WITHHOLDING_TAX_PERSEN = 0.5;
     var SHOPEE_ORDER_PROCESSING_FEE = 1250;
 
-    // Sama persis dengan `biayaPersenRupiah` di frontmatter Astro dan
-    // `rupiah_bulat` di `backend/src/pos/service.rs` -- lihat komentarnya di
-    // sana. Aritmetika bilangan bulat, bukan `Math.round(basis * (persen /
-    // 100))`, supaya angka di sini tidak pernah meleset dari yang backend
-    // simpan tepat di titik pembulatan seperti ,50.
+    // Sama dengan `biayaPersenRupiah` di frontmatter dan `rupiah_bulat` di `pos/service.rs`: aritmetika bilangan bulat agar tak meleset di pembulatan ,50.
     function biayaPersenRupiah(basis, persen) {
       var basisPoin = Math.round(persen * 100);
       return Math.round((basis * basisPoin) / 10000);
@@ -1796,14 +1453,7 @@ function ringkasBatch(p: Product): string {
     var bilahItem = document.querySelector('[data-bilah-item]');
     var bilahTotal = document.querySelector('[data-bilah-total]');
 
-    // Panel batch dirender server dengan `open` supaya tetap terpakai tanpa
-    // JavaScript. Ditutup di sini, lalu dibuka lagi sebagai pop up lewat
-    // showModal(). Kolom jumlah di dalamnya tidak ikut ke mana-mana: elemen
-    // yang sama itulah yang terkirim, terbuka maupun tertutup.
-    baris.forEach(function (row) {
-      var panel = row.querySelector('[data-panel-batch]');
-      if (panel && panel.open) panel.close();
-    });
+    // Panel batch dibuka sebagai pop up lewat showModal(); kolom jumlah di dalamnya tetap elemen yang sama yang terkirim.
 
     function kolomQty(row) {
       return Array.prototype.slice.call(row.querySelectorAll('[data-qty]'));
@@ -1837,20 +1487,7 @@ function ringkasBatch(p: Product): string {
       return k ? k.value : 'toko';
     }
 
-    /**
-     * Menulis ulang seluruh harga di layar mengikuti kanal yang dipilih.
-     *
-     * Angkanya TIDAK dihitung di sini -- ketiga harga tiap produk sudah
-     * dirender server sebagai atribut data-, dan yang dikerjakan fungsi ini
-     * cuma memilih salah satunya. Menghitung sendiri berarti aturan "harga
-     * kanal kosong jatuh ke harga dasar" hidup di tiga tempat (SQL, Astro,
-     * dan skrip ini), dan cepat atau lambat ketiganya berbeda.
-     *
-     * Baris keranjang yang produknya sedang tersaring keluar dari katalog
-     * tidak punya atribut itu; harganya dibiarkan apa adanya sampai
-     * produknya terlihat lagi. Yang menagih tetap backend, yang membaca
-     * harga kanal dari baris produk saat checkout.
-     */
+    /** Menulis ulang harga sesuai kanal dengan memilih atribut data- dari server (bukan menghitung) agar aturan harga kanal tak hidup di tiga tempat; yang tersaring keluar dibiarkan. */
     function terapkanKanal() {
       // `data-harga-toko` dibaca sebagai `dataset.hargaToko`, dan seterusnya.
       var pilihan = kanal();
@@ -1942,19 +1579,12 @@ function ringkasBatch(p: Product): string {
       // --- Pembayaran ---------------------------------------------------
       var isShopee = kanal() === 'shopee';
 
-      // Ongkir tidak berlaku sama sekali untuk Shopee -- kolomnya
-      // disembunyikan, dan nilainya dipaksa nol di sini juga supaya sisa
-      // angka lama dari kanal Toko tidak diam-diam ikut terhitung.
+      // Ongkir tidak berlaku untuk Shopee: kolom disembunyikan dan nilainya dipaksa nol agar sisa angka kanal Toko tidak ikut terhitung.
       var biaya = isShopee ? 0 : Math.max(0, parseFloat(ongkir.value) || 0);
-      // Dipotong sampai setinggi-tingginya subtotal, sama seperti yang
-      // dihitung server. Backend menolak yang melebihi; di sini angkanya
-      // cuma tidak dibiarkan membuat total negatif di layar.
+      // Dipotong setinggi subtotal seperti server; backend yang menolak yang melebihi, di sini hanya mencegah total negatif.
       var potongan = Math.min(subtotal, Math.max(0, parseFloat(diskon.value) || 0));
 
-      // Shopee tidak punya pilihan metode -- uangnya sudah pasti diterima
-      // lewat ShopeePay. Radio "E-wallet" dipaksa tercentang di sini (bukan
-      // cuma di render awal server) supaya kasir yang mengganti kanal tanpa
-      // reload tidak diam-diam mengirim metode lama (mis. tunai).
+      // Shopee tanpa pilihan metode: radio "E-wallet" dipaksa tercentang di sini agar ganti kanal tanpa reload tidak mengirim metode lama.
       if (isShopee) {
         var radioEwallet = borang.querySelector('[data-metode][value="ewallet"]');
         if (radioEwallet && !radioEwallet.checked) radioEwallet.checked = true;
@@ -1966,8 +1596,7 @@ function ringkasBatch(p: Product): string {
       if (blokDibayar) blokDibayar.classList.toggle('hidden', isShopee);
       if (blokCepat) blokCepat.classList.toggle('hidden', isShopee);
 
-      // Kosong jatuh ke tarif bawaan, dan dijepit 0-100 -- sama seperti
-      // server (lihat `jepitPersen` di frontmatter Astro).
+      // Kosong jatuh ke tarif bawaan dan dijepit 0-100 seperti server (`jepitPersen` di frontmatter).
       function persenInput(input, bawaan) {
         var mentah = input ? input.value.trim() : '';
         return mentah === '' ? bawaan : Math.min(100, Math.max(0, parseFloat(mentah) || bawaan));
@@ -1975,19 +1604,14 @@ function ringkasBatch(p: Product): string {
       var commissionPersen = persenInput(commissionFeeInput, SHOPEE_COMMISSION_PERSEN_DEFAULT);
       var servicePersen = persenInput(serviceFeeInput, SHOPEE_SERVICE_PERSEN_DEFAULT);
 
-      // Basis potongan Shopee: omzet SETELAH diskon. Sama dengan
-      // `basis_fee` di backend/src/pos/service.rs.
+      // Basis potongan Shopee: omzet setelah diskon, sama dengan `basis_fee` di `pos/service.rs`.
       var basisFee = Math.max(0, subtotal - potongan);
       var biayaKomisi = isShopee ? biayaPersenRupiah(basisFee, commissionPersen) : 0;
       var biayaLayanan = isShopee ? biayaPersenRupiah(basisFee, servicePersen) : 0;
       var biayaPph = isShopee ? biayaPersenRupiah(basisFee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
       var biayaProses = isShopee ? SHOPEE_ORDER_PROCESSING_FEE : 0;
 
-      // Untuk Shopee ini BUKAN lagi "yang dibayar pembeli" -- pembeli sudah
-      // membayar penuh di Shopee. Ini estimasi yang cair ke toko setelah
-      // keempat potongan di atas, dan itulah kenapa labelnya berganti jadi
-      // "Estimasi Total Penghasilan" di bawah. `biaya` (ongkir) sudah nol
-      // untuk Shopee, jadi rumusnya tetap satu untuk semua kanal.
+      // Untuk Shopee ini estimasi yang cair ke toko setelah empat potongan (bukan yang dibayar pembeli), makanya label berganti; `biaya` ongkir sudah nol sehingga rumusnya satu.
       var total = subtotal - potongan + biaya - biayaKomisi - biayaLayanan - biayaPph - biayaProses;
       var adaTunai = tunai();
 
@@ -2022,9 +1646,7 @@ function ringkasBatch(p: Product): string {
         if (isShopee) selBiayaProses.textContent = '-' + rupiah.format(biayaProses);
       }
 
-      // Kolom uang diterima hanya berlaku untuk tunai; dimatikan supaya
-      // angkanya tidak ikut terkirim sebagai pembayaran yang tidak pernah
-      // terjadi.
+      // Kolom uang diterima hanya untuk tunai; dimatikan supaya angkanya tidak terkirim sebagai pembayaran yang tak pernah terjadi.
       dibayar.disabled = !adaTunai;
 
       var bayar = parseFloat(dibayar.value);
@@ -2036,9 +1658,7 @@ function ringkasBatch(p: Product): string {
       labelKembalian.textContent = kurang ? 'Uang yang diterima masih kurang' : 'Kembalian';
       selKembalian.textContent = adaBayar ? rupiah.format(Math.abs(bayar - total)) : '—';
 
-      // Yang menahan penjualan tetap backend. Tombol ini cuma berhenti
-      // menawarkan aksi yang sudah pasti ditolak -- dan menyebutkan alasannya,
-      // supaya kasir tidak menekan tombol mati tanpa tahu apa yang kurang.
+      // Yang menahan penjualan tetap backend; tombol hanya berhenti menawarkan aksi yang pasti ditolak dan menyebut alasannya.
       var bisa = jalur > 0 && (!adaTunai || (adaBayar && bayar >= total));
       tombolBayar.disabled = !bisa;
       tombolBayar.textContent =
@@ -2054,9 +1674,7 @@ function ringkasBatch(p: Product): string {
       if (bilahTotal) bilahTotal.textContent = rupiah.format(total);
     }
 
-    // Batasnya sisa BATCH ini, bukan stok produk: dua batch produk yang sama
-    // punya jatah sendiri-sendiri, dan menjumlahkannya di sini akan
-    // menjanjikan butir yang tidak ada di kiriman yang dipilih.
+    // Batas adalah sisa batch ini, bukan stok produk, karena tiap batch punya jatah sendiri.
     function ubah(kolom, selisih) {
       var sisa = parseInt(kolom.dataset.sisa || '0', 10);
       var angka = nilai(kolom) + selisih;
@@ -2076,10 +1694,25 @@ function ringkasBatch(p: Product): string {
       return row ? document.getElementById(row.dataset.kolom) : null;
     }
 
+    var dialogDetail = borang.querySelector('[data-dialog-detail]');
+
     borang.addEventListener('click', function (e) {
-      // `[data-cetak-struk]` ditangani skrip module terpisah di bawah
-      // (butuh `import` untuk merender nota jadi gambar, yang tidak bisa
-      // dilakukan di sini -- lihat catatan `is:inline` di atas skrip ini).
+      var bukaDetail = e.target.closest('[data-buka-detail]');
+      if (bukaDetail && dialogDetail) {
+        var isi = bukaDetail.closest('[data-produk]').querySelector('[data-detail-isi]');
+        dialogDetail.querySelector('[data-detail-judul]').textContent = isi.dataset.judul;
+        dialogDetail.querySelector('[data-detail-badan]').replaceChildren(isi.cloneNode(true));
+        dialogDetail.showModal();
+        return;
+      }
+
+      // Ketukan di latar (di luar kotak isi) menutup dialog detail.
+      if (e.target === dialogDetail || e.target.closest('[data-tutup-detail]')) {
+        dialogDetail.close();
+        return;
+      }
+
+      // `[data-cetak-struk]` ditangani skrip module terpisah di bawah karena butuh `import` untuk merender nota jadi gambar.
 
       var buka = e.target.closest('[data-buka-batch]');
       if (buka) {
@@ -2108,8 +1741,7 @@ function ringkasBatch(p: Product): string {
         return;
       }
 
-      // Kendali −/+ di panel keranjang menulis ke KOLOM YANG SAMA milik
-      // katalog, bukan ke salinan: yang tampil di panel hanyalah angkanya.
+      // Kendali −/+ di panel keranjang menulis ke kolom yang sama milik katalog, bukan salinan.
       var tambahK = e.target.closest('[data-tambah-keranjang]');
       if (tambahK) {
         var kolomTambahK = kolomKeranjang(tambahK);
@@ -2138,8 +1770,7 @@ function ringkasBatch(p: Product): string {
       }
     });
 
-    /** Total berjalan, dibaca dari angka yang barusan dirender -- bukan dari
-        nilai yang dirender server saat halaman dimuat. */
+    /** Total berjalan dibaca dari angka yang barusan dirender, bukan nilai render server saat muat. */
     function totalBerjalan() {
       var subtotal = barisKeranjang.reduce(function (n, row) {
         var qty = nilai(document.getElementById(row.dataset.kolom));
@@ -2149,9 +1780,7 @@ function ringkasBatch(p: Product): string {
       return subtotal - potongan + Math.max(0, parseFloat(ongkir.value) || 0);
     }
 
-    // Enter di dalam panel batch men-submit form, dan pop up yang sedang
-    // dibuka lenyap bersama halamannya. Di dalam panel, Enter menutup panel
-    // saja; di kolom pencarian, Enter membuka panel produk teratas.
+    // Enter di panel batch menutup panel (bukan men-submit form), dan di kolom pencarian membuka panel produk teratas.
     borang.addEventListener('keydown', function (e) {
       if (e.key !== 'Enter') return;
 
@@ -2183,10 +1812,34 @@ function ringkasBatch(p: Product): string {
       if (e.target === kotakCari) saring();
     });
 
-    // Pil kategori menyaring di tempat, tidak mengirim form: mengirimnya
-    // berarti memuat ulang halaman, dan keranjang yang sedang dibangun ikut
-    // melewati server tanpa alasan.
+    // Pil kategori menyaring di tempat tanpa mengirim form, supaya keranjang yang sedang dibangun tidak ikut melewati server.
     if (pil) {
+      // Tepi memudar menandai masih ada pil di luar layar (scrollbar disembunyikan di CSS), dan tepi yang mentok tidak memudar.
+      function perbaruiPudar() {
+        var sisaKanan = pil.scrollWidth - pil.clientWidth - pil.scrollLeft;
+        pil.style.setProperty('--pudar-kiri', pil.scrollLeft > 1 ? '1.5rem' : '0px');
+        pil.style.setProperty('--pudar-kanan', sisaKanan > 1 ? '1.5rem' : '0px');
+      }
+      pil.addEventListener('scroll', perbaruiPudar, { passive: true });
+      window.addEventListener('resize', perbaruiPudar);
+      perbaruiPudar();
+
+      // Tanpa scrollbar, roda mouse biasa tidak menggeser baris mendatar.
+      pil.addEventListener(
+        'wheel',
+        function (e) {
+          if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+          var mentok =
+            e.deltaY < 0
+              ? pil.scrollLeft <= 0
+              : pil.scrollLeft + pil.clientWidth >= pil.scrollWidth - 1;
+          if (mentok) return;
+          e.preventDefault();
+          pil.scrollLeft += e.deltaY;
+        },
+        { passive: false }
+      );
+
       pil.addEventListener('change', function () {
         saring();
         Array.prototype.forEach.call(pil.querySelectorAll('label'), function (l) {
@@ -2197,8 +1850,7 @@ function ringkasBatch(p: Product): string {
 
     borang.addEventListener('change', function (e) {
       if (e.target.matches('[data-metode]')) hitung();
-      // Ganti kanal berarti seluruh harga di layar berganti, jadi harganya
-      // ditulis ulang dulu -- `hitung` menjumlahkan dari angka itu.
+      // Ganti kanal berarti harga di layar berganti, jadi ditulis ulang dulu karena `hitung` menjumlahkan dari angka itu.
       if (e.target.matches('[data-kanal]')) {
         terapkanKanal();
         hitung();
@@ -2217,8 +1869,7 @@ function ringkasBatch(p: Product): string {
           row.dataset.nama.indexOf(kata) !== -1 ||
           row.dataset.sku.indexOf(kata) !== -1;
         var cocokKategori = !kategori || row.dataset.kategori === kategori;
-        // Barang yang sudah masuk keranjang tidak pernah disembunyikan --
-        // kalau hilang dari layar, kasir tidak punya cara membatalkannya.
+        // Barang yang sudah masuk keranjang tidak pernah disembunyikan, kalau hilang kasir tak bisa membatalkannya.
         var diKeranjang = jumlahBaris(row) > 0;
         var tampil = diKeranjang || (cocokKata && cocokKategori);
         row.hidden = !tampil;
@@ -2232,39 +1883,7 @@ function ringkasBatch(p: Product): string {
   })();
 </script>
 
-{/*
-  Cetak/bagikan nota lewat share sheet OS.
-
-  Terpisah dari skrip `is:inline` di atas karena ini satu-satunya bagian
-  halaman kasir yang butuh `import` (`html2canvas-pro`, untuk merender
-  `.nota-cetak` jadi PNG) -- Astro membundel skrip module lewat Vite,
-  bukan skrip `is:inline`.
-
-  BUKAN `html-to-image`: library itu merender lewat trik SVG
-  `<foreignObject>` (serialisasi node jadi `<img>` bergambar SVG, lalu
-  digambar ke kanvas) yang terbukti gagal SENYAP untuk nota ini -- `toBlob`
-  selesai tanpa galat, tapi kanvas hasilnya kosong transparan, tidak cuma di
-  proyek ini (lihat isu bubkoo/html-to-image #160/#199/#449). `html2canvas-pro`
-  menggambar tiap elemen ke kanvas satu per satu, tanpa lewat `<foreignObject>`
-  sama sekali, jadi tidak kena batasan itu. Dipilih "-pro" (fork terawat dari
-  html2canvas), bukan `html2canvas` biasa, karena varian asli gagal mem-parse
-  warna `oklch()` -- dipakai luas di tema Tailwind v4 situs ini (lihat
-  `--color-stone-*`/`--color-emerald-*` di `theme.css`) walau nota sendiri
-  cuma hitam-putih; `html2canvas-pro` mendukungnya.
-
-  Alurnya: render `.nota-cetak` (nota yang sama yang dipakai `@media print`)
-  jadi gambar PNG dari klon off-screen, lalu:
-    1. Kalau `navigator.share` bisa menerima file (Web Share API level 2 --
-       Android Chrome, iOS Safari, dan Chromium desktop), buka share sheet
-       supaya kasir bisa memilih app seperti OpenLabel+ untuk mencetak lewat
-       printer thermal Bluetooth.
-    2. Kalau tidak didukung (mis. Firefox desktop) atau kasir membatalkan
-       pemilihan app lalu batal, unduh PNG-nya supaya tetap bisa dibuka
-       manual dari OpenLabel+.
-    3. Kalau perenderan gambarnya sendiri gagal (mis. galat tak terduga dari
-       library), jatuh ke `window.print()` bawaan browser supaya kasir tidak
-       pernah mentok tanpa cara mencetak sama sekali.
-*/}
+{/* Bagikan nota lewat share sheet OS (skrip module karena butuh `import` `html2canvas-pro`; `html-to-image` gagal senyap, `html2canvas` tak mem-parse `oklch()`); cadangan unduh PNG lalu `window.print()`. */}
 <script>
   import html2canvas from 'html2canvas-pro';
 
@@ -2288,8 +1907,7 @@ function ringkasBatch(p: Product): string {
           await navigator.share({ files: [file], title: 'Nota' });
           return;
         } catch (err) {
-          // AbortError: kasir menutup share sheet sendiri -- bukan galat,
-          // jangan lanjut ke unduhan supaya tidak mengejutkan.
+          // AbortError berarti kasir menutup share sheet sendiri, bukan galat, jadi tidak lanjut ke unduhan.
           if (err instanceof Error && err.name === 'AbortError') return;
         }
       }
@@ -2300,16 +1918,13 @@ function ringkasBatch(p: Product): string {
 
   async function notaKeFile(nota: HTMLElement) {
     const klon = nota.cloneNode(true) as HTMLElement;
-    // `.nota-cetak` sendiri `display: none` di layar (lihat theme.css) --
-    // style inline di sini menang atas itu tanpa mengubah elemen aslinya.
+    // `.nota-cetak` `display: none` di layar (theme.css); style inline di sini menang tanpa mengubah elemen aslinya.
     klon.style.display = 'block';
     klon.style.position = 'fixed';
     klon.style.left = '-9999px';
     klon.style.top = '0';
     klon.style.background = '#ffffff';
-    // Padding di sini saja, bukan ditambahkan ke `.nota-cetak` sendiri: PNG ini
-    // dibagikan/diunduh apa adanya (jadi butuh jarak dari tepi gambar), sedangkan
-    // `@media print` mencetak ke kertas struk yang marginnya sudah urusan printer.
+    // Padding hanya di sini, bukan di `.nota-cetak`: PNG dibagikan apa adanya sehingga butuh jarak dari tepi, sedangkan `@media print` margin-nya urusan printer.
     klon.style.padding = '16px';
     document.body.appendChild(klon);
     try {

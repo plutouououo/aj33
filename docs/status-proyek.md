@@ -310,7 +310,9 @@ prepared statement, dan sqlx memakainya untuk tiap query.
   upload multipart dan isian file di form. Catatan: tabel `product_images`
   **bukan** untuk ini (terikat `channel_listing_id`, isinya gambar listing
   marketplace).
-- Halaman `/pesanan` ada di menu tapi belum dibuat — tautan mati.
+- Halaman `/pesanan` (Pesanan Masuk) belum dibuat; menunya disembunyikan dari
+  `AppShell.astro` supaya tidak mengarah ke 404 — pasang lagi di sana begitu
+  halamannya ada.
 - `/pengaturan/platform` sekarang sudah ada halamannya, tapi masih placeholder
   "segera hadir" — belum ada endpoint backend untuk connect/disconnect
   Shopee/TikTok Shop maupun baca status koneksinya dari tabel `platforms`.

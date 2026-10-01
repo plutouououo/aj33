@@ -11,18 +11,7 @@ interface Props {
 const { judul, user } = Astro.props;
 const path = Astro.url.pathname;
 
-/**
- * Menu aplikasi.
- *
- * Yang ditampilkan ditentukan `bolehAkses` di `session.ts` -- daftar yang
- * sama yang dipakai middleware untuk memantulkan request. Menu di sini tidak
- * punya daftar perannya sendiri, supaya tidak pernah ada halaman yang
- * ditawarkan tapi ditolak, atau disembunyikan tapi sebenarnya terbuka.
- *
- * Dikelompokkan supaya daftar yang memanjang tetap bisa dipindai: "bisnis"
- * untuk yang ditata sekali lalu jarang disentuh, "operasional" untuk yang
- * dibuka tiap hari.
- */
+/** Menu aplikasi, difilter `bolehAkses` (daftar yang sama dengan middleware) agar tak ada halaman yang ditawarkan tapi ditolak; dikelompokkan supaya mudah dipindai. */
 const grup = [
   {
     judul: 'Ringkasan',
@@ -43,7 +32,7 @@ const grup = [
     judul: 'Operasional',
     menu: [
       { href: '/kasir', label: 'Kasir', ikon: 'keranjang' },
-      { href: '/pesanan', label: 'Pesanan Masuk', ikon: 'amplop' },
+      // '/pesanan' (Pesanan Masuk, ikon 'amplop') dipasang lagi di sini begitu halamannya ada; sebelumnya menunya mengarah ke 404.
       { href: '/tiket', label: 'Tiket Packing', ikon: 'papan' },
     ],
   },
@@ -76,13 +65,7 @@ const grupTampil = user
 const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
 ---
 
-<!--
-  `overflow-x-hidden` di `<html>` DAN `<body>`: di Safari iOS elemen yang
-  digulung/di-pan sebenarnya `<html>`, bukan `body` -- kalau cuma `body` yang
-  ditutup, konten sesempit apa pun yang membuat lebar dokumen lebih dari
-  lebar layar (mis. baris pil kategori kasir yang sengaja scroll mendatar)
-  tetap bisa dijangkau lewat geser jari, menampilkan area kosong di kanan.
--->
+<!-- `overflow-x-hidden` di `<html>` dan `<body>`: di Safari iOS yang di-pan adalah `<html>`, jadi konten yang melebihi layar tetap terjangkau bila hanya `body` yang ditutup. -->
 <!doctype html>
 <html lang="id" class="overflow-x-hidden">
   <head>
@@ -100,16 +83,13 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
     <link rel="apple-touch-icon" href="/ikon-192.png" />
 
     <script is:inline>
-      // Dibaca sebelum halaman digambar, bukan setelahnya: tiap klik menu di
-      // aplikasi ini memuat halaman baru, jadi kalau pilihan ciut dipasang
-      // belakangan sidebar akan berkedip lebar-lalu-menyempit tiap navigasi.
+      // Dibaca sebelum halaman digambar, supaya sidebar tidak berkedip lebar-lalu-menyempit tiap navigasi.
       try {
         if (localStorage.getItem('aj33_sidebar') === 'ciut') {
           document.documentElement.dataset.sidebar = 'ciut';
         }
       } catch {
-        // localStorage diblokir (mode privat). Sidebar tampil lebar, dan itu
-        // keadaan yang benar -- tidak ada yang perlu ditangani.
+        // localStorage diblokir (mode privat): sidebar tampil lebar dan itu sudah benar.
       }
     </script>
   </head>
@@ -118,16 +98,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
     {
       user ? (
         <div class="flex min-h-screen">
-          {/*
-            Saklar laci menu di layar kecil. Checkbox, bukan tombol ber-JS:
-            kalau menunya cuma bisa dibuka dengan JavaScript, mematikan JS
-            berarti tidak bisa berpindah halaman sama sekali. Diletakkan
-            sebagai anak pertama supaya `peer-checked:` bisa menjangkau
-            sidebar, tirai, dan kolom isi yang semuanya saudara di bawahnya.
-
-            `sr-only` menyembunyikan tanpa membuang dari urutan fokus, jadi
-            menu tetap bisa dibuka lewat Tab + Spasi.
-          */}
+          {/* Saklar laci menu berupa checkbox (bukan tombol JS) agar menu tetap bisa dibuka tanpa JavaScript; anak pertama agar `peer-checked:` menjangkau saudaranya. */}
           <input
             type="checkbox"
             id="buka-menu"
@@ -135,8 +106,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             aria-label="Buka menu navigasi"
           />
 
-          {/* Tirai gelap. Mengklik di mana pun di luar laci menutupnya --
-              perilaku yang diharapkan orang dari laci di ponsel. */}
+          {/* Tirai gelap: klik di luar laci menutupnya, seperti yang diharapkan dari laci di ponsel. */}
           <label
             for="buka-menu"
             class="fixed inset-0 z-20 hidden bg-black/40 peer-checked:block md:peer-checked:hidden"
@@ -196,8 +166,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
               ))}
             </nav>
 
-            {/* Hanya di layar lebar. Di ponsel laci sudah selebar penuh dan
-                menciutkannya jadi rel ikon tidak menambah ruang apa pun. */}
+            {/* Hanya di layar lebar; di ponsel laci sudah selebar penuh, jadi menciutkannya tidak menambah ruang. */}
             <button
               id="ciutkan"
               type="button"
@@ -206,7 +175,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
               aria-controls="sidebar"
               aria-expanded="true"
             >
-              <span id="ciutkan-ikon" class="text-base leading-none">«</span>
+              <span id="ciutkan-ikon" class="text-base leading-none" aria-hidden="true">«</span>
               <span class="teks-sidebar">Ciutkan</span>
             </button>
           </aside>
@@ -214,8 +183,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
           <div class="flex min-w-0 flex-1 flex-col transition-[margin] md:ml-[var(--lebar-sidebar)]">
             <header class="flex items-center justify-between gap-3 border-b border-[var(--color-garis)] bg-white px-4 py-3 md:gap-4 md:px-6 md:py-4">
               <div class="flex min-w-0 items-center gap-2">
-                {/* Pemicu laci. <label>, bukan <button>, karena yang
-                    menggerakkannya checkbox di atas -- lihat komentar di sana. */}
+                {/* Pemicu laci berupa `<label>`, bukan `<button>`, karena yang menggerakkannya adalah checkbox di atas. */}
                 <label
                   for="buka-menu"
                   class="aksi-baris -ml-1 shrink-0 cursor-pointer md:hidden"
@@ -247,17 +215,13 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
                     {user.role}
                   </span>
                 </span>
-                <a class="aksi-baris" href="/pengaturan/akun">Password</a>
                 <form method="POST" action="/logout">
                   <button class="aksi-baris">Keluar</button>
                 </form>
               </div>
             </header>
 
-            {/* Padding lebih rapat di ponsel. Bilah menempel (.bilah-tab,
-                .bilah-aksi, .bilah-bawah) membatalkan padding ini dengan
-                margin negatif, jadi keduanya harus berubah bersamaan --
-                lihat theme.css. */}
+            {/* Padding lebih rapat di ponsel; bilah menempel (.bilah-tab, .bilah-aksi, .bilah-bawah) membatalkannya dengan margin negatif, jadi keduanya harus berubah bersamaan (lihat theme.css). */}
             <main class="flex-1 px-4 py-4 md:px-6 md:py-6">
               <slot />
             </main>
@@ -272,9 +236,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
 
 
     <script is:inline>
-      // Tombol ciutkan. Pilihannya disimpan supaya bertahan lintas halaman --
-      // tanpa itu tombolnya tidak ada gunanya di aplikasi yang memuat ulang
-      // halaman tiap klik menu.
+      // Pilihan ciut disimpan agar bertahan lintas halaman, karena tiap klik menu memuat halaman baru.
       (() => {
         const tombol = document.getElementById('ciutkan');
         const ikon = document.getElementById('ciutkan-ikon');
@@ -303,13 +265,11 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
         gambar();
       })();
 
-      // Service worker didaftarkan setelah halaman selesai dimuat supaya
-      // tidak bersaing dengan permintaan yang menampilkan isi halaman.
+      // Service worker didaftarkan setelah halaman selesai dimuat agar tidak bersaing dengan permintaan isi halaman.
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch(() => {
-            // Registrasi gagal (mis. mode privat) tidak boleh mengganggu
-            // apa pun -- aplikasi tetap berjalan tanpa service worker.
+            // Registrasi gagal (mis. mode privat) tidak boleh mengganggu; aplikasi jalan tanpa service worker.
           });
         });
       }

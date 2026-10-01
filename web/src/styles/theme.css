@@ -1,20 +1,6 @@
 @import "tailwindcss";
 
-/*
-  Sistem visual AJ33. Rujukannya docs/panduan-ui.md -- kalau menambah token
-  atau komponen di sini, tambahkan juga penjelasannya di sana.
-
-  Dua merah yang berbeda, dan jangan ditukar:
-
-    merah-*  warna merek. Dipakai untuk aksi utama, navigasi aktif, kepala
-             tabel. Gelap dan pekat, jadi teks putih di atasnya lolos WCAG AA.
-    bahaya   merah terang bawaan Tailwind (red-600). Khusus galat, stok
-             menipis, dan aksi merusak.
-
-  Kalau keduanya memakai merah yang sama, tombol "Simpan" jadi tidak bisa
-  dibedakan dari peringatan -- pengguna berhenti memperhatikan warna merah
-  sama sekali.
-*/
+/* Sistem visual AJ33 (rujukan docs/panduan-ui.md); `merah-*` untuk merek/aksi utama dan `bahaya` (red-600) khusus galat dan aksi merusak, jangan ditukar. */
 @theme {
   /* Merek: bata tua. 600 untuk tombol, 800 untuk kepala tabel. */
   --color-merah-50: #fdf2f1;
@@ -28,15 +14,13 @@
   --color-merah-800: #7c1d17;
   --color-merah-900: #641814;
 
-  /* Kuning dipakai hemat: hanya status "menunggu tindakan". Luminansinya
-     tinggi, jadi selalu berpasangan dengan teks gelap, tidak pernah putih. */
+  /* Kuning hanya untuk status "menunggu tindakan"; luminansinya tinggi jadi selalu berpasangan dengan teks gelap. */
   --color-kuning-50: #fffbeb;
   --color-kuning-100: #fef3c7;
   --color-kuning-500: #f59e0b;
   --color-kuning-700: #b45309;
 
-  /* Netral. Latar aplikasi abu sangat muda supaya kartu putih di atasnya
-     punya tepi tanpa perlu bayangan tebal. */
+  /* Netral: latar abu sangat muda supaya kartu putih punya tepi tanpa bayangan tebal. */
   --color-dasar: #f7f7f8;
   --color-permukaan: #ffffff;
   --color-garis: #e8e6e4;
@@ -44,19 +28,15 @@
 
   --color-teks: #1c1917;
   --color-teks-lembut: #78716c;
-  --color-teks-samar: #a8a29e;
+  --color-teks-samar: #78716c;
 
   /* Lebar sidebar dipakai layout dan tombol ciutkan, jadi satu angka saja. */
   --lebar-sidebar: 15rem;
 
-  /* Tinggi bilah tab dipakai dua kali: oleh bilahnya sendiri dan oleh
-     scroll-margin tiap bagian. Satu angka supaya lompatan #anchor tidak
-     pernah berhenti di balik bilah yang menempel. */
+  /* Tinggi bilah tab dipakai bilahnya dan scroll-margin bagian, satu angka agar lompatan #anchor tak berhenti di balik bilah. */
   --tinggi-bilah-tab: 3.25rem;
 
-  /* Lebar maksimum satu kolom isian. Isian yang menurun ke bawah tanpa batas
-     lebar justru lebih sulit dibaca di monitor lebar: mata harus menyeberangi
-     layar untuk tiap baris. 34rem kira-kira sepanjang satu kalimat nyaman. */
+  /* Lebar maksimum kolom isian; 34rem kira-kira satu kalimat nyaman, lebih lebar justru sulit dibaca di monitor lebar. */
   --lebar-borang: 34rem;
 }
 
@@ -73,34 +53,24 @@
       "Helvetica Neue", Arial, sans-serif;
   }
 
-  /* Fokus keyboard harus selalu terlihat. Tanpa ini, pengguna yang
-     bernavigasi dengan Tab kehilangan jejak posisinya. */
+  /* Fokus keyboard harus selalu terlihat agar pengguna Tab tidak kehilangan posisi. */
   :focus-visible {
     outline: 2px solid var(--color-merah-600);
     outline-offset: 2px;
   }
 }
 
-/*
-  `tombol` dan `lencana` dideklarasikan sebagai @utility, bukan kelas biasa di
-  @layer components. Di Tailwind v4, `@apply` hanya menerima utility -- kelas
-  komponen buatan sendiri ditolak. Dengan @utility, varian di bawah bisa
-  membangun di atasnya tanpa menyalin ulang deklarasi dasarnya.
-*/
+/* `tombol` dan `lencana` berupa @utility karena `@apply` di Tailwind v4 hanya menerima utility, sehingga varian bisa dibangun di atasnya. */
 @utility tombol {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5
          text-sm font-semibold transition-colors
          disabled:cursor-not-allowed disabled:opacity-50;
 }
 
-/*
-  Pil saringan yang bisa ditekan. Sengaja bukan varian `lencana`: lencana
-  hanya menampilkan status dan tidak bisa diklik, sedangkan pil adalah target
-  sentuh -- paddingnya lebih besar dan punya keadaan hover.
-*/
+/* Pil saringan yang bisa ditekan, sengaja bukan varian `lencana` (yang hanya status): padding lebih besar dan ada hover. */
 @utility pil {
   @apply inline-flex shrink-0 items-center whitespace-nowrap rounded-full border
-         px-4 py-2 text-sm font-medium transition-colors;
+         min-h-11 px-4 py-2 text-sm font-medium transition-colors;
 }
 
 @utility lencana {
@@ -110,36 +80,31 @@
 @layer components {
   /* --- Tombol ------------------------------------------------------- */
 
-  /* Aksi utama halaman. Satu saja per layar: kalau ada dua, keduanya
-     berhenti terbaca sebagai "yang ini dulu". */
+  /* Aksi utama halaman, satu saja per layar agar tidak ada dua "yang ini dulu". */
   .tombol-utama {
     @apply tombol bg-merah-600 text-white hover:bg-merah-700;
   }
 
-  /* Aksi pendamping yang setara pentingnya (mis. "Import" di sebelah
-     "Tambah"): sama besar, tapi tidak menarik mata lebih dulu. */
+  /* Aksi pendamping yang setara pentingnya (mis. "Import" di sebelah "Tambah"): sama besar tapi tidak menarik mata lebih dulu. */
   .tombol-halus {
     @apply tombol border border-[var(--color-garis)] bg-white text-stone-700
            hover:border-merah-200 hover:bg-merah-50 hover:text-merah-700;
   }
 
-  /* Aksi merusak yang tidak bisa dibatalkan. Memakai merah bahaya, bukan
-     merah merek. */
+  /* Aksi merusak yang tak bisa dibatalkan, memakai merah bahaya bukan merah merek. */
   .tombol-bahaya {
     @apply tombol bg-red-600 text-white hover:bg-red-700;
   }
 
-  /* Aksi di dalam baris tabel. Ditulis kecil dan kalem supaya tidak
-     bersaing dengan isi barisnya sendiri. */
+  /* Aksi di dalam baris tabel, kecil dan kalem agar tak bersaing dengan isi barisnya. */
   .aksi-baris {
-    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm
-           text-stone-500 transition-colors hover:bg-merah-50 hover:text-merah-700
+    @apply inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5
+           rounded-md px-2 py-1 text-sm text-stone-500 transition-colors hover:bg-merah-50 hover:text-merah-700
            disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent
            disabled:hover:text-stone-500;
   }
 
-  /* <summary> yang tampil sebagai tombol. `list-none` saja tidak cukup:
-     Safari menggambar segitiganya lewat pseudo-element sendiri. */
+  /* `<summary>` yang tampil sebagai tombol; `list-none` tak cukup karena Safari menggambar segitiganya lewat pseudo-element sendiri. */
   summary.tombol-utama::-webkit-details-marker,
   summary.tombol-halus::-webkit-details-marker {
     display: none;
@@ -152,17 +117,13 @@
            p-5 shadow-sm;
   }
 
-  /* Kartu tanpa padding, untuk isi yang mengatur paddingnya sendiri
-     (tabel, daftar berpembatas). */
+  /* Kartu tanpa padding untuk isi yang mengatur paddingnya sendiri (tabel, daftar berpembatas). */
   .kartu-rapat {
     @apply overflow-hidden rounded-xl border border-[var(--color-garis)]
            bg-[var(--color-permukaan)] shadow-sm;
   }
 
-  /* Kartu satu angka, dipakai berjajar di dasbor dan laporan. Keterangan di
-     atas, angkanya di bawah: yang dicari mata saat memindai sebaris kartu
-     adalah angkanya, dan angka yang sejajar di seluruh baris lebih cepat
-     dibandingkan daripada angka yang posisinya ikut panjang keterangan. */
+  /* Kartu satu angka (keterangan di atas, angka di bawah) agar angka sejajar sebaris dan mudah dibandingkan, dipakai di dasbor dan laporan. */
   .kartu-angka {
     @apply flex flex-col gap-1 rounded-xl border border-[var(--color-garis)]
            bg-[var(--color-permukaan)] p-5 shadow-sm;
@@ -178,10 +139,7 @@
     @apply text-xs text-[var(--color-teks-lembut)];
   }
 
-  /* Pil naik/turun di kartu ringkasan laporan, dibanding periode setara
-     sebelumnya. `red-600` Tailwind bawaan dipakai untuk "turun" -- sama
-     seperti "bahaya" di atas -- bukan `merah-*` milik merek, supaya
-     "turun" tidak disalahbaca sebagai warna aksi utama. */
+  /* Pil naik/turun di ringkasan laporan; "turun" memakai `red-600` seperti "bahaya", bukan `merah-*` merek, agar tak terbaca sebagai warna aksi utama. */
   .lencana-naik {
     @apply lencana bg-emerald-50 text-emerald-700;
   }
@@ -192,7 +150,7 @@
   /* --- Kolom isian --------------------------------------------------- */
 
   .kolom {
-    @apply w-full rounded-lg border border-[var(--color-garis)] bg-white px-3 py-2.5
+    @apply min-h-11 w-full rounded-lg border border-[var(--color-garis)] bg-white px-3 py-2.5
            text-sm text-stone-900 placeholder:text-[var(--color-teks-samar)]
            focus:border-merah-500 focus:outline-none focus:ring-2 focus:ring-merah-100;
   }
@@ -203,9 +161,7 @@
 
   /* --- Tabel --------------------------------------------------------- */
 
-  /* Kepala tabel memakai merah merek pekat dengan teks putih. Kontras
-     tinggi ini yang memisahkan judul kolom dari ratusan baris di bawahnya
-     tanpa perlu garis tebal. */
+  /* Kepala tabel merah merek pekat berteks putih; kontras tinggi memisahkan judul kolom dari ratusan baris tanpa garis tebal. */
   .tabel {
     @apply w-full border-collapse text-sm;
   }
@@ -223,17 +179,24 @@
     @apply bg-merah-50/40;
   }
 
-  /* Kolom angka selalu rata kanan dan tabular, supaya digit sejajar dan
-     selisih besaran terlihat dari panjangnya. */
+  /* Tautan dan tombol di sel punya area sentuh 44 px; `-my-3` sama dengan padding vertikal sel sehingga tinggi baris tidak membesar. */
+  .tabel tbody td :is(a, button) {
+    @apply -my-3 inline-flex min-h-11 items-center;
+  }
+
+  /* Kotak centang tetap 16 px dan label pembungkus memberi area sentuh 44 px; margin negatif menjaga tata letak sel. */
+  .kotak-sentuh {
+    @apply -m-3.5 inline-flex p-3.5;
+  }
+
+  /* Kolom angka rata kanan dan tabular supaya digit sejajar dan selisih besaran terlihat. */
   .sel-angka {
     @apply text-right tabular-nums;
   }
 
   /* --- Lencana status ------------------------------------------------ */
 
-  /* Kuning menunggu tindakan orang, merah merek sedang berjalan, hijau
-     selesai, merah bahaya gagal. Dipakai konsisten untuk status tiket,
-     pesanan, produk, dan stok. */
+  /* Warna status konsisten: kuning menunggu, merah merek berjalan, hijau selesai, merah bahaya gagal (tiket, pesanan, produk, stok). */
   .lencana-perlu-tindakan {
     @apply lencana bg-kuning-100 text-kuning-700;
   }
@@ -246,8 +209,7 @@
   .lencana-gagal {
     @apply lencana bg-red-100 text-red-700;
   }
-  /* Bukan status kerja, melainkan "dimatikan" -- abu, bukan warna apa pun,
-     supaya tidak terbaca sebagai peringatan. */
+  /* Bukan status kerja melainkan "dimatikan", jadi abu agar tidak terbaca sebagai peringatan. */
   .lencana-nonaktif {
     @apply lencana bg-stone-100 text-stone-500;
   }
@@ -271,12 +233,11 @@
   }
 
   .nav-tautan {
-    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium
+    @apply flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium
            text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900;
   }
 
-  /* Halaman aktif ditandai latar merah muda DAN teks merah pekat, bukan
-     salah satunya: latar saja terlalu samar di layar toko yang terang. */
+  /* Halaman aktif ditandai latar merah muda dan teks merah pekat sekaligus, karena latar saja terlalu samar di layar toko yang terang. */
   .nav-tautan-aktif {
     @apply flex items-center gap-3 rounded-lg bg-merah-50 px-3 py-2.5 text-sm
            font-semibold text-merah-700;
@@ -284,9 +245,7 @@
 
   /* --- Remah roti ----------------------------------------------------- */
 
-  /* Halaman dalam tidak punya nama induknya di topbar -- topbar hanya
-     menampilkan judul halaman itu sendiri -- jadi jalan kembalinya harus
-     ditulis di badan halaman. */
+  /* Halaman dalam tidak punya nama induk di topbar, jadi jalan kembalinya ditulis di badan halaman. */
   .remah {
     @apply mb-4 flex flex-wrap items-center gap-1.5 text-sm
            text-[var(--color-teks-lembut)];
@@ -300,11 +259,7 @@
 
   /* --- Bilah tab bagian ----------------------------------------------- */
 
-  /* Tautan lompat ke bagian-bagian formulir panjang. BUKAN panel yang saling
-     menyembunyikan: seluruh bagian tetap terlihat saat digulir, jadi form
-     tetap bisa diisi berurutan tanpa JavaScript.
-     `-mx-6 px-6` membatalkan padding <main> milik AppShell supaya latarnya
-     penuh selebar kolom isi. z-10, tetap di bawah sidebar yang z-20. */
+  /* Tautan lompat ke bagian formulir panjang, bukan panel yang saling menyembunyikan; `-mx-6 px-6` membatalkan padding `<main>` AppShell, z-10 di bawah sidebar z-20. */
   .bilah-tab {
     @apply sticky top-0 z-10 -mx-4 mb-5 flex h-[var(--tinggi-bilah-tab)]
            items-stretch gap-1 overflow-x-auto border-b
@@ -312,16 +267,13 @@
            md:-mx-6 md:px-6;
   }
   .tab-bagian {
-    @apply inline-flex shrink-0 items-center whitespace-nowrap border-b-2
+    @apply inline-flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-2
            border-transparent px-3 text-sm font-medium
            text-[var(--color-teks-lembut)] transition-colors
            hover:border-merah-200 hover:text-merah-700;
   }
 
-  /* Sasaran lompatan. Tanpa scroll-margin, #anchor berhenti tepat di bawah
-     bilah tab yang menempel dan judul bagiannya tertutup.
-     `:target` menyorot bagian TUJUAN, bukan tabnya -- lihat panduan-ui.md
-     soal kenapa bilah tab sengaja tidak punya keadaan aktif. */
+  /* Sasaran lompatan memakai scroll-margin agar judul tak tertutup bilah tab; `:target` menyorot bagian tujuan, bukan tabnya (lihat panduan-ui.md). */
   .sasaran-bagian {
     scroll-margin-top: calc(var(--tinggi-bilah-tab) + 1rem);
   }
@@ -331,10 +283,7 @@
 
   /* --- Bilah aksi menempel -------------------------------------------- */
 
-  /* Tombol simpan formulir panjang harus terjangkau dari bagian mana pun,
-     jadi tidak ikut tergulir. `-mx-6 -mb-6` membatalkan padding <main> milik
-     AppShell supaya bilahnya rapat ke tepi bawah kolom isi -- kalau padding
-     itu berubah, bilah ini ikut rusak. */
+  /* Tombol simpan formulir panjang harus terjangkau dari bagian mana pun; `-mx-6 -mb-6` membatalkan padding `<main>` AppShell, jadi ikut rusak bila padding itu berubah. */
   .bilah-aksi {
     @apply sticky bottom-0 z-10 -mx-4 -mb-4 mt-6 flex flex-wrap items-center
            justify-end gap-3 border-t border-[var(--color-garis)]
@@ -344,8 +293,7 @@
 
   /* --- Susunan isian menurun ------------------------------------------ */
 
-  /* Satu isian per baris. Isian bersebelahan membuat mata memindai zig-zag,
-     dan urutan Tab-nya berhenti sama dengan urutan bacanya. */
+  /* Satu isian per baris agar mata tak zig-zag dan urutan Tab sama dengan urutan baca. */
   .borang-tegak {
     @apply flex flex-col gap-5;
   }
@@ -362,10 +310,7 @@
 
   /* --- Pil saringan ---------------------------------------------------- */
 
-  /* Kategori di kasir dipilih dengan satu ketukan, bukan lewat <select>:
-     memilih dari daftar gulung sambil memegang barang terlalu lambat.
-     Barisnya menggulung mendatar, jadi kategori boleh bertambah tanpa
-     mengubah tinggi layar. */
+  /* Kategori di kasir dipilih dengan satu ketukan (bukan `<select>`) karena memilih dari daftar gulung sambil memegang barang terlalu lambat; barisnya menggulung mendatar. */
   .pil-diam {
     @apply pil border-[var(--color-garis)] bg-white text-stone-600
            hover:border-merah-200 hover:bg-merah-50 hover:text-merah-700;
@@ -376,9 +321,7 @@
 
   /* --- Kartu produk kasir ---------------------------------------------- */
 
-  /* Satu kartu = satu barang yang bisa dijual. Seluruh blok informasinya
-     adalah target ketuk "pilih batch", jadi tidak ada aksi lain di dalamnya
-     selain <details> dan panel batchnya sendiri. */
+  /* Satu kartu = satu barang yang bisa dijual; seluruh blok infonya adalah target ketuk "pilih batch", tanpa aksi lain selain detail dan panel batch. */
   .kartu-produk {
     @apply flex flex-col overflow-hidden rounded-xl border
            border-[var(--color-garis)] bg-[var(--color-permukaan)] shadow-sm
@@ -389,9 +332,7 @@
            bg-merah-50 shadow-sm transition-colors;
   }
 
-  /* Jendela foto. Tanpa `image_url` yang tampil adalah garis miring samar --
-     bentuk kartunya tetap sama tinggi, jadi barisan kartu tidak bergerigi
-     hanya karena sebagian barang belum difoto. */
+  /* Jendela foto tanpa `image_url` menampilkan garis miring samar dengan tinggi sama, supaya barisan kartu tak bergerigi. */
   .foto-produk {
     @apply relative block h-24 border-b border-[var(--color-garis-lembut)];
     background-image: repeating-linear-gradient(
@@ -401,12 +342,10 @@
     );
   }
   .foto-sku {
-    @apply absolute bottom-1.5 left-2 font-mono text-[10px]
-           text-[var(--color-teks-lembut)];
+    @apply absolute bottom-1.5 left-2 rounded bg-white/85 px-1 font-mono
+           text-[10px] text-[var(--color-teks-lembut)];
   }
-  /* Berapa pack barang ini yang sudah masuk keranjang. Ditempel di fotonya
-     supaya terbaca saat memindai barisan kartu, bukan hanya saat membaca
-     satu kartu. */
+  /* Jumlah pack di keranjang ditempel di foto agar terbaca saat memindai barisan kartu. */
   .lencana-jumlah {
     @apply absolute right-1.5 top-1.5 grid h-6 min-w-6 place-items-center
            rounded-full bg-merah-600 px-1.5 text-xs font-bold tabular-nums
@@ -415,9 +354,7 @@
 
   /* --- Panel keranjang kasir --------------------------------------------- */
 
-  /* Keranjang, pembayaran, dan struk hidup di satu kolom yang menempel di
-     samping katalog. Di bawah `lg` kolomnya turun ke bawah katalog dan
-     `.bilah-bawah` yang menjadi jalan ke sana. */
+  /* Keranjang, pembayaran, dan struk satu kolom menempel di samping katalog; di bawah `lg` turun ke bawah katalog dan `.bilah-bawah` jadi jalan ke sana. */
   .panel-kasir {
     @apply flex w-full flex-col gap-3 lg:sticky lg:top-4 lg:w-96 lg:shrink-0
            lg:self-start;
@@ -426,29 +363,23 @@
     @apply flex items-center justify-between gap-2 bg-merah-600 px-4 py-2.5
            text-xs font-bold uppercase tracking-wider text-white;
   }
-  /* Satu baris = satu (produk, batch), sama dengan satu baris yang dikirim ke
-     `POST /transactions`. Nama dan batch mengambil satu baris penuh; jumlah,
-     kendali, dan subtotalnya turun ke baris kedua. */
+  /* Satu baris = satu (produk, batch) seperti baris di `POST /transactions`; nama dan batch satu baris penuh, jumlah/kendali/subtotal di baris kedua. */
   .baris-keranjang {
     @apply grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 border-b
            border-[var(--color-garis-lembut)] px-4 py-2.5;
   }
 
+  /* Stepper −/+ jumlah 44 px karena ditekan berulang oleh kasir yang memegang barang; 36 px terlalu kecil di HP. */
+  .tombol-bulat {
+    @apply grid h-11 w-11 shrink-0 place-items-center rounded-full border
+           border-[var(--color-garis)] bg-white text-lg leading-none
+           text-stone-700 transition-colors hover:border-merah-300
+           hover:bg-merah-50 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
   /* --- Pemilih batch di kasir ------------------------------------------- */
 
-  /* Satu <dialog> per barang, berisi kolom jumlah untuk TIAP batch barang
-     itu. Kolom-kolom itulah field yang benar-benar terkirim; tidak ada
-     salinan kedua di tempat lain.
-
-     Dirender server dengan atribut `open`, jadi tanpa JavaScript isinya
-     tampil sebagai panel biasa di dalam kartu dan kasir tetap bisa berjualan.
-     Skrip halaman menutupnya saat muat, lalu membukanya lagi dengan
-     `showModal()` -- yang berpindah hanya cara menampilkannya, bukan
-     datanya.
-
-     Aturan pertama membatalkan gaya bawaan <dialog> (absolute, border,
-     padding, latar sendiri) supaya bentuk "panel di dalam kartu" itu rapi.
-     `:modal` mengembalikannya sebagai pop up saat benar-benar dibuka. */
+  /* Satu `<dialog>` per barang berisi kolom jumlah tiap batch (field yang terkirim); tanpa JS tampil sebagai panel biasa, `:modal` mengubahnya jadi pop up lewat `showModal()`. */
   .panel-batch {
     @apply static m-0 w-auto max-w-none border-0 border-t
            border-[var(--color-garis-lembut)] bg-transparent px-3 pb-3 pt-2;
@@ -462,6 +393,28 @@
   .panel-batch::backdrop {
     background: rgb(0 0 0 / 0.45);
   }
+  /* Dialog detail produk: satu untuk seluruh katalog, selalu modal. */
+  .panel-detail {
+    @apply m-auto w-[min(26rem,calc(100vw-2rem))] rounded-xl border
+           border-[var(--color-garis)] bg-[var(--color-permukaan)] p-0
+           text-[var(--color-teks)] shadow-lg;
+  }
+  .panel-detail::backdrop {
+    background: rgb(0 0 0 / 0.45);
+  }
+  /* Baris pil menggulung mendatar: scrollbar disembunyikan, diganti tepi memudar (skrip mengatur --pudar-kiri/--pudar-kanan); tanpa JS tepi kanan tetap memudar. */
+  /* `relative` karena radio `sr-only` di dalamnya `absolute`; tanpa penjangkar ia lolos dari pemotongan dan melebarkan dokumen (798 px di layar 412 px) sehingga dialog tampil di tengah layout itu. */
+  .pil-gulung {
+    position: relative;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--pudar-kiri, 0px),
+      #000 calc(100% - var(--pudar-kanan, 1.5rem)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--pudar-kiri, 0px),
+      #000 calc(100% - var(--pudar-kanan, 1.5rem)), transparent);
+  }
+  .pil-gulung::-webkit-scrollbar {
+    display: none;
+  }
   /* Satu batch = satu baris: keterangan di kiri, kendali jumlah di kanan. */
   .baris-batch {
     @apply flex items-center gap-2 border-t border-[var(--color-garis-lembut)]
@@ -470,9 +423,7 @@
 
   /* --- Bilah bawah kasir ------------------------------------------------ */
 
-  /* Sama menempelnya dengan `.bilah-aksi`, tapi isinya ringkasan keranjang
-     yang harus terbaca sekilas, jadi tidak rata kanan dan diberi bayangan
-     supaya terpisah dari daftar produk yang bergulir di belakangnya. */
+  /* Sama menempelnya dengan `.bilah-aksi`, tapi berisi ringkasan keranjang yang terbaca sekilas dan diberi bayangan agar terpisah dari daftar produk di belakangnya. */
   .bilah-bawah {
     @apply sticky bottom-0 z-10 -mx-4 -mb-4 mt-6 flex flex-wrap items-center
            gap-3 border-t border-[var(--color-garis)]
@@ -483,11 +434,7 @@
 
   /* --- Kotak total tagihan ---------------------------------------------- */
 
-  /* Angka yang diminta ke pembeli. Sebelumnya ditulis sebagai teks biasa
-     seukuran keterangan, padahal kembalian di bawahnya besar -- kasir jadi
-     membaca angka yang salah lebih dulu. Keduanya sekarang sama besar:
-     total yang ditagih dan kembalian yang diberikan sama pentingnya, dan
-     dibedakan warnanya saja (netral vs hijau), bukan ukurannya. */
+  /* Angka yang diminta ke pembeli, sama besar dengan kembalian (beda warna saja) karena keduanya sama penting dan salah baca berarti uang hilang. */
   .kotak-total {
     @apply flex items-baseline justify-between gap-4 rounded-xl border
            border-[var(--color-garis)] bg-stone-50 px-4 py-3;
@@ -498,8 +445,7 @@
 
   /* --- Kotak kembalian -------------------------------------------------- */
 
-  /* Angka yang dibacakan ke pembeli. Ditulis sebesar mungkin karena inilah
-     satu-satunya angka di layar yang salah bacanya berarti uang hilang. */
+  /* Angka yang dibacakan ke pembeli, sebesar mungkin karena salah bacanya berarti uang hilang. */
   .kotak-kembalian {
     @apply rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3
            text-emerald-900;
@@ -508,19 +454,14 @@
     @apply text-2xl font-bold tabular-nums;
   }
 
-  /* Bentuk yang sama persis dengan `.kotak-kembalian`, warnanya saja yang
-     berganti jadi merah bahaya. Keduanya menempati kotak yang sama di panel
-     pembayaran: "uangnya cukup?" satu pertanyaan, jadi satu tempat jawaban. */
+  /* Bentuk sama dengan `.kotak-kembalian` tapi merah bahaya; keduanya satu kotak karena menjawab satu pertanyaan, "uangnya cukup?". */
   .kotak-kurang {
     @apply rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-800;
   }
 
   /* --- Nota cetak (struk kertas) ---------------------------------------- */
 
-  /* Disembunyikan di layar. Hanya `@media print` di bawah -- di luar
-     @layer, supaya urutan cascade-nya pasti menang atas komponen ini --
-     yang menampilkannya kembali saat mencetak. Lebar sempit dan huruf
-     monospace meniru struk printer thermal/kasir, bukan kertas A4. */
+  /* Disembunyikan di layar; hanya `@media print` di luar @layer yang menampilkannya, dengan lebar sempit dan monospace meniru struk thermal. */
   .nota-cetak {
     @apply mx-auto hidden max-w-xs font-mono text-xs text-black;
   }
@@ -547,48 +488,20 @@
   }
 }
 
-/*
-  Saklar progressive enhancement untuk halaman kasir.
-
-  `data-js` dipasang skrip di halaman itu sebagai baris pertamanya. Tombol
-  -/+ hanya berguna kalau ada JavaScript; kolom angka hanya perlu terlihat
-  kalau tidak ada. KEDUANYA selalu ada di HTML dan selalu ikut terkirim --
-  yang berubah cuma yang terlihat. Karena itu server menerima bentuk data
-  yang sama persis apakah JavaScript hidup atau mati.
-
-  Ditaruh di luar @layer components dengan alasan yang sama seperti blok
-  sidebar di bawah: `:root` bukan milik komponen mana pun.
-*/
-/*
-  KEDUANYA HANYA MENYEMBUNYIKAN, tidak pernah menentukan display saat
-  terlihat.
-
-  Sebelumnya aturannya berbunyi `:root[data-js] .hanya-js { display:
-  inline-flex }`, dan itu diam-diam menimpa display milik elemennya sendiri.
-  Dua kerusakan lahir dari satu baris itu: `.tombol-bulat` yang memusatkan
-  tanda −/+ dengan `grid place-items-center` berubah jadi flex sehingga
-  tandanya menempel ke kiri lingkaran, dan tombol informasi produk di kasir
-  berubah jadi flex baris sehingga nama, SKU, dan harga berjejer ke samping
-  padahal ketiganya sudah ditulis `block`.
-
-  Dengan bentuk di bawah, keadaan "terlihat" tidak punya deklarasi display
-  sama sekali -- tiap elemen memakai display-nya sendiri, dan menambah
-  `.hanya-js` pada elemen apa pun tidak lagi bisa mengubah tata letaknya.
-*/
+/* Saklar progressive enhancement kasir: `data-js` dipasang skrip; tombol -/+ dan kolom angka selalu ada di HTML dan terkirim, hanya yang terlihat berubah; di luar @layer karena `:root`. */
+/* Keduanya hanya menyembunyikan, tak pernah menentukan display saat terlihat; aturan lama `inline-flex` menimpa display elemen (merusak `.tombol-bulat` dan tombol info produk). */
 :root:not([data-js]) .hanya-js {
   display: none;
 }
 :root[data-js] .tanpa-js {
   display: none;
 }
+/* Panel batch dirender tanpa `open` (45 panel terbuka berarti 45 tata letak yang langsung ditutup skrip); tanpa JS tampil sebagai panel biasa lewat aturan ini. */
+:root:not([data-js]) .panel-batch:not([open]) {
+  display: block;
+}
 
-/*
-  Sidebar ciut menyisakan ikon saja. Lebarnya diubah lewat variabel yang sama
-  dengan yang dipakai margin konten, jadi keduanya tidak bisa lepas sinkron.
-
-  Ditaruh di sini, bukan di <style> milik AppShell, karena style Astro
-  ter-scope per komponen dan `:root` bukan milik komponen mana pun.
-*/
+/* Sidebar ciut menyisakan ikon; lebar diubah lewat variabel yang sama dengan margin konten, dan ditaruh di sini karena style Astro ter-scope per komponen sedangkan `:root` bukan milik komponen. */
 :root[data-sidebar='ciut'] {
   --lebar-sidebar: 4.25rem;
 }
@@ -599,18 +512,7 @@
   padding-top: 1rem;
 }
 
-/*
-  Di bawah breakpoint md, sidebar berubah jadi laci geser yang menutupi isi,
-  bukan kolom di sampingnya. Dua hal harus dipaksa kembali normal di sana:
-
-  Lebarnya. Kalau pengguna pernah menciutkan sidebar di desktop, pilihan itu
-  tersimpan di localStorage dan ikut terbawa ke ponsel -- lacinya akan terbuka
-  selebar 4,25rem berisi ikon tanpa teks, yang tidak ada gunanya sebagai menu
-  layar penuh.
-
-  Tombol "Ciutkan" sendiri sudah disembunyikan lewat `md:flex` di AppShell,
-  jadi di layar kecil keadaan ini tidak bisa diubah dari mana pun.
-*/
+/* Di bawah md sidebar jadi laci layar penuh, jadi lebar ciut yang tersimpan di localStorage dipaksa normal (tombol Ciutkan tersembunyi di layar kecil, keadaan itu tak bisa diubah). */
 @media (max-width: 47.9375rem) {
   :root[data-sidebar='ciut'] {
     --lebar-sidebar: 15rem;
@@ -620,22 +522,7 @@
   }
 }
 
-/*
-  Cetak nota kasir.
-
-  Trik "sembunyikan semuanya, tampilkan satu blok" klasik: SELURUH halaman
-  disembunyikan lewat `visibility` (bukan `display`, supaya tata letaknya
-  tidak ikut runtuh sebelum aturan kedua sempat menimpanya), lalu `.nota-cetak`
-  beserta seluruh isinya dikembalikan terlihat dan dilepas dari alur normal ke
-  pojok kiri-atas kertas. `.nota-cetak` sendiri berawal `display: none` (lihat
-  komponennya di atas) -- itu sebabnya blok ini juga harus mengembalikan
-  `display: block`, karena `visibility: visible` saja tidak berlaku pada
-  elemen yang sudah `display: none`.
-
-  Di luar @layer dengan alasan yang sama seperti blok `.hanya-js`/`.tanpa-js`
-  di atas: gaya tanpa @layer selalu menang atas gaya di dalam @layer,
-  terlepas dari urutan tempatnya ditulis di berkas ini.
-*/
+/* Cetak nota kasir: seluruh halaman disembunyikan lewat `visibility` lalu `.nota-cetak` dikembalikan (`display: block`) ke pojok kertas; di luar @layer agar menang atas gaya ber-layer. */
 @media print {
   body * {
     visibility: hidden;
