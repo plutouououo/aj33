@@ -369,10 +369,10 @@
 
   /* --- Panel keranjang kasir --------------------------------------------- */
 
-  /* Keranjang, pembayaran, dan struk satu kolom menempel di samping katalog dan menggulung sendiri; 6.5rem = tinggi topbar + padding, supaya dasarnya muat di layar sebelum halaman digulir. */
+  /* Keranjang, pembayaran, dan struk satu kolom di samping katalog; tingginya dibatasi form kasir (lihat kasir.astro) dan isi yang melebihinya menggulung di sini. */
   .panel-kasir {
-    @apply flex w-full flex-col gap-3 scroll-mt-[calc(var(--tinggi-topbar)+1rem)] lg:sticky lg:top-[calc(var(--tinggi-topbar)+1rem)] lg:w-96 lg:shrink-0
-           lg:self-start lg:max-h-[calc(100dvh-6.5rem)] lg:overflow-y-auto
+    @apply flex w-full flex-col gap-3 scroll-mt-[calc(var(--tinggi-topbar)+1rem)] lg:w-96 lg:shrink-0
+           lg:self-start lg:max-h-full lg:overflow-y-auto
            lg:pb-1 lg:*:shrink-0;
   }
   /* Tombol bayar menempel di dasar panel yang menggulung supaya selalu terjangkau walau isi panel lebih tinggi dari layar. */
@@ -427,6 +427,22 @@
   }
   .pil-gulung::-webkit-scrollbar {
     display: none;
+  }
+  /* Tetap bisa digulung (roda, sentuh, keyboard) tanpa menampilkan batang gulung. */
+  .tanpa-scrollbar {
+    scrollbar-width: none;
+  }
+  .tanpa-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  /* Tepi atas/bawah memudar selama masih ada isi di luar layar (skrip mengisi --pudar-atas/--pudar-bawah); hanya di layar lebar tempat daftar menggulung sendiri. */
+  @media (min-width: 64rem) {
+    .pudar-tepi {
+      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--pudar-atas, 0px),
+        #000 calc(100% - var(--pudar-bawah, 0px)), transparent);
+      mask-image: linear-gradient(to bottom, transparent, #000 var(--pudar-atas, 0px),
+        #000 calc(100% - var(--pudar-bawah, 0px)), transparent);
+    }
   }
   /* Satu batch = satu baris: keterangan di kiri, kendali jumlah di kanan. */
   .baris-batch {

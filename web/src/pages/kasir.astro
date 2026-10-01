@@ -404,26 +404,41 @@ function ringkasBatch(p: Product): string {
     action="#struk"
     id="borang-kasir"
     data-transaksi={bolehTransaksi ? 'ya' : 'tidak'}
-    class="flex flex-col gap-4 lg:flex-row lg:items-start"
+    class="flex flex-col gap-4 lg:h-[calc(100dvh-var(--tinggi-topbar)-3rem)] lg:flex-row lg:items-start"
   >
     <input type="hidden" name="idempotency_key" value={kunci} />
 
-    <section class="min-w-0 flex-1">
-      {/* Menempel di atas daftar supaya pencarian dan kategori tetap terjangkau saat katalog digulung; labelnya sr-only agar bilahnya ringkas. */}
-      <div class="kartu sticky top-[calc(var(--tinggi-topbar)+0.5rem)] z-10 mb-3 p-3!">
+    {/* Di layar lebar form dipatok setinggi sisa layar (3rem = padding vertikal main) supaya halaman tak menggulung; yang menggulung hanya daftar produk dan panel keranjang. */}
+    <section class="contents min-w-0 flex-1 lg:flex lg:h-full lg:flex-col">
+      {/* Menempel di atas daftar supaya pencarian dan kategori tetap terjangkau saat katalog digulung; di ponsel section dibuat contents agar induk sticky-nya form, bukan section yang selesai sebelum keranjang. */}
+      <div class="kartu sticky top-[calc(var(--tinggi-topbar)-0.5rem)] z-10 p-3! lg:static lg:mb-3 lg:shrink-0">
         <label class="sr-only" for="cari">Cari produk</label>
         <div class="flex flex-wrap gap-2">
           {/* Tombol submit pertama di form ini disengaja: Enter di kolom mana pun jatuh ke "terapkan saringan", satu-satunya aksi yang aman dipicu tak sengaja. */}
-          <input
-            class="kolom max-w-md flex-1"
-            id="cari"
-            type="search"
-            name="cari"
-            value={cariIsi}
-            placeholder="Cari nama atau SKU (tekan / )"
-            aria-keyshortcuts="/"
-            data-cari
-          />
+          <div class="relative max-w-md flex-1">
+            <svg
+              class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-teks-lembut)]"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="m20 20-3.5-3.5"></path>
+            </svg>
+            <input
+              class="kolom w-full pl-9"
+              id="cari"
+              type="search"
+              name="cari"
+              value={cariIsi}
+              placeholder="Cari nama atau SKU (tekan / )"
+              aria-keyshortcuts="/"
+              data-cari
+            />
+          </div>
           <button class="tombol-halus tanpa-js" type="submit" name="aksi" value="saring">
             Terapkan
           </button>
@@ -464,7 +479,7 @@ function ringkasBatch(p: Product): string {
         </p>
       )}
 
-      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" data-daftar>
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 lg:min-h-0 lg:flex-1 lg:auto-rows-min lg:content-start lg:overflow-y-auto tanpa-scrollbar pudar-tepi" data-daftar>
         {barang.map((p) => {
           const jumlah = jumlahProduk.get(p.id) ?? 0;
           const batches = batchProduk.get(p.id) ?? [];
@@ -591,7 +606,7 @@ function ringkasBatch(p: Product): string {
                         <input type="hidden" name="harga" value={hargaDi(p, kanalIsi)} data-harga-kolom />
                         <input type="hidden" name="batch_id" value={b.id} />
 
-                        <label class="min-w-0 flex-1 text-xs" for={`qty-${p.id}-${b.id}`}>
+                        <label class="min-h-11 min-w-0 flex-1 cursor-pointer text-xs" for={`qty-${p.id}-${b.id}`}>
                           <span class="block truncate font-medium">
                             {b.batch_number ?? 'Tanpa nomor'}
                           </span>
@@ -692,7 +707,7 @@ function ringkasBatch(p: Product): string {
     </section>
 
     {bolehTransaksi && (
-      <aside class="panel-kasir" id="keranjang">
+      <aside class="panel-kasir tanpa-scrollbar" id="keranjang">
         <div class="kartu-rapat">
           <div class="kepala-panel">
             <span>Keranjang</span>
@@ -750,7 +765,7 @@ function ringkasBatch(p: Product): string {
 
           
 
-          <div class="max-h-80 overflow-y-auto">
+          <div>
             {barisPanel.map((r) => (
               <div
                 class="baris-keranjang"
@@ -1094,7 +1109,7 @@ function ringkasBatch(p: Product): string {
 
           <div class="flex items-center gap-3">
             <button
-              class="inline-flex min-h-11 items-center text-xs font-semibold text-[var(--color-teks-lembut)] hover:text-merah-700"
+              class="inline-flex min-h-11 flex-1 items-center justify-center text-xs font-semibold text-[var(--color-teks-lembut)] hover:text-merah-700"
               type="submit"
               name="aksi"
               value="kosongkan"
@@ -1674,6 +1689,24 @@ function ringkasBatch(p: Product): string {
     borang.addEventListener('click', function (e) {
       // `[data-cetak-struk]` ditangani skrip module terpisah di bawah karena butuh `import` untuk merender nota jadi gambar.
 
+      // Klik pada backdrop mengenai <dialog> itu sendiri, di luar kotaknya.
+      if (e.target.hasAttribute('data-panel-batch')) {
+        var kotak = e.target.getBoundingClientRect();
+        if (e.clientX < kotak.left || e.clientX > kotak.right || e.clientY < kotak.top || e.clientY > kotak.bottom) {
+          e.target.close();
+          return;
+        }
+      }
+
+      // Teks batch ikut jadi area tambah, jadi kasir tak perlu membidik tombol +.
+      var labelBatch = e.target.closest('[data-baris-batch] label');
+      if (labelBatch) {
+        e.preventDefault();
+        var kolomLabel = kolomDi(labelBatch);
+        if (kolomLabel) ubah(kolomLabel, 1);
+        return;
+      }
+
       var buka = e.target.closest('[data-buka-batch]');
       if (buka) {
         var panel = buka.closest('[data-produk]').querySelector('[data-panel-batch]');
@@ -1792,6 +1825,26 @@ function ringkasBatch(p: Product): string {
         hitung();
       if (e.target === kotakCari) saring();
     });
+
+    // Tanpa scrollbar, tepi yang memudar satu-satunya petunjuk masih ada isi di luar layar; tepi yang mentok tidak memudar.
+    function pasangPudarBawah(el, nama, aktif, mati) {
+      function perbarui() {
+        var sisa = el.scrollHeight - el.clientHeight - el.scrollTop;
+        el.style.setProperty(nama, sisa > 1 ? aktif : mati);
+        el.style.setProperty('--pudar-atas', el.scrollTop > 1 ? '2rem' : '0px');
+      }
+      el.addEventListener('scroll', perbarui, { passive: true });
+      window.addEventListener('resize', perbarui);
+      new MutationObserver(perbarui).observe(el, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['hidden', 'open', 'class'],
+      });
+      perbarui();
+    }
+    var daftarProduk = document.querySelector('[data-daftar]');
+    if (daftarProduk) pasangPudarBawah(daftarProduk, '--pudar-bawah', '3rem', '0px');
 
     // Pil kategori menyaring di tempat tanpa mengirim form, supaya keranjang yang sedang dibangun tidak ikut melewati server.
     if (pil) {
