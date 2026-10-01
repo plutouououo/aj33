@@ -255,6 +255,12 @@ Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 - Kolom turunan `shipping_charged` dan `shipping_subsidy` (generated, dihitung database) dipakai semua laporan. Subsidi masuk `SalesSummary.expenses`, mengurangi laba, muncul sebagai kategori "Ongkir ditanggung toko" di rincian beban, dan mengurangi `net_profit` transaksinya. Void transaksi otomatis mengeluarkannya dari laporan karena laporan hanya membaca `completed`.
 - Beban ini bukan baris di tabel `expenses`; ia diturunkan dari transaksi supaya tak bisa berselisih dengan transaksi yang di-void.
 
+### Biaya Shopee di pengaturan dan kanal marketplace (migrasi 0024)
+
+- Persen komisi (bawaan 17,25%) dan biaya layanan (bawaan 0%) Shopee tak lagi diisi di kasir: owner mengaturnya di Pengaturan › Harga (`PATCH /api/settings/shopee-fees`, pecahan 0..1; GET lewat `/api/settings/pricing`). `checkout` memakainya bila request tak menyebut persen sendiri, dan menyimpan persen itu di transaksi sehingga mengubah pengaturan tak mengubah transaksi lama. PPh 0,5% dan biaya proses Rp1.250 tetap di kode.
+- Biaya proses Rp1.250 baru tampil dan dihitung setelah keranjang berisi (sebelumnya "Estimasi Total Penghasilan" kosong tampil -Rp1.250).
+- Kanal Tokopedia/TikTok kini berisian sama dengan Shopee: tanpa ongkir, tanpa pilihan metode (dipaksa e-wallet), tanpa "uang diterima". Backend (`SalesChannel::marketplace`) mengabaikan ongkir dan menolak tunai untuk kedua kanal. Biaya platform Tokopedia belum ada, jadi labelnya tetap "Total".
+
 ---
 
 ## Jebakan yang sudah memakan waktu

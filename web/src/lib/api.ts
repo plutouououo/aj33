@@ -171,9 +171,12 @@ export interface Category {
   name: string;
 }
 
-/** Batas harga grosir: baris kanal toko dihargai grosir bila berat baris (jumlah × ukuran pack) LEBIH dari angka ini. */
+/** Pengaturan harga: batas grosir (baris kanal toko dihargai grosir bila berat baris, jumlah × ukuran pack, LEBIH dari angka ini) dan persen biaya Shopee bawaan. */
 export interface PricingSettings {
   wholesale_threshold_kg: number;
+  /** Pecahan (0,1725 = 17,25%), bukan persen. */
+  shopee_commission_percent: number;
+  shopee_service_percent: number;
 }
 
 /** Bagian atribut yang punya kode sendiri di kamus SKU. */

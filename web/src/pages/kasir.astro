@@ -25,11 +25,12 @@ const KANAL = [
 
 type Kanal = (typeof KANAL)[number]['nilai'];
 
-/** Biaya Shopee satu transaksi, nama field mengikuti `get_escrow_detail` dan sama dengan hitungan `pos/service.rs`, dihitung ulang di sini agar kasir melihatnya sebelum simpan. */
-const SHOPEE_COMMISSION_PERSEN_DEFAULT = 17.25;
-const SHOPEE_SERVICE_PERSEN_DEFAULT = 0;
+/** Biaya Shopee satu transaksi, nama field mengikuti `get_escrow_detail` dan sama dengan hitungan `pos/service.rs`, dihitung ulang di sini agar kasir melihatnya sebelum simpan; persen komisi dan layanan diatur owner di Pengaturan › Harga. */
 const SHOPEE_WITHHOLDING_TAX_PERSEN = 0.5;
 const SHOPEE_ORDER_PROCESSING_FEE = 1250;
+
+/** Shopee dan Tokopedia: uang sudah diterima lewat e-wallet marketplace, jadi tanpa ongkir, metode bayar, maupun uang diterima. */
+const adalahMarketplace = (k: Kanal): boolean => k !== 'toko';
 
 /** Aritmetika bilangan bulat (basis × basis poin) agar pembulatan ,50 ke atas sama persis dengan `rupiah_bulat` di `pos/service.rs`, bukan `Math.round` float. */
 function biayaPersenRupiah(basis: number, persen: number): number {
@@ -82,9 +83,6 @@ let gratisOngkirIsi = false;
 let dibayarIsi = '';
 let cariIsi = '';
 let kategoriIsi = '';
-// Persen komisi/layanan Shopee tidak direset tiap transaksi selesai, karena pesanan Shopee berikutnya biasanya memakai persen yang sama.
-let commissionPersenIsi = String(SHOPEE_COMMISSION_PERSEN_DEFAULT);
-let servicePersenIsi = String(SHOPEE_SERVICE_PERSEN_DEFAULT);
 
 /** Keranjang dibaca dari lima deret field sejajar yang harus sama panjang; tiap baris batch merender kelimanya sekaligus sehingga tidak bisa bergeser. */
 function bacaKeranjang(form: FormData): BarisKeranjang[] {
@@ -125,13 +123,11 @@ if (Astro.request.method === 'POST') {
   // Kanal asing diperlakukan sebagai toko karena nilainya menentukan harga dan backend menolaknya dengan galat yang tidak berarti bagi kasir.
   const kanalDikirim = String(form.get('sales_channel') ?? '');
   kanalIsi = (KANAL.find((k) => k.nilai === kanalDikirim)?.nilai ?? 'toko') as Kanal;
-  // Shopee dipaksa e-wallet di server juga, supaya request rakitan tidak menyelundupkan Shopee dengan metode tunai (kembalian jadi tak bermakna).
-  if (kanalIsi === 'shopee') metode = 'ewallet';
+  // Marketplace dipaksa e-wallet di server juga, supaya request rakitan tidak menyelundupkan pesanannya dengan metode tunai (kembalian jadi tak bermakna).
+  if (adalahMarketplace(kanalIsi)) metode = 'ewallet';
   ongkirIsi = String(form.get('shipping_cost') ?? '').trim();
   gratisOngkirIsi = form.get('shipping_borne_by_store') === '1';
   dibayarIsi = String(form.get('amount_paid') ?? '').trim();
-  commissionPersenIsi = String(form.get('platform_commission_fee_percent') ?? '').trim();
-  servicePersenIsi = String(form.get('platform_service_fee_percent') ?? '').trim();
 
   const angka = (kolom: string): number | undefined => {
     const mentah = String(form.get(kolom) ?? '').trim();
@@ -168,9 +164,6 @@ if (Astro.request.method === 'POST') {
       galat = 'Sesi kasir tidak valid. Muat ulang halaman.';
     } else {
       try {
-        // Persen dikirim sebagai pecahan (0,1725 = 17,25%) dan `undefined` bila kosong, supaya tarif bawaan hanya didefinisikan di backend.
-        const persenKomisi = angka('platform_commission_fee_percent');
-        const persenLayanan = angka('platform_service_fee_percent');
         struk = await api<Transaction>('/transactions', {
           method: 'POST',
           token,
@@ -180,13 +173,9 @@ if (Astro.request.method === 'POST') {
             payment_method: metode,
             sales_channel: kanalIsi,
             amount_paid: metode === 'cash' ? angka('amount_paid') : undefined,
-            // Ongkir tidak dikirim untuk Shopee agar niatnya jelas dari isi request, bukan hanya dari validasi backend.
-            shipping_cost: kanalIsi === 'shopee' ? undefined : angka('shipping_cost'),
-            shipping_borne_by_store: kanalIsi === 'shopee' ? undefined : gratisOngkirIsi,
-            platform_commission_fee_percent:
-              kanalIsi === 'shopee' && persenKomisi !== undefined ? persenKomisi / 100 : undefined,
-            platform_service_fee_percent:
-              kanalIsi === 'shopee' && persenLayanan !== undefined ? persenLayanan / 100 : undefined,
+            // Ongkir tidak dikirim untuk marketplace agar niatnya jelas dari isi request, bukan hanya dari validasi backend; persen komisi/layanan Shopee diisi backend dari pengaturan.
+            shipping_cost: adalahMarketplace(kanalIsi) ? undefined : angka('shipping_cost'),
+            shipping_borne_by_store: adalahMarketplace(kanalIsi) ? undefined : gratisOngkirIsi,
             items: keranjang.map((b) => ({
               product_id: b.product_id,
               qty: b.qty,
@@ -266,17 +255,14 @@ const jumlahBatch = new Map(keranjang.map((b) => [`${b.product_id}:${b.batch_id}
 
 const totalItem = keranjang.reduce((n, b) => n + b.qty, 0);
 const totalBelanja = keranjang.reduce((n, b) => n + b.harga * b.qty, 0);
-// Ongkir tidak berlaku untuk Shopee: kolom disembunyikan dan nilai lama yang menyangkut tetap dipaksa nol di sini.
-const ongkirAngka = kanalIsi === 'shopee' ? 0 : Math.max(0, Number(ongkirIsi) || 0);
+// Ongkir tidak berlaku untuk marketplace: kolom disembunyikan dan nilai lama yang menyangkut tetap dipaksa nol di sini.
+const ongkirAngka = adalahMarketplace(kanalIsi) ? 0 : Math.max(0, Number(ongkirIsi) || 0);
 // Diskon ongkir menanggung seluruh ongkir (beban toko), sama dengan `shipping_borne_by_store` di `pos/service.rs`; tanpa ongkir tak ada yang ditanggung.
 const diskonOngkirAngka = gratisOngkirIsi ? ongkirAngka : 0;
 
-// Kosong jatuh ke tarif bawaan dan dijepit 0-100, sama seperti backend menjepit pecahan ke 0..1 (`pos::service::checkout`).
-const jepitPersen = (isi: string, bawaan: number): number =>
-  isi.trim() === '' ? bawaan : Math.min(100, Math.max(0, Number(isi) || bawaan));
-
-const commissionPersenAngka = jepitPersen(commissionPersenIsi, SHOPEE_COMMISSION_PERSEN_DEFAULT);
-const servicePersenAngka = jepitPersen(servicePersenIsi, SHOPEE_SERVICE_PERSEN_DEFAULT);
+// Pecahan pengaturan (0,1725) jadi persen tampil (17,25); toFixed membuang sisa float.
+const commissionPersenAngka = Number((pengaturanHarga.shopee_commission_percent * 100).toFixed(2));
+const servicePersenAngka = Number((pengaturanHarga.shopee_service_percent * 100).toFixed(2));
 
 // Basis potongan Shopee adalah omzet barang, sama dengan `basis_fee` di `pos/service.rs`.
 const basisFeeShopee = totalBelanja;
@@ -286,7 +272,12 @@ const biayaLayananAngka =
   kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, servicePersenAngka) : 0;
 const biayaWithholdingTaxAngka =
   kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
-const biayaOrderProcessingAngka = kanalIsi === 'shopee' ? SHOPEE_ORDER_PROCESSING_FEE : 0;
+// Tanpa barang belum ada pesanan yang diproses, jadi biaya Rp1.250 baru ikut setelah keranjang terisi.
+const biayaOrderProcessingAngka =
+  kanalIsi === 'shopee' && keranjang.length > 0 ? SHOPEE_ORDER_PROCESSING_FEE : 0;
+
+/** Nominal pengurang ditulis "-Rp1.250", tetapi nol ditulis polos agar tak tampak "-Rp0". */
+const minusRupiah = (n: number): string => (n > 0 ? `-${rupiah(n)}` : rupiah(0));
 
 // Untuk Shopee angka ini bukan yang dibayar pembeli melainkan setelah empat biaya platform, labelnya berganti ke "Estimasi Total Penghasilan"; rumusnya satu untuk semua kanal.
 const totalTagihan =
@@ -421,6 +412,8 @@ function ringkasBatch(p: Product): string {
     id="borang-kasir"
     data-transaksi={bolehTransaksi ? 'ya' : 'tidak'}
     data-batas-gram={Math.round(batasGrosirKg * 1000)}
+    data-komisi-persen={commissionPersenAngka}
+    data-layanan-persen={servicePersenAngka}
     class="flex flex-col gap-4 lg:h-[calc(100dvh-var(--tinggi-topbar)-3rem)] lg:flex-row lg:items-start"
   >
     <input type="hidden" name="idempotency_key" value={kunci} />
@@ -748,49 +741,49 @@ function ringkasBatch(p: Product): string {
             </span>
           </div>
 
-          <div class="flex flex-col gap-2 border-b border-[var(--color-garis-lembut)] px-4 py-3">
-            <div class="flex items-center gap-2">
-              <label class="shrink-0 text-xs text-[var(--color-teks-lembut)]" for="customer_id">
-                Pelanggan
-              </label>
-              <select class="kolom min-w-0 flex-1" id="customer_id" name="customer_id">
-                <option value="" selected={!pelangganDipilih}>Tidak ada (Walk-in)</option>
-                {pelanggan.map((c) => (
-                  <option value={c.id} selected={pelangganDipilih === c.id}>
-                    {namaPelanggan(c)}
-                    {c.phone ? ` · ${c.phone}` : ''}
-                  </option>
-                ))}
-              </select>
+          {/* Pelanggan baru dibuat lewat POST ke halaman ini (bukan form terpisah) agar keranjang di form yang sama tidak perlu disalin; tombolnya checkbox `peer` (tanpa JS) dan nama tanpa `required` supaya tidak menahan "Selesaikan". */}
+          <div class="flex flex-wrap items-center gap-2 border-b border-[var(--color-garis-lembut)] px-4 py-3">
+            <label class="shrink-0 text-xs text-[var(--color-teks-lembut)]" for="customer_id">
+              Pelanggan
+            </label>
+            <select class="kolom min-w-0 flex-1" id="customer_id" name="customer_id">
+              <option value="" selected={!pelangganDipilih}>Tidak ada (Walk-in)</option>
+              {pelanggan.map((c) => (
+                <option value={c.id} selected={pelangganDipilih === c.id}>
+                  {namaPelanggan(c)}
+                  {c.phone ? ` · ${c.phone}` : ''}
+                </option>
+              ))}
+            </select>
+            <input type="checkbox" id="buka-pelanggan-baru" class="peer sr-only" />
+            <label
+              for="buka-pelanggan-baru"
+              class="tombol-halus shrink-0 cursor-pointer peer-checked:border-merah-600 peer-checked:bg-merah-50 peer-checked:text-merah-700 peer-focus-visible:ring-2 peer-focus-visible:ring-merah-600"
+            >
+              ＋ Baru
+              <span class="sr-only">pelanggan</span>
+            </label>
+            <div class="hidden w-full flex-col gap-2 rounded-lg border border-merah-200 bg-merah-50 p-2.5 peer-checked:flex">
+              <input
+                class="kolom"
+                name="pelanggan_nama"
+                aria-label="Nama pelanggan baru"
+                placeholder="Nama pelanggan"
+              />
+              <input
+                class="kolom"
+                name="pelanggan_telepon"
+                type="tel"
+                aria-label="Nomor telepon pelanggan baru"
+                placeholder="No. telepon (opsional)"
+              />
+              <p class="text-xs text-[var(--color-teks-lembut)]">
+                Nomor yang sudah pernah dicatat memakai pelanggan lama, bukan dibuat ganda.
+              </p>
+              <button class="tombol-halus" type="submit" name="aksi" value="pelanggan-baru">
+                Simpan pelanggan
+              </button>
             </div>
-
-            {/* Pelanggan baru dibuat lewat POST ke halaman ini (bukan form terpisah) agar keranjang di form yang sama tidak perlu disalin; nama tanpa `required` supaya tidak menahan "Selesaikan". */}
-            <details>
-              <summary class="flex min-h-11 cursor-pointer list-none items-center text-xs font-semibold text-merah-700">
-                ＋ Tambah pelanggan baru
-              </summary>
-              <div class="mt-2 flex flex-col gap-2 rounded-lg border border-merah-200 bg-merah-50 p-2.5">
-                <input
-                  class="kolom"
-                  name="pelanggan_nama"
-                  aria-label="Nama pelanggan baru"
-                  placeholder="Nama pelanggan"
-                />
-                <input
-                  class="kolom"
-                  name="pelanggan_telepon"
-                  type="tel"
-                  aria-label="Nomor telepon pelanggan baru"
-                  placeholder="No. telepon (opsional)"
-                />
-                <p class="text-xs text-[var(--color-teks-lembut)]">
-                  Nomor yang sudah pernah dicatat memakai pelanggan lama, bukan dibuat ganda.
-                </p>
-                <button class="tombol-halus" type="submit" name="aksi" value="pelanggan-baru">
-                  Simpan pelanggan
-                </button>
-              </div>
-            </details>
           </div>
 
           
@@ -893,47 +886,10 @@ function ringkasBatch(p: Product): string {
             </div>
           </div>
 
-          {/* Selalu dirender agar ganti kanal tanpa reload tetap memunculkannya; dua kolom komisi dan layanan mengikuti pemisahan `get_escrow_detail` Shopee. */}
-          <div
-            class:list={['grid gap-3 sm:grid-cols-2', kanalIsi === 'shopee' ? '' : 'hidden']}
-            data-blok-commission-fee
-          >
-            <div>
-              <label class="label" for="platform_commission_fee_percent">Biaya Komisi Shopee (%)</label>
-              <input
-                class="kolom tabular-nums"
-                id="platform_commission_fee_percent"
-                name="platform_commission_fee_percent"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={commissionPersenIsi}
-                placeholder={String(SHOPEE_COMMISSION_PERSEN_DEFAULT)}
-                data-commission-fee
-              />
-              </div>
-            <div>
-              <label class="label" for="platform_service_fee_percent">Biaya Layanan Shopee (%)</label>
-              <input
-                class="kolom tabular-nums"
-                id="platform_service_fee_percent"
-                name="platform_service_fee_percent"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={servicePersenIsi}
-                placeholder={String(SHOPEE_SERVICE_PERSEN_DEFAULT)}
-                data-service-fee
-              />
-            </div>
-          </div>
-
           <div>
             <p class="label">Metode pembayaran</p>
             <div
-              class:list={['flex flex-wrap gap-2', kanalIsi === 'shopee' ? 'hidden' : '']}
+              class:list={['flex flex-wrap gap-2', adalahMarketplace(kanalIsi) ? 'hidden' : '']}
               data-blok-metode-pilihan
             >
               {METODE.map((m) => (
@@ -950,22 +906,32 @@ function ringkasBatch(p: Product): string {
                 </label>
               ))}
             </div>
-            {/* Metode Shopee bukan pilihan: radio tetap di DOM (disembunyikan) dan `syncMetodeShopee` memaksa "E-wallet"; jangan tambah `inline-block` di `pil-aktif` karena menimpa `hidden`. */}
+            {/* Metode marketplace bukan pilihan: radio tetap di DOM (disembunyikan) dan skrip memaksa "E-wallet"; jangan tambah `inline-block` di `pil-aktif` karena menimpa `hidden`. */}
             <p
               class:list={['pil-aktif', kanalIsi === 'shopee' ? '' : 'hidden']}
               data-blok-metode-shopee
             >
               ShopeePay
             </p>
+            <p
+              class:list={['pil-aktif', kanalIsi === 'tiktok' ? '' : 'hidden']}
+              data-blok-metode-tiktok
+            >
+              E-wallet
+            </p>
           </div>
 
           {/* Ongkir jarang dipakai di penjualan toko, jadi dilipat; tetap di DOM (ikut terkirim) dan terbuka sendiri bila sudah terisi. */}
-          <details open={Boolean(ongkirIsi || gratisOngkirIsi)}>
+          <details
+            class:list={[adalahMarketplace(kanalIsi) ? 'hidden' : '']}
+            open={Boolean(ongkirIsi || gratisOngkirIsi)}
+            data-blok-ongkir
+          >
             <summary class="flex min-h-11 cursor-pointer list-none items-center text-xs font-semibold text-merah-700">
               ＋ Ongkos kirim
             </summary>
-            {/* Tidak berlaku untuk Shopee; disembunyikan, bukan dihapus dari DOM, supaya skrip tetap bisa membaca atau mengosongkan nilainya. */}
-            <div class:list={['grid gap-3 pb-1', kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-ongkir>
+            {/* Tidak berlaku untuk marketplace; seluruh lipatannya disembunyikan, bukan dihapus dari DOM, supaya skrip tetap bisa membaca atau mengosongkan nilainya. */}
+            <div class="grid gap-3 pb-1">
               <div>
                 <label class="label" for="shipping_cost">Ongkos kirim (Rp)</label>
                 <input
@@ -996,9 +962,9 @@ function ringkasBatch(p: Product): string {
             </div>
           </details>
 
-          {/* Shopee tidak butuh ini karena uangnya sudah diterima penuh lewat ShopeePay, jadi disembunyikan seluruhnya. */}
+          {/* Marketplace tidak butuh ini karena uangnya sudah diterima penuh lewat e-wallet, jadi disembunyikan seluruhnya. */}
           <div>
-            <div class:list={[kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-dibayar>
+            <div class:list={[adalahMarketplace(kanalIsi) ? 'hidden' : '']} data-blok-dibayar>
               <label class="label" for="amount_paid">Uang diterima (tunai)</label>
               <input
                 class="kolom tabular-nums"
@@ -1015,9 +981,9 @@ function ringkasBatch(p: Product): string {
             </div>
           </div>
 
-          {/* Nominal cepat hanya berguna dengan JS dan memakai total berjalan (ongkir bisa berubah setelah muat); disembunyikan juga untuk Shopee. */}
+          {/* Nominal cepat hanya berguna dengan JS dan memakai total berjalan (ongkir bisa berubah setelah muat); disembunyikan juga untuk marketplace. */}
           <div
-            class:list={['hanya-js flex flex-wrap gap-2', kanalIsi === 'shopee' ? 'hidden' : '']}
+            class:list={['hanya-js flex flex-wrap gap-2', adalahMarketplace(kanalIsi) ? 'hidden' : '']}
             data-cepat
           >
             <button type="button" class="pil-diam" data-uang-pas>Uang pas</button>
@@ -1051,7 +1017,7 @@ function ringkasBatch(p: Product): string {
             <div
               class:list={[
                 'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
-                kanalIsi === 'shopee' ? 'hidden' : '',
+                adalahMarketplace(kanalIsi) ? 'hidden' : '',
               ]}
               data-baris-ongkir
             >
@@ -1070,7 +1036,7 @@ function ringkasBatch(p: Product): string {
             >
               <span>Biaya Komisi (<span data-biaya-komisi-persen>{commissionPersenAngka}</span>%)</span>
               <span class="tabular-nums text-merah-700" data-biaya-komisi-tampil>
-                -{rupiah(biayaKomisiAngka)}
+                {minusRupiah(biayaKomisiAngka)}
               </span>
             </div>
             <div
@@ -1082,7 +1048,7 @@ function ringkasBatch(p: Product): string {
             >
               <span>Biaya Layanan (<span data-biaya-layanan-persen>{servicePersenAngka}</span>%)</span>
               <span class="tabular-nums text-merah-700" data-biaya-layanan-tampil>
-                -{rupiah(biayaLayananAngka)}
+                {minusRupiah(biayaLayananAngka)}
               </span>
             </div>
             <div
@@ -1094,7 +1060,7 @@ function ringkasBatch(p: Product): string {
             >
               <span>PPh UMKM (0,5%)</span>
               <span class="tabular-nums text-merah-700" data-biaya-pph-tampil>
-                -{rupiah(biayaWithholdingTaxAngka)}
+                {minusRupiah(biayaWithholdingTaxAngka)}
               </span>
             </div>
             <div
@@ -1106,7 +1072,7 @@ function ringkasBatch(p: Product): string {
             >
               <span>Biaya proses pemesanan</span>
               <span class="tabular-nums text-merah-700" data-biaya-proses-tampil>
-                -{rupiah(biayaOrderProcessingAngka)}
+                {minusRupiah(biayaOrderProcessingAngka)}
               </span>
             </div>
 
@@ -1402,9 +1368,7 @@ function ringkasBatch(p: Product): string {
       maximumFractionDigits: 0,
     });
 
-    // Sama dengan `SHOPEE_COMMISSION_PERSEN_DEFAULT` di frontmatter dan tarif di `pos/service.rs` (tiga tempat harus ikut berubah); hanya nilai awal yang boleh diganti kasir.
-    var SHOPEE_COMMISSION_PERSEN_DEFAULT = 17.25;
-    var SHOPEE_SERVICE_PERSEN_DEFAULT = 0;
+    // PPh dan biaya proses sama dengan frontmatter dan `pos/service.rs` (tiga tempat harus ikut berubah); persen komisi dan layanan datang dari pengaturan lewat data- di form.
     var SHOPEE_WITHHOLDING_TAX_PERSEN = 0.5;
     var SHOPEE_ORDER_PROCESSING_FEE = 1250;
 
@@ -1426,12 +1390,10 @@ function ringkasBatch(p: Product): string {
     var ongkir = borang.querySelector('[data-ongkir]');
     var gratisOngkir = borang.querySelector('[data-gratis-ongkir]');
     var dibayar = borang.querySelector('[data-dibayar]');
-    var commissionFeeInput = borang.querySelector('[data-commission-fee]');
-    var serviceFeeInput = borang.querySelector('[data-service-fee]');
-    var blokCommissionFee = borang.querySelector('[data-blok-commission-fee]');
     var blokOngkir = borang.querySelector('[data-blok-ongkir]');
     var blokMetodePilihan = borang.querySelector('[data-blok-metode-pilihan]');
     var blokMetodeShopee = borang.querySelector('[data-blok-metode-shopee]');
+    var blokMetodeTiktok = borang.querySelector('[data-blok-metode-tiktok]');
     var blokDibayar = borang.querySelector('[data-blok-dibayar]');
     var blokCepat = borang.querySelector('[data-cepat]');
     var selSubtotal = borang.querySelector('[data-subtotal]');
@@ -1622,38 +1584,41 @@ function ringkasBatch(p: Product): string {
 
       // --- Pembayaran ---------------------------------------------------
       var isShopee = kanal() === 'shopee';
+      var isMarketplace = kanal() !== 'toko';
 
-      // Ongkir tidak berlaku untuk Shopee: kolom disembunyikan dan nilainya dipaksa nol agar sisa angka kanal Toko tidak ikut terhitung.
-      var biaya = isShopee ? 0 : Math.max(0, parseFloat(ongkir.value) || 0);
+      // Ongkir tidak berlaku untuk marketplace: kolom disembunyikan dan nilainya dipaksa nol agar sisa angka kanal Toko tidak ikut terhitung.
+      var biaya = isMarketplace ? 0 : Math.max(0, parseFloat(ongkir.value) || 0);
       // Diskon ongkir menanggung seluruh ongkir (beban toko), sama dengan `shipping_borne_by_store` di `pos/service.rs`.
       var potongan = gratisOngkir && gratisOngkir.checked ? biaya : 0;
 
-      // Shopee tanpa pilihan metode: radio "E-wallet" dipaksa tercentang di sini agar ganti kanal tanpa reload tidak mengirim metode lama.
-      if (isShopee) {
+      // Marketplace tanpa pilihan metode: radio "E-wallet" dipaksa tercentang di sini agar ganti kanal tanpa reload tidak mengirim metode lama.
+      if (isMarketplace) {
         var radioEwallet = borang.querySelector('[data-metode][value="ewallet"]');
         if (radioEwallet && !radioEwallet.checked) radioEwallet.checked = true;
       }
-      if (blokMetodePilihan) blokMetodePilihan.classList.toggle('hidden', isShopee);
+      if (blokMetodePilihan) blokMetodePilihan.classList.toggle('hidden', isMarketplace);
       if (blokMetodeShopee) blokMetodeShopee.classList.toggle('hidden', !isShopee);
-      if (blokCommissionFee) blokCommissionFee.classList.toggle('hidden', !isShopee);
-      if (blokOngkir) blokOngkir.classList.toggle('hidden', isShopee);
-      if (blokDibayar) blokDibayar.classList.toggle('hidden', isShopee);
-      if (blokCepat) blokCepat.classList.toggle('hidden', isShopee);
+      if (blokMetodeTiktok) blokMetodeTiktok.classList.toggle('hidden', kanal() !== 'tiktok');
+      if (blokOngkir) blokOngkir.classList.toggle('hidden', isMarketplace);
+      if (blokDibayar) blokDibayar.classList.toggle('hidden', isMarketplace);
+      if (blokCepat) blokCepat.classList.toggle('hidden', isMarketplace);
 
-      // Kosong jatuh ke tarif bawaan dan dijepit 0-100 seperti server (`jepitPersen` di frontmatter).
-      function persenInput(input, bawaan) {
-        var mentah = input ? input.value.trim() : '';
-        return mentah === '' ? bawaan : Math.min(100, Math.max(0, parseFloat(mentah) || bawaan));
-      }
-      var commissionPersen = persenInput(commissionFeeInput, SHOPEE_COMMISSION_PERSEN_DEFAULT);
-      var servicePersen = persenInput(serviceFeeInput, SHOPEE_SERVICE_PERSEN_DEFAULT);
+      // Persen dari pengaturan owner, ditulis server ke atribut form (sama dengan `commissionPersenAngka` di frontmatter).
+      var commissionPersen = parseFloat(borang.dataset.komisiPersen || '0');
+      var servicePersen = parseFloat(borang.dataset.layananPersen || '0');
 
       // Basis potongan Shopee: omzet barang, sama dengan `basis_fee` di `pos/service.rs`.
       var basisFee = subtotal;
       var biayaKomisi = isShopee ? biayaPersenRupiah(basisFee, commissionPersen) : 0;
       var biayaLayanan = isShopee ? biayaPersenRupiah(basisFee, servicePersen) : 0;
       var biayaPph = isShopee ? biayaPersenRupiah(basisFee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
-      var biayaProses = isShopee ? SHOPEE_ORDER_PROCESSING_FEE : 0;
+      // Rp1.250 baru berlaku setelah ada barang di keranjang (sama dengan `biayaOrderProcessingAngka`).
+      var biayaProses = isShopee && jalur > 0 ? SHOPEE_ORDER_PROCESSING_FEE : 0;
+
+      // Nol ditulis polos agar tak tampak "-Rp0" (sama dengan `minusRupiah` di frontmatter).
+      function minusRupiah(n) {
+        return n > 0 ? '-' + rupiah.format(n) : rupiah.format(0);
+      }
 
       // Untuk Shopee ini estimasi yang cair ke toko setelah empat potongan (bukan yang dibayar pembeli), makanya label berganti; `biaya` ongkir sudah nol sehingga rumusnya satu.
       var total = subtotal - potongan + biaya - biayaKomisi - biayaLayanan - biayaPph - biayaProses;
@@ -1662,7 +1627,7 @@ function ringkasBatch(p: Product): string {
       selSubtotal.textContent = rupiah.format(subtotal);
       barisDiskon.classList.toggle('hidden', potongan <= 0);
       selDiskon.textContent = '-' + rupiah.format(potongan);
-      if (barisOngkir) barisOngkir.classList.toggle('hidden', isShopee);
+      if (barisOngkir) barisOngkir.classList.toggle('hidden', isMarketplace);
       selOngkir.textContent = rupiah.format(biaya);
       if (labelTotal) labelTotal.textContent = isShopee ? 'Estimasi Total Penghasilan' : 'Total';
       selTotal.textContent = rupiah.format(total);
@@ -1671,23 +1636,23 @@ function ringkasBatch(p: Product): string {
         barisBiayaKomisi.classList.toggle('hidden', !isShopee);
         if (isShopee) {
           if (selBiayaKomisiPersen) selBiayaKomisiPersen.textContent = String(commissionPersen);
-          selBiayaKomisi.textContent = '-' + rupiah.format(biayaKomisi);
+          selBiayaKomisi.textContent = minusRupiah(biayaKomisi);
         }
       }
       if (barisBiayaLayanan && selBiayaLayanan) {
         barisBiayaLayanan.classList.toggle('hidden', !isShopee);
         if (isShopee) {
           if (selBiayaLayananPersen) selBiayaLayananPersen.textContent = String(servicePersen);
-          selBiayaLayanan.textContent = '-' + rupiah.format(biayaLayanan);
+          selBiayaLayanan.textContent = minusRupiah(biayaLayanan);
         }
       }
       if (barisBiayaPph && selBiayaPph) {
         barisBiayaPph.classList.toggle('hidden', !isShopee);
-        if (isShopee) selBiayaPph.textContent = '-' + rupiah.format(biayaPph);
+        if (isShopee) selBiayaPph.textContent = minusRupiah(biayaPph);
       }
       if (barisBiayaProses && selBiayaProses) {
         barisBiayaProses.classList.toggle('hidden', !isShopee);
-        if (isShopee) selBiayaProses.textContent = '-' + rupiah.format(biayaProses);
+        if (isShopee) selBiayaProses.textContent = minusRupiah(biayaProses);
       }
 
       // Kolom uang diterima hanya untuk tunai; dimatikan supaya angkanya tidak terkirim sebagai pembayaran yang tak pernah terjadi.
@@ -1886,7 +1851,7 @@ function ringkasBatch(p: Product): string {
     borang.addEventListener('input', function (e) {
       if (
         e.target.matches(
-          '[data-qty], [data-qty-luar], [data-ongkir], [data-dibayar], [data-commission-fee], [data-service-fee]'
+          '[data-qty], [data-qty-luar], [data-ongkir], [data-dibayar]'
         )
       )
         hitung();

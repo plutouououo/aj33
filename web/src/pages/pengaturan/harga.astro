@@ -1,5 +1,5 @@
 ---
-/** Batas harga grosir: baris kanal toko memakai harga grosir bila berat baris (jumlah pack × ukuran) lebih dari batas ini; selebihnya harga ecer. */
+/** Pengaturan harga: batas grosir kanal toko (berat baris lebih dari batas memakai harga grosir) dan persen komisi/layanan Shopee yang jadi bawaan kasir. */
 import Galat from '../../components/Galat.astro';
 import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type PricingSettings } from '../../lib/api';
@@ -12,33 +12,72 @@ const token = Astro.locals.token!;
 let galat: string | null = null;
 let sukses: string | null = null;
 let isiBatas: string | null = null;
+let isiKomisi: string | null = null;
+let isiLayanan: string | null = null;
+
+/** Persen dari form (17,25) jadi pecahan backend (0,1725); `null` bila bukan angka 0–100. */
+function keDesimal(isi: string): number | null {
+  const persen = Number(isi);
+  if (isi === '' || !Number.isFinite(persen) || persen < 0 || persen > 100) return null;
+  return Number((persen / 100).toFixed(4));
+}
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  isiBatas = String(form.get('wholesale_threshold_kg') ?? '').trim();
-  const batas = Number(isiBatas);
+  const aksi = String(form.get('aksi') ?? '');
 
-  if (isiBatas === '' || !Number.isFinite(batas) || batas <= 0) {
-    galat = 'Batas grosir harus berupa angka lebih dari 0.';
+  if (aksi === 'biaya-shopee') {
+    isiKomisi = String(form.get('shopee_commission_percent') ?? '').trim();
+    isiLayanan = String(form.get('shopee_service_percent') ?? '').trim();
+    const komisi = keDesimal(isiKomisi);
+    const layanan = keDesimal(isiLayanan);
+
+    if (komisi === null || layanan === null) {
+      galat = 'Persentase biaya Shopee harus berupa angka 0 sampai 100.';
+    } else {
+      try {
+        await api<PricingSettings>('/settings/shopee-fees', {
+          method: 'PATCH',
+          token,
+          body: { shopee_commission_percent: komisi, shopee_service_percent: layanan },
+        });
+        return Astro.redirect(sesudahAksi(Astro.url, 'simpan-biaya'), 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan biaya Shopee.';
+      }
+    }
   } else {
-    try {
-      await api<PricingSettings>('/settings/pricing', {
-        method: 'PATCH',
-        token,
-        body: { wholesale_threshold_kg: batas },
-      });
-      return Astro.redirect(sesudahAksi(Astro.url, 'simpan'), 303);
-    } catch (err) {
-      galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan pengaturan harga.';
+    isiBatas = String(form.get('wholesale_threshold_kg') ?? '').trim();
+    const batas = Number(isiBatas);
+
+    if (isiBatas === '' || !Number.isFinite(batas) || batas <= 0) {
+      galat = 'Batas grosir harus berupa angka lebih dari 0.';
+    } else {
+      try {
+        await api<PricingSettings>('/settings/pricing', {
+          method: 'PATCH',
+          token,
+          body: { wholesale_threshold_kg: batas },
+        });
+        return Astro.redirect(sesudahAksi(Astro.url, 'simpan'), 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan pengaturan harga.';
+      }
     }
   }
 }
 
 if (!galat) {
-  sukses = pesanDari(Astro.url, { simpan: 'Batas grosir tersimpan. Berlaku untuk transaksi berikutnya.' });
+  sukses = pesanDari(Astro.url, {
+    simpan: 'Batas grosir tersimpan. Berlaku untuk transaksi berikutnya.',
+    'simpan-biaya': 'Biaya Shopee tersimpan. Jadi bawaan kasir untuk pesanan Shopee berikutnya.',
+  });
 }
 
 const pengaturan = await api<PricingSettings>('/settings/pricing', { token });
+
+/** Pecahan backend jadi persen tampil tanpa sisa float (0,1725 → "17.25"). */
+const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).toFixed(2)));
 ---
 
 <PengaturanShell judul="Harga" user={user}>
@@ -80,5 +119,51 @@ const pengaturan = await api<PricingSettings>('/settings/pricing', { token });
     </div>
 
     <button class="tombol-utama" type="submit">Simpan batas</button>
+  </form>
+
+  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
+    Potongan Shopee dihitung dari omzet barang. Komisi dan biaya layanan di bawah dipakai
+    otomatis tiap kasir mencatat pesanan Shopee; PPh 0,5% dan biaya proses pesanan Rp1.250 tetap.
+    Perubahan tidak mengubah transaksi yang sudah tersimpan.
+  </p>
+
+  <form method="POST" class="kartu borang-tegak mb-6">
+    <input type="hidden" name="aksi" value="biaya-shopee" />
+    <h2 class="font-semibold">Biaya Shopee</h2>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="shopee_commission_percent">Biaya komisi (%)</label>
+      <input
+        class="kolom tabular-nums"
+        id="shopee_commission_percent"
+        name="shopee_commission_percent"
+        type="number"
+        min="0"
+        max="100"
+        step="0.01"
+        inputmode="decimal"
+        value={isiKomisi ?? keTeksPersen(pengaturan.shopee_commission_percent)}
+        required
+      />
+    </div>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="shopee_service_percent">Biaya layanan (%)</label>
+      <input
+        class="kolom tabular-nums"
+        id="shopee_service_percent"
+        name="shopee_service_percent"
+        type="number"
+        min="0"
+        max="100"
+        step="0.01"
+        inputmode="decimal"
+        value={isiLayanan ?? keTeksPersen(pengaturan.shopee_service_percent)}
+        required
+      />
+      <p class="isian-bantu">Isi 0 bila toko tidak ikut program berbayar Shopee.</p>
+    </div>
+
+    <button class="tombol-halus" type="submit">Simpan biaya Shopee</button>
   </form>
 </PengaturanShell>

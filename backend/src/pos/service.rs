@@ -62,6 +62,11 @@ impl SalesChannel {
         }
     }
 
+    /// Shopee dan Tokopedia dicatat sebagai pesanan yang uangnya sudah diterima lewat e-wallet marketplace, dan ongkirnya urusan marketplace.
+    fn marketplace(self) -> bool {
+        !matches!(self, Self::Toko)
+    }
+
     /// Harga kanal yang `None` jatuh ke harga ecer, bukan nol (menjual nol adalah kerugian), lihat migrasi 0005; grosir hanya milik kanal toko.
     fn harga(self, produk: &stock::LockedProduct, qty: i32, batas_grosir_kg: Decimal) -> Decimal {
         match self {
@@ -80,13 +85,7 @@ fn harga_toko(produk: &stock::LockedProduct, qty: i32, batas_grosir_kg: Decimal)
     }
 }
 
-/// Tarif Shopee mengikuti `get_escrow_detail` (migrasi 0018): komisi bisa diganti kasir, service fee default nol, PPh 0,5% dan Rp1.250 tetap; fungsi karena `Decimal::new` bukan `const fn`.
-fn shopee_commission_persen_default() -> Decimal {
-    Decimal::new(1725, 4) // 17,25%
-}
-fn shopee_service_persen_default() -> Decimal {
-    Decimal::ZERO
-}
+/// Tarif Shopee mengikuti `get_escrow_detail` (migrasi 0018): komisi dan service fee diatur owner di `pricing_settings`, PPh 0,5% dan Rp1.250 tetap; fungsi karena `Decimal::new` bukan `const fn`.
 fn shopee_withholding_tax_persen() -> Decimal {
     Decimal::new(5, 3) // 0,5%
 }
@@ -116,9 +115,9 @@ pub struct CheckoutInput {
     pub shipping_cost: Option<Decimal>,
     /// Diskon ongkir: toko menanggung seluruh ongkir (jadi beban toko, pembeli tak membayarnya); tanpa ini ongkir ditagih ke pembeli. Diabaikan bila ongkir nol (migrasi 0023).
     pub shipping_borne_by_store: bool,
-    /// Persentase `commission_fee` Shopee sebagai pecahan, hanya `SalesChannel::Shopee`; `None` jatuh ke `shopee_commission_persen_default()`.
+    /// Persentase `commission_fee` Shopee sebagai pecahan, hanya `SalesChannel::Shopee`; `None` jatuh ke komisi di `pricing_settings`.
     pub platform_commission_fee_percent: Option<Decimal>,
-    /// Persentase `service_fee` Shopee (opsional); `None` jatuh ke `shopee_service_persen_default()` (nol).
+    /// Persentase `service_fee` Shopee (opsional); `None` jatuh ke biaya layanan di `pricing_settings`.
     pub platform_service_fee_percent: Option<Decimal>,
     pub items: Vec<CheckoutItem>,
     pub cashier_user_id: Uuid,
@@ -217,15 +216,15 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         return Err(AppError::bad_request("Jumlah item harus lebih dari 0."));
     }
 
-    // Transaksi Shopee dicatat sebagai uang yang pasti diterima lewat ShopeePay, bukan tunai berkembalian, karena `total_amount` sudah bersih dari potongan Shopee.
-    if input.sales_channel == SalesChannel::Shopee && input.payment_method == PaymentMethod::Cash {
+    // Transaksi marketplace dicatat sebagai uang yang pasti diterima lewat e-wallet, bukan tunai berkembalian (untuk Shopee `total_amount` juga sudah bersih dari potongan).
+    if input.sales_channel.marketplace() && input.payment_method == PaymentMethod::Cash {
         return Err(AppError::bad_request(
-            "Transaksi Shopee tidak bisa dicatat sebagai tunai -- uangnya diterima lewat ShopeePay.",
+            "Transaksi marketplace tidak bisa dicatat sebagai tunai -- uangnya diterima lewat e-wallet.",
         ));
     }
 
-    // Ongkir tak berlaku untuk Shopee: nilai terkirim diabaikan (bukan ditolak) dan dinormalkan sekali agar yang di-hash = yang tersimpan.
-    let ongkir = if input.sales_channel == SalesChannel::Shopee {
+    // Ongkir tak berlaku untuk marketplace: nilai terkirim diabaikan (bukan ditolak) dan dinormalkan sekali agar yang di-hash = yang tersimpan.
+    let ongkir = if input.sales_channel.marketplace() {
         Decimal::ZERO
     } else {
         let nilai = uang(input.shipping_cost.unwrap_or(Decimal::ZERO));
@@ -235,7 +234,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         nilai
     };
 
-    // Ditanggung toko hanya bermakna bila ada ongkir; dinormalkan di sini karena yang di-hash harus yang tersimpan (Shopee sudah berongkir nol).
+    // Ditanggung toko hanya bermakna bila ada ongkir; dinormalkan di sini karena yang di-hash harus yang tersimpan (marketplace sudah berongkir nol).
     let ongkir_ditanggung_toko = input.shipping_borne_by_store && ongkir > Decimal::ZERO;
 
     // Diselesaikan sebelum sidik jari karena persen bagian dari permintaan kasir; nol selain Shopee dan tak boleh ikut tersimpan (migrasi 0018, `transactions_platform_fee_channel_check`).
@@ -249,20 +248,21 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     };
 
     let (commission_persen, service_persen) = match input.sales_channel {
-        SalesChannel::Shopee => (
-            jepit_persen(
-                input
-                    .platform_commission_fee_percent
-                    .unwrap_or_else(shopee_commission_persen_default),
-                "biaya komisi",
-            )?,
-            jepit_persen(
-                input
-                    .platform_service_fee_percent
-                    .unwrap_or_else(shopee_service_persen_default),
-                "biaya layanan",
-            )?,
-        ),
+        SalesChannel::Shopee => {
+            let bawaan = settings::repo::biaya_shopee(pool).await?;
+            (
+                jepit_persen(
+                    input
+                        .platform_commission_fee_percent
+                        .unwrap_or(bawaan.komisi),
+                    "biaya komisi",
+                )?,
+                jepit_persen(
+                    input.platform_service_fee_percent.unwrap_or(bawaan.layanan),
+                    "biaya layanan",
+                )?,
+            )
+        }
         _ => (Decimal::ZERO, Decimal::ZERO),
     };
 

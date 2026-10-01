@@ -37,9 +37,9 @@ struct CheckoutRequest {
     /// Diskon ongkir: toko menanggung ongkir (beban toko) alih-alih pembeli. Kosong berarti pembeli yang menanggung.
     #[serde(default)]
     shipping_borne_by_store: bool,
-    /// Persentase `commission_fee` Shopee sebagai pecahan (0,1725 = 17,25%), hanya untuk Shopee; kosong jatuh ke `shopee_commission_persen_default`.
+    /// Persentase `commission_fee` Shopee sebagai pecahan (0,1725 = 17,25%), hanya untuk Shopee; kosong jatuh ke komisi di pengaturan.
     platform_commission_fee_percent: Option<Decimal>,
-    /// Persentase `service_fee` Shopee (program opsional), kosong berarti nol (`shopee_service_persen_default`).
+    /// Persentase `service_fee` Shopee (program opsional), kosong jatuh ke biaya layanan di pengaturan.
     platform_service_fee_percent: Option<Decimal>,
     items: Vec<CheckoutItem>,
 }

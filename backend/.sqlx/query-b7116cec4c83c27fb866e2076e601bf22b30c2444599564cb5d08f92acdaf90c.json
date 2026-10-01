@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE pricing_settings\n        SET shopee_commission_percent = $1, shopee_service_percent = $2,\n            updated_by = $3, updated_at = now()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Numeric",
+        "Numeric",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b7116cec4c83c27fb866e2076e601bf22b30c2444599564cb5d08f92acdaf90c"
+}
