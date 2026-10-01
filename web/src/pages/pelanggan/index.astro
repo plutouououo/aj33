@@ -194,7 +194,17 @@ const ASAL: Record<string, string> = {
 
   <div id="daftar-pelanggan" data-daftar>
   <div class="kartu-rapat overflow-x-auto">
-    <table class="tabel">
+    <table class="tabel table-fixed min-w-[64rem]">
+      <colgroup>
+        <col class="w-48" />
+        <col class="w-36" />
+        <col />
+        <col class="w-32" />
+        <col class="w-24" />
+        <col class="w-36" />
+        <col class="w-44" />
+        {user.role === 'owner' && <col class="w-36" />}
+      </colgroup>
       <thead>
         <tr>
           <th>Nama</th>
