@@ -1,9 +1,4 @@
-//! Otorisasi toko TikTok Shop dan penyimpanan tokennya.
-//!
-//! Alurnya: Owner membuka URL otorisasi Partner Center, mengizinkan aplikasi
-//! mengakses tokonya, lalu TikTok mengarahkan balik ke `/callback` dengan
-//! `auth_code`. Kode itu ditukar menjadi access token + refresh token, yang
-//! disimpan terenkripsi di tabel `platforms`.
+//! Otorisasi toko TikTok Shop: `/callback` membawa `auth_code` yang ditukar jadi access dan refresh token, disimpan terenkripsi di `platforms`.
 
 use super::client;
 use super::NAMA_PLATFORM;
@@ -54,8 +49,7 @@ pub fn url_otorisasi(cfg: &TiktokConfig, state: &str) -> AppResult<String> {
     ))
 }
 
-/// Peng-escape-an minimal untuk nilai query string. Cukup untuk dua nilai
-/// yang dipakai di sini (service id dan state acak buatan kita sendiri).
+/// Peng-escape-an minimal untuk query string, cukup untuk dua nilai di sini (service id dan state acak buatan sendiri).
 fn urlencoding(nilai: &str) -> String {
     nilai
         .bytes()
@@ -84,8 +78,7 @@ pub async fn tukar_kode_dengan_token(
 
     let data = ambil_token(&url).await?;
 
-    // Toko mana yang baru saja memberi izin hanya diketahui setelah token
-    // di tangan, jadi urutannya memang begini: token dulu, baru tokonya.
+    // Toko yang memberi izin baru diketahui setelah token di tangan, jadi urutannya token dulu baru toko.
     let shop_cipher = client::toko_pertama_yang_diizinkan(cfg, &data.access_token).await?;
 
     let kedaluwarsa = Utc::now() + Duration::seconds(data.access_token_expire_in);
@@ -104,8 +97,7 @@ pub async fn tukar_kode_dengan_token(
     Ok(kedaluwarsa)
 }
 
-/// Mengambil token yang siap pakai, memperbaruinya lebih dulu kalau sudah
-/// mendekati kedaluwarsa.
+/// Mengambil token siap pakai, memperbaruinya dulu bila mendekati kedaluwarsa.
 pub async fn token_yang_berlaku(
     pool: &PgPool,
     cfg: &TiktokConfig,
@@ -181,9 +173,7 @@ async fn ambil_token(url: &str) -> AppResult<TokenData> {
     })?;
 
     body.data.ok_or_else(|| {
-        // Pesan dari TikTok ikut ditampilkan karena inilah satu-satunya
-        // petunjuk kenapa otorisasi ditolak (kode kedaluwarsa, app key
-        // salah, dan seterusnya).
+        // Pesan TikTok ikut ditampilkan karena satu-satunya petunjuk otorisasi ditolak (kode kedaluwarsa, app key salah, dst.).
         AppError::bad_request(format!(
             "TikTok Shop menolak permintaan token: {} ({})",
             body.message, body.code

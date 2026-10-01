@@ -1,5 +1,4 @@
-//! Aturan main autentikasi: siapa boleh masuk, token dibuat dan dibaca
-//! bagaimana. Tidak ada SQL di sini -- itu urusan `repo.rs`.
+//! Aturan autentikasi (siapa boleh masuk, token dibuat dan dibaca); tanpa SQL, itu urusan `repo.rs`.
 
 use super::repo::{self, UserRow};
 use super::throttle::Throttle;
@@ -21,8 +20,7 @@ struct Claims {
     exp: i64,
 }
 
-/// Bentuk user yang boleh dilihat frontend. `password_hash` tidak pernah
-/// ikut, walaupun sudah di-hash.
+/// Bentuk user yang boleh dilihat frontend; `password_hash` tak pernah ikut walau sudah di-hash.
 #[derive(Debug, Serialize)]
 pub struct PublicUser {
     pub id: Uuid,
@@ -31,9 +29,7 @@ pub struct PublicUser {
     pub role: Role,
     pub phone: Option<String>,
     pub is_active: bool,
-    /// Selama true, frontend menahan pengguna di halaman ganti password.
-    /// Ikut ke frontend -- bukan ke dalam token -- supaya pencabutannya
-    /// berlaku seketika, bukan setelah token yang lama kedaluwarsa.
+    /// Selama true frontend menahan pengguna di halaman ganti password; ikut ke frontend (bukan token) agar pencabutan berlaku seketika.
     pub must_change_password: bool,
 }
 
@@ -41,9 +37,7 @@ impl TryFrom<UserRow> for PublicUser {
     type Error = AppError;
 
     fn try_from(row: UserRow) -> Result<Self, Self::Error> {
-        // Database sudah menjaga lewat CHECK constraint, jadi nilai di luar
-        // daftar berarti ada yang menulis langsung ke tabel -- itu bug, bukan
-        // kesalahan pengguna.
+        // Database sudah menjaga lewat CHECK, jadi nilai di luar daftar berarti ada yang menulis langsung ke tabel: bug, bukan salah pengguna.
         let role = Role::parse(&row.role).ok_or_else(|| {
             tracing::error!(user_id = %row.id, role = %row.role, "role tidak dikenal di database");
             AppError::unauthorized("Akun tidak valid.")
@@ -68,9 +62,7 @@ pub async fn login(
     email_or_username: &str,
     password: &str,
 ) -> AppResult<(String, PublicUser)> {
-    // Diperiksa sebelum menyentuh database sama sekali: percobaan yang sudah
-    // melewati jatah tidak pantas membebani Postgres, apalagi bcrypt yang
-    // memang sengaja lambat.
+    // Diperiksa sebelum menyentuh database: percobaan melewati jatah tak pantas membebani Postgres dan bcrypt yang sengaja lambat.
     if let Some(sisa) = throttle.sisa_tunggu(email_or_username) {
         let menit = (sisa.as_secs() / 60) + 1;
         tracing::warn!(
@@ -84,16 +76,11 @@ pub async fn login(
 
     let user = repo::find_by_username(pool, email_or_username).await?;
 
-    // Akun tidak ada, akun nonaktif, dan password salah sengaja memberi
-    // pesan yang sama persis -- supaya halaman login tidak bisa dipakai
-    // menebak username mana yang terdaftar.
+    // Akun tak ada, nonaktif, dan password salah memberi pesan sama persis agar login tak bisa dipakai menebak username terdaftar.
     let Some(user) = user.filter(|u| u.is_active) else {
-        // Tetap jalankan verifikasi terhadap hash palsu supaya waktu respons
-        // untuk username yang tidak ada mirip dengan yang ada.
+        // Tetap verifikasi terhadap hash palsu agar waktu respons username tak ada mirip dengan yang ada.
         let _ = bcrypt::verify(password, HASH_UMPAN);
-        // Username yang tidak ada pun dihitung. Kalau hanya yang terdaftar
-        // yang dibatasi, perbedaan perilakunya sendiri jadi cara menebak
-        // username mana yang nyata.
+        // Username tak ada pun dihitung, kalau tidak perbedaan perilaku itu sendiri jadi cara menebak username nyata.
         throttle.catat_gagal(email_or_username);
         return Err(AppError::unauthorized("Username atau password salah."));
     };
@@ -110,20 +97,12 @@ pub async fn login(
 
     let public: PublicUser = user.try_into()?;
     let token = buat_token(jwt_secret, public.id, public.role)?;
-    // Terbukti tahu passwordnya, jadi percobaan gagal sebelumnya tidak lagi
-    // relevan -- salah ketik beberapa kali lalu berhasil tidak boleh
-    // meninggalkan jejak yang menahan login berikutnya.
+    // Terbukti tahu password sehingga percobaan gagal sebelumnya tak relevan; salah ketik beberapa kali lalu berhasil tak boleh menahan login berikutnya.
     throttle.bersihkan(email_or_username);
     Ok((token, public))
 }
 
-/// Hash bcrypt yang valid tapi tidak akan pernah cocok dengan password apa
-/// pun. Dipakai agar percobaan login ke username yang tidak terdaftar tetap
-/// memakan waktu komputasi yang setara.
-/// Ini hash bcrypt sungguhan dari 32 byte acak yang langsung dibuang, jadi
-/// tidak ada password yang bisa mencocokinya. Test di bawah menjaga agar
-/// bentuknya tetap valid -- hash yang malformed ditolak bcrypt seketika dan
-/// justru membuat jalur ini jauh lebih cepat, yang merusak tujuannya.
+/// Hash bcrypt valid dari 32 byte acak yang dibuang agar login ke username tak terdaftar memakan waktu setara; hash malformed ditolak seketika dan merusak tujuannya.
 const HASH_UMPAN: &str = "$2b$10$WW5CUrknix4wAipG9Qv9MO.gebjJWMbaLOyjIb8zVsIGt/VAVMNZ2";
 
 pub async fn get_me(pool: &PgPool, user_id: Uuid) -> AppResult<PublicUser> {
@@ -135,21 +114,13 @@ pub async fn get_me(pool: &PgPool, user_id: Uuid) -> AppResult<PublicUser> {
     user.try_into()
 }
 
-/// Biaya bcrypt untuk password yang dibuat aplikasi ini. Sama dengan hash
-/// yang sudah ada di database, jadi waktu verifikasi login tidak berubah
-/// tergantung akun mana yang masuk.
+/// Biaya bcrypt password buatan aplikasi, sama dengan hash di database agar waktu verifikasi tak bergantung akun.
 const BIAYA_BCRYPT: u32 = 10;
 
-/// Panjang minimum password. Angka yang sama dijaga di halaman frontend,
-/// tapi yang menegakkan adalah yang di sini.
+/// Panjang minimum password; angka sama dijaga di frontend tapi yang menegakkan di sini.
 const PANJANG_MINIMUM: usize = 8;
 
-/// Mengganti password sendiri.
-///
-/// Password lama tetap diminta walaupun pengguna sudah membawa token yang
-/// sah: token bisa saja ikut terbawa di perangkat yang ditinggal terbuka,
-/// dan tanpa pemeriksaan ini siapa pun yang menemukannya bisa mengunci
-/// pemilik akun keluar dari akunnya sendiri.
+/// Ganti password sendiri tetap meminta password lama walau token sah, karena token bisa terbawa di perangkat yang ditinggal terbuka dan penemunya bisa mengunci pemilik keluar.
 pub async fn change_password(
     pool: &PgPool,
     user_id: Uuid,
@@ -170,18 +141,14 @@ pub async fn change_password(
         return Err(AppError::unauthorized("Password lama salah."));
     }
 
-    // Dihitung dalam karakter, bukan byte: "delapan huruf" yang diminta di
-    // layar harus berarti hal yang sama untuk password yang memakai huruf
-    // beraksen.
+    // Dihitung dalam karakter, bukan byte, agar "delapan huruf" bermakna sama untuk huruf beraksen.
     if password_baru.chars().count() < PANJANG_MINIMUM {
         return Err(AppError::bad_request(format!(
             "Password baru minimal {PANJANG_MINIMUM} karakter."
         )));
     }
 
-    // bcrypt memotong masukan di 72 byte. Tanpa penolakan ini, dua password
-    // panjang yang 72 byte pertamanya sama akan sama-sama bisa masuk --
-    // diam-diam, tanpa pemiliknya pernah tahu.
+    // bcrypt memotong masukan di 72 byte; tanpa penolakan, dua password panjang dengan 72 byte pertama sama sama-sama bisa masuk diam-diam.
     if password_baru.len() > 72 {
         return Err(AppError::bad_request(
             "Password baru terlalu panjang (maksimal 72 karakter).",
@@ -201,9 +168,7 @@ pub async fn change_password(
 
     repo::update_password(pool, user.id, &hash).await?;
 
-    // Dibaca ulang, bukan disusun dari `user` yang sudah basi: yang
-    // dikembalikan harus memuat `must_change_password` yang sudah mati,
-    // karena itulah yang melepas pengguna dari halaman ganti password.
+    // Dibaca ulang, bukan disusun dari `user` basi, karena yang dikembalikan harus memuat `must_change_password` yang sudah mati untuk melepas pengguna dari halaman ganti password.
     get_me(pool, user.id).await
 }
 
@@ -225,9 +190,7 @@ fn buat_token(secret: &str, user_id: Uuid, role: Role) -> AppResult<String> {
     })
 }
 
-/// Kebalikan `buat_token`. Semua kegagalan -- kedaluwarsa, tanda tangan
-/// salah, isi tidak masuk akal -- menghasilkan pesan yang sama, karena
-/// bagi pengguna bedanya tidak ada: sesinya harus diulang.
+/// Kebalikan `buat_token`; semua kegagalan (kedaluwarsa, tanda tangan salah, isi tak masuk akal) berpesan sama karena bagi pengguna sama-sama harus mengulang sesi.
 pub fn baca_token(secret: &str, token: &str) -> AppResult<CurrentUser> {
     let data = decode::<Claims>(
         token,
@@ -286,9 +249,7 @@ mod tests {
 
     #[test]
     fn hash_umpan_valid_tapi_tidak_pernah_cocok() {
-        // Kalau hash ini ditolak bcrypt sebagai malformed, jalur "username
-        // tidak ada" jadi jauh lebih cepat daripada jalur password salah,
-        // dan perbedaan waktunya membocorkan username mana yang terdaftar.
+        // Bila hash ini ditolak bcrypt sebagai malformed, jalur "username tak ada" lebih cepat dari "password salah" dan selisih waktunya membocorkan username terdaftar.
         assert!(matches!(bcrypt::verify("apa pun", HASH_UMPAN), Ok(false)));
     }
 }

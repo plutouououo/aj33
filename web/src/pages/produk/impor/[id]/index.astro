@@ -103,12 +103,7 @@ try {
 
 const halamanTerakhir = batch && rows ? Math.max(1, Math.ceil(rows.total / limit)) : 1;
 
-/**
- * Grup `category_text` yang belum terselesaikan PADA HALAMAN INI -- panel
- * pemetaan tidak memuat seluruh batch, cuma yang kelihatan. Batch besar
- * dengan kategori tak dikenal tersebar di banyak halaman perlu dikunjungi
- * tiap halamannya; ini simplifikasi yang disengaja, bukan lupa.
- */
+/** Grup `category_text` yang belum terselesaikan hanya pada halaman ini (panel tak memuat seluruh batch); batch besar perlu dikunjungi per halaman, simplifikasi disengaja. */
 const kategoriBelumJelas = rows
   ? [...new Set(
       rows.data

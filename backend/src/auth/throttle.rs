@@ -1,23 +1,4 @@
-//! Pembatas percobaan login.
-//!
-//! Backend ini menghadap internet lewat server Astro, dan `POST /auth/login`
-//! adalah satu-satunya endpoint bisnis yang bisa dipanggil tanpa token. Tanpa
-//! pembatas, password akun bisa ditebak tanpa henti -- dan log sshd server
-//! menunjukkan pemindaian otomatis memang berjalan terus-menerus.
-//!
-//! DIHITUNG PER USERNAME, BUKAN PER IP. Semua permintaan tiba dari server
-//! Astro di `127.0.0.1`, jadi pembatas berbasis IP di lapisan ini akan
-//! memperlakukan seluruh pengguna sebagai satu orang. Per username langsung
-//! menjaga hal yang benar-benar terancam: kredensial satu akun.
-//!
-//! Konsekuensinya disadari: penyerang yang tahu sebuah username bisa sengaja
-//! menghabiskan jatahnya supaya pemilik aslinya ikut tertahan. Karena itu ini
-//! bukan penguncian -- jatahnya longgar dan jendelanya pendek, jadi
-//! gangguannya terbatas sementara penebakan berskala besar tetap tertutup.
-//!
-//! Catatannya disimpan di memori, bukan database. Prosesnya tunggal, dan
-//! hitungan yang hilang saat restart bukan masalah: penyerang tidak bisa
-//! memaksa backend restart.
+//! Pembatas login per username (bukan IP, semua request datang dari Astro di 127.0.0.1), di memori karena proses tunggal; jatah longgar agar bukan penguncian.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -37,9 +18,7 @@ struct Catatan {
 pub struct Throttle {
     maks: u32,
     jendela: Duration,
-    // Mutex biasa, bukan milik async: bagian terkuncinya hanya beberapa
-    // operasi HashMap tanpa await sama sekali, jadi tidak pernah menahan
-    // thread eksekutor.
+    // Mutex biasa (bukan async) karena bagian terkunci hanya operasi HashMap tanpa await sehingga tak menahan thread eksekutor.
     catatan: Mutex<HashMap<String, Catatan>>,
 }
 
@@ -57,14 +36,12 @@ impl Throttle {
         }
     }
 
-    /// Username disamakan bentuknya supaya "Owner" dan " owner " tidak
-    /// mendapat jatah masing-masing.
+    /// Username disamakan bentuknya agar "Owner" dan " owner " tak mendapat jatah masing-masing.
     fn kunci(username: &str) -> String {
         username.trim().to_lowercase()
     }
 
-    /// Sisa waktu tunggu kalau jatahnya sudah habis, `None` kalau boleh
-    /// mencoba.
+    /// Sisa waktu tunggu bila jatah habis, `None` bila boleh mencoba.
     pub fn sisa_tunggu(&self, username: &str) -> Option<Duration> {
         let kunci = Self::kunci(username);
         let catatan = self.catatan.lock().ok()?;
@@ -81,16 +58,11 @@ impl Throttle {
     pub fn catat_gagal(&self, username: &str) {
         let kunci = Self::kunci(username);
         let Ok(mut catatan) = self.catatan.lock() else {
-            // Mutex teracuni berarti ada thread lain yang panic sambil
-            // memegangnya. Login tetap harus bisa jalan; kehilangan
-            // pembatas lebih baik daripada backend yang menolak semua orang.
+            // Mutex teracuni berarti thread lain panic; login tetap harus jalan karena kehilangan pembatas lebih baik daripada menolak semua orang.
             return;
         };
 
-        // Dibersihkan tiap kali menulis supaya peta tidak tumbuh tanpa batas
-        // saat seseorang mencoba ribuan username berbeda. Batas atasnya jadi
-        // "berapa username unik dalam satu jendela", bukan sepanjang umur
-        // proses.
+        // Dibersihkan tiap menulis agar peta tak tumbuh tanpa batas saat ribuan username berbeda dicoba.
         catatan.retain(|_, c| c.mulai.elapsed() < self.jendela);
 
         let c = catatan.entry(kunci).or_insert_with(|| Catatan {
@@ -98,9 +70,7 @@ impl Throttle {
             mulai: Instant::now(),
         });
 
-        // Jendela yang sudah lewat dimulai ulang, bukan diteruskan -- kalau
-        // tidak, percobaan gagal sesekali selama berbulan-bulan akhirnya
-        // menutup akun yang tidak pernah diserang.
+        // Jendela yang lewat dimulai ulang, bukan diteruskan, agar kegagalan sesekali berbulan-bulan tak menutup akun yang tak diserang.
         if c.mulai.elapsed() >= self.jendela {
             c.gagal = 0;
             c.mulai = Instant::now();
@@ -109,8 +79,7 @@ impl Throttle {
         c.gagal = c.gagal.saturating_add(1);
     }
 
-    /// Dipanggil setelah login berhasil. Percobaan gagal sebelumnya tidak
-    /// lagi relevan begitu orangnya terbukti tahu passwordnya.
+    /// Dipanggil setelah login berhasil karena percobaan gagal sebelumnya tak relevan lagi.
     pub fn bersihkan(&self, username: &str) {
         let kunci = Self::kunci(username);
         if let Ok(mut catatan) = self.catatan.lock() {

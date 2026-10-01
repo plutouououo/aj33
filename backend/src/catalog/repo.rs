@@ -9,26 +9,17 @@ use uuid::Uuid;
 
 use super::sku;
 
-/// Bentuk produk yang dikirim ke frontend. `category_name` hasil JOIN,
-/// mengikuti skema `Product` di `contracts/api.yaml`.
-///
-/// Daftar kolomnya ditulis ulang di tiap query, bukan disatukan lewat
-/// konstanta: `query_as!` memeriksa SQL saat compile, jadi yang diterimanya
-/// harus berupa literal utuh. Harganya pengulangan; imbalannya, kolom yang
-/// salah ketik ketahuan saat build, bukan saat halaman dibuka.
+/// Bentuk produk ke frontend (skema `Product` di `contracts/api.yaml`); kolom ditulis ulang per query karena `query_as!` butuh literal utuh.
 #[derive(Debug, Serialize)]
 pub struct Product {
     pub id: Uuid,
     pub category_id: Option<Uuid>,
     pub category_name: Option<String>,
-    /// Nama identifikasi internal: yang dicari pegawai di kasir dan dibaca
-    /// pengepak. Pendek dan cepat dikenali.
+    /// Nama identifikasi internal yang dicari pegawai di kasir dan dibaca pengepak; pendek dan cepat dikenali.
     pub name: String,
-    /// Judul untuk marketplace. `None` berarti belum diisi -- pemanggil yang
-    /// memutuskan apakah jatuh kembali ke `name`.
+    /// Judul untuk marketplace; `None` berarti belum diisi dan pemanggil memutuskan apakah jatuh ke `name`.
     pub seo_name: Option<String>,
-    /// Selalu hasil rakitan dari merek/jenis/warna/ukuran, tidak pernah
-    /// diketik manual. Lihat modul `sku`.
+    /// Selalu hasil rakitan dari merek/jenis/warna/ukuran, tak pernah diketik manual (lihat modul `sku`).
     pub sku: Option<String>,
     pub brand_name: Option<String>,
     pub product_type: Option<String>,
@@ -38,11 +29,9 @@ pub struct Product {
     pub variant_size: Option<String>,
     /// Terisi berarti baris ini varian dari produk lain.
     pub parent_id: Option<Uuid>,
-    /// Banyaknya varian di bawah produk ini. Induk yang punya varian tidak
-    /// dijual langsung -- yang dijual varian-variannya.
+    /// Banyaknya varian; induk yang punya varian tak dijual langsung, yang dijual varian-variannya.
     pub variant_count: i64,
-    /// Harga dasar: yang dipakai kasir di toko, sekaligus rujukan saat harga
-    /// kanal belum diisi.
+    /// Harga dasar untuk kasir di toko sekaligus rujukan saat harga kanal belum diisi.
     pub price: Decimal,
     /// `None` berarti belum diatur -- bukan gratis. Lihat migrasi 0005.
     pub price_shopee: Option<Decimal>,
@@ -52,14 +41,7 @@ pub struct Product {
     pub stock_qty: i32,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
-    /// Kedaluwarsa terdekat dari batch yang MASIH BERSISA. Diambil di query
-    /// yang sama supaya daftar produk bisa menandai barang yang mendekati
-    /// kedaluwarsa tanpa query tambahan per baris.
-    ///
-    /// Batch yang sudah habis tidak ikut. Sebelum migrasi 0011 sisa batch
-    /// tidak pernah berkurang, jadi tanggal batch yang barangnya sudah lama
-    /// terjual tetap menyala merah selamanya -- dan peringatan yang selalu
-    /// menyala adalah peringatan yang berhenti dibaca.
+    /// Kedaluwarsa terdekat hanya dari batch yang masih bersisa, di query yang sama agar daftar bisa menandai tanpa query per baris; batch habis tak ikut supaya peringatan tak menyala selamanya.
     pub nearest_expiry: Option<NaiveDate>,
     pub is_active: bool,
     pub created_by: Option<Uuid>,
@@ -89,13 +71,7 @@ pub struct StockAdjustment {
     pub created_at: DateTime<Utc>,
 }
 
-/// Satu catatan barang masuk. `quantity` adalah jumlah yang MASUK saat itu,
-/// bukan sisa yang belum terjual -- sisanya ada di `remaining_qty`.
-///
-/// Sejak migrasi 0011 `remaining_qty` adalah stok sungguhan:
-/// `products.stock_qty` sama dengan jumlah `remaining_qty` seluruh batch
-/// produk itu, dan `stock.rs` yang menjaganya. `quantity` tinggal menjadi
-/// fakta sejarah tentang isi kiriman.
+/// Satu catatan barang masuk: `quantity` isi saat masuk, `remaining_qty` stok sungguhan (sejak migrasi 0011 `products.stock_qty` = jumlah `remaining_qty`, dijaga `stock.rs`).
 #[derive(Debug, Serialize)]
 pub struct ProductBatch {
     pub id: Uuid,
@@ -108,25 +84,20 @@ pub struct ProductBatch {
     /// Sisa yang belum keluar. Inilah yang dikurangi penjualan.
     pub remaining_qty: i32,
     pub expiry_date: Option<NaiveDate>,
-    /// Rak tempat kiriman INI ditaruh, mis. "Rak A3". Sifat kiriman, bukan
-    /// sifat barang: dua kiriman produk yang sama bisa tinggal di rak yang
-    /// berbeda, dan sejak migrasi 0016 masing-masing menyebutkan sendiri.
+    /// Rak tempat kiriman ini ditaruh; sifat kiriman, bukan barang (sejak migrasi 0016 tiap batch menyebut sendiri).
     pub storage_location: Option<String>,
     pub received_at: DateTime<Utc>,
     pub created_by: Option<Uuid>,
 }
 
-/// Bagian katalog yang diminta pemanggil. Halaman produk mengurus induk,
-/// kasir hanya boleh melihat yang benar-benar bisa dijual.
+/// Bagian katalog yang diminta: halaman produk mengurus induk, kasir hanya melihat yang bisa dijual.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     /// Semua baris, varian sekalipun.
     Semua,
     /// Hanya produk induk (`parent_id IS NULL`).
     Induk,
-    /// Hanya yang bisa dijual: produk tanpa varian, dan varian itu sendiri.
-    /// Induk yang punya varian tidak punya harga yang berlaku -- harganya ada
-    /// di masing-masing varian -- jadi tidak boleh muncul di kasir.
+    /// Hanya yang bisa dijual: produk tanpa varian dan varian itu sendiri; induk berevarian tak punya harga berlaku sehingga tak boleh muncul di kasir.
     Terjual,
 }
 
@@ -154,9 +125,7 @@ pub async fn list_products(
     pool: &PgPool,
     filter: &ProductFilter,
 ) -> AppResult<(Vec<Product>, i64)> {
-    // `$1 IS NULL OR ...` membuat satu query melayani semua kombinasi filter.
-    // Alternatifnya merangkai SQL sebagai string, yang menutup pintu bagi
-    // pemeriksaan query saat compile.
+    // `$1 IS NULL OR ...` membuat satu query melayani semua kombinasi filter, tanpa merangkai SQL string yang menutup pemeriksaan saat compile.
     let baris = sqlx::query_as!(
         Product,
         r#"
@@ -185,10 +154,7 @@ pub async fn list_products(
                OR ($5 = 'induk' AND p.parent_id IS NULL)
                OR ($5 = 'terjual'
                    AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))
-        -- `p.id` bukan hiasan: nama produk boleh kembar, dan tanpa pemutus
-        -- yang pasti urutan dua baris bernama sama bisa bertukar antar kueri.
-        -- Di daftar berhalaman itu berarti satu produk muncul dua kali dan
-        -- produk lain tidak pernah muncul sama sekali.
+        -- `p.id` pemutus urutan: nama produk boleh kembar dan tanpanya baris kembar bisa bertukar antar kueri (muncul dua kali di daftar berhalaman).
         ORDER BY p.name, p.id
         LIMIT $6 OFFSET $7
         "#,
@@ -226,8 +192,7 @@ pub async fn list_products(
     )
     .fetch_one(pool);
 
-    // Dua query independen -- dijalankan bersamaan, bukan bergiliran, supaya
-    // latensi totalnya sebesar yang paling lambat, bukan jumlah keduanya.
+    // Dua query independen dijalankan bersamaan agar latensi total sebesar yang terlambat, bukan jumlahnya.
     let (rows, total) = tokio::try_join!(baris, hitung)?;
 
     Ok((rows, total))
@@ -261,8 +226,7 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
     Ok(row)
 }
 
-/// Varian sebuah produk, diurutkan menurut sumbu variannya supaya daftarnya
-/// tampil dengan urutan yang sama setiap kali dibuka.
+/// Varian diurutkan menurut sumbu variannya agar urutan tampil selalu sama.
 pub async fn list_variants(pool: &PgPool, parent_id: Uuid) -> AppResult<Vec<Product>> {
     let rows = sqlx::query_as!(
         Product,
@@ -308,16 +272,12 @@ pub struct NewProduct {
     pub cost_price: Option<Decimal>,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
-    /// Endpoint HTTP manual selalu mengirim `true` (produk langsung
-    /// terbit); impor massal yang butuh mengontrolnya lewat toggle
-    /// "terbitkan setelah commit".
+    /// Endpoint manual selalu mengirim `true` (langsung terbit); impor massal mengontrolnya lewat toggle "terbitkan setelah commit".
     pub is_active: bool,
     pub created_by: Uuid,
 }
 
-/// Produk selalu lahir dengan stok nol. Stok awal masuk lewat batch (lihat
-/// `insert_batch` dan `stock::tambah`), supaya tidak pernah ada butir stok
-/// yang muncul tanpa baris ledger yang menjelaskan asalnya.
+/// Produk lahir dengan stok nol; stok awal masuk lewat batch (`insert_batch`, `stock::tambah`) agar tak ada butir tanpa baris ledger.
 pub async fn insert_product(
     tx: &mut Transaction<'_, Postgres>,
     input: &NewProduct,
@@ -356,22 +316,10 @@ pub async fn insert_product(
     Ok(id)
 }
 
-/// Kolom yang boleh dikosongkan kembali, bukan sekadar diganti isinya.
-///
-/// `None` berarti kolomnya tidak disebut permintaan -- biarkan apa adanya.
-/// `Some(None)` berarti pengguna sengaja mengosongkannya. Keduanya harus
-/// dibedakan: tanpa itu, harga Shopee yang terlanjur diisi tidak akan pernah
-/// bisa dikembalikan ke "belum diatur", dan warna varian yang salah ketik
-/// menempel selamanya di SKU.
+/// `Ubah<T>`: `None` = tak disebut (biarkan), `Some(None)` = sengaja dikosongkan; tanpa pembedaan ini harga Shopee atau warna varian yang salah tak bisa dikembalikan ke kosong.
 pub type Ubah<T> = Option<Option<T>>;
 
-/// Deserializer untuk `Ubah<T>`, wajib dipasang lewat `deserialize_with`.
-///
-/// Tanpa ini serde membaca `"price_shopee": null` sebagai `None` -- sama
-/// dengan field yang tidak disebut sama sekali -- sehingga permintaan
-/// mengosongkan kolom diam-diam berubah jadi "biarkan apa adanya". Di sini
-/// yang null dibungkus jadi `Some(None)`, dan yang benar-benar tidak disebut
-/// ditangani `#[serde(default)]` di field-nya.
+/// Deserializer `Ubah<T>` wajib lewat `deserialize_with`: tanpa ini `null` terbaca `None` (biarkan) sehingga permintaan mengosongkan kolom diam-diam jadi no-op.
 pub fn ubah_terkirim<'de, D, T>(deserializer: D) -> Result<Ubah<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -394,10 +342,7 @@ fn salinan<T: Copy>(kolom: &Ubah<T>) -> (bool, Option<T>) {
     }
 }
 
-/// Semua kolom opsional: yang tidak disebut dibiarkan seperti semula. Stok
-/// TIDAK ikut di sini -- satu-satunya jalan mengubah stok adalah lewat
-/// `stock.rs`, supaya tidak ada perubahan yang lolos tanpa tercatat di
-/// ledger.
+/// Semua kolom opsional (tak disebut = biarkan); stok tak ikut karena hanya berubah lewat `stock.rs` agar tercatat di ledger.
 #[derive(Default)]
 pub struct ProductPatch {
     pub name: Option<String>,
@@ -431,9 +376,7 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
     let (ubah_modal, cost_price) = salinan(&patch.cost_price);
     let (ubah_gambar, image_url) = teks(&patch.image_url);
 
-    // Kolom yang tidak boleh NULL memakai COALESCE; sisanya memakai CASE
-    // dengan penanda tersendiri, karena COALESCE tidak bisa membedakan
-    // "tidak disebut" dari "sengaja dikosongkan".
+    // Kolom NOT NULL memakai COALESCE, sisanya CASE dengan penanda sendiri karena COALESCE tak membedakan "tak disebut" dari "sengaja dikosongkan".
     let hasil = sqlx::query!(
         r#"
         UPDATE products SET
@@ -489,13 +432,7 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
     Ok(hasil.rows_affected() > 0)
 }
 
-/// Memastikan sebuah SKU belum dipakai produk lain.
-///
-/// Tidak ada akhiran pembeda otomatis. Dua produk dengan jenis, grade,
-/// merek, dan ukuran yang sama persis memang menghasilkan SKU yang sama, dan
-/// yang kedua ditolak di sini: `CBSB-AFC-2KG-2` tidak memberi tahu siapa pun
-/// apa bedanya dari `CBSB-AFC-2KG`, selain melewati batas 12 karakter. Kalau
-/// dua barang memang berbeda, yang membedakannya harus ada di atributnya.
+/// Memastikan SKU belum dipakai produk lain; tanpa akhiran pembeda otomatis, produk kedua dengan atribut sama ditolak karena `-2` tak memberi tahu bedanya dan melewati batas 12 karakter.
 pub async fn sku_harus_bebas(pool: &PgPool, sku: &str, kecuali: Option<Uuid>) -> AppResult<()> {
     if sku_dipakai(pool, sku, kecuali).await? {
         return Err(AppError::conflict(format!(
@@ -530,8 +467,7 @@ pub async fn category_ada(pool: &PgPool, id: Uuid) -> AppResult<bool> {
     Ok(ada)
 }
 
-/// Apa yang menahan sebuah produk sehingga tidak boleh dihapus. `None`
-/// berarti tidak ada -- produk itu belum menyentuh apa pun dan aman dibuang.
+/// Penahan hapus produk; `None` berarti produk belum menyentuh apa pun dan aman dibuang.
 pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static str>> {
     let row = sqlx::query!(
         r#"
@@ -565,14 +501,7 @@ pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static
     })
 }
 
-/// Apa yang menahan SKU sebuah produk supaya tidak boleh dikoreksi.
-///
-/// Lebih longgar dari `penahan_hapus`: penjualan di kasir, tiket packing, dan
-/// pesanan marketplace adalah catatan historis di dalam sistem ini sendiri --
-/// mengubah SKU produknya tidak merusak catatan itu. Yang masih menahan
-/// hanya dua hal yang benar-benar bergantung pada SKU tetap sama: varian
-/// (kode induk adalah awalan SKU seluruh variannya) dan listing marketplace
-/// (pemetaan SKU ke listing yang sudah aktif di Shopee/TikTok Shop).
+/// Penahan koreksi SKU lebih longgar dari `penahan_hapus`: hanya varian dan listing marketplace aktif yang mengunci, riwayat penjualan/tiket tidak.
 pub async fn penahan_ubah_sku(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static str>> {
     let row = sqlx::query!(
         r#"
@@ -594,10 +523,7 @@ pub async fn penahan_ubah_sku(pool: &PgPool, id: Uuid) -> AppResult<Option<&'sta
     })
 }
 
-/// Menghapus produk berikut catatan yang hanya berarti bersama produk itu:
-/// batch barang masuk dan baris ledger stoknya. Pemanggil wajib memeriksa
-/// `penahan_hapus` lebih dulu -- riwayat penjualan tidak pernah ikut terhapus
-/// lewat jalan ini.
+/// Menghapus produk beserta batch dan ledger stoknya; pemanggil wajib memeriksa `penahan_hapus` dulu, riwayat penjualan tak pernah ikut terhapus.
 pub async fn delete_product(pool: &PgPool, id: Uuid) -> AppResult<bool> {
     let mut tx = pool.begin().await?;
 
@@ -647,14 +573,7 @@ pub struct NewBatch {
     pub created_by: Uuid,
 }
 
-/// Mencatat satu batch. Penambahan stoknya dikerjakan pemanggil lewat
-/// `stock.rs` di transaksi yang sama, jadi batch dan ledger tidak pernah bisa
-/// bercerita berbeda.
-///
-/// `remaining_qty` sengaja MULAI DARI NOL, bukan dari `quantity`. Kolom itu
-/// adalah stok sungguhan, dan satu-satunya yang boleh menggerakkannya adalah
-/// `stock.rs` -- kalau di sini pun ikut mengisinya, ada dua penulis untuk
-/// satu angka dan invarian stok = jumlah sisa batch kehilangan penjaganya.
+/// Mencatat satu batch; stok ditambah pemanggil lewat `stock.rs` di transaksi yang sama, dan `remaining_qty` mulai nol agar hanya `stock.rs` yang menulis angka itu.
 pub async fn insert_batch(tx: &mut Transaction<'_, Postgres>, input: &NewBatch) -> AppResult<Uuid> {
     let id = sqlx::query_scalar!(
         r#"
@@ -678,14 +597,7 @@ pub async fn insert_batch(tx: &mut Transaction<'_, Postgres>, input: &NewBatch) 
     Ok(id)
 }
 
-/// Seluruh batch yang masih bersisa, untuk produk yang benar-benar bisa
-/// dijual. Dibaca kasir sekali per halaman supaya bisa memilih sendiri batch
-/// mana yang dikeluarkan, tanpa satu permintaan per produk.
-///
-/// Urutannya SAMA PERSIS dengan urutan FEFO di `stock.rs`, jadi pilihan
-/// teratas di layar adalah pilihan yang akan diambil otomatis kalau kasir
-/// tidak memilih apa-apa. Dua urutan yang berbeda untuk hal yang sama adalah
-/// cara paling halus membuat kasir tidak percaya pada layarnya.
+/// Seluruh batch bersisa produk yang bisa dijual, dibaca sekali per halaman kasir; urutannya sama persis dengan FEFO di `stock.rs` agar pilihan teratas di layar = yang diambil otomatis.
 pub async fn list_batches_tersedia(pool: &PgPool) -> AppResult<Vec<ProductBatch>> {
     let rows = sqlx::query_as!(
         ProductBatch,
@@ -706,8 +618,7 @@ pub async fn list_batches_tersedia(pool: &PgPool) -> AppResult<Vec<ProductBatch>
     Ok(rows)
 }
 
-/// Dibaca di dalam transaksi penghapusan: jumlahnya dipakai untuk menarik
-/// kembali stok yang dulu ditambahkan batch ini.
+/// Dibaca di transaksi penghapusan; jumlahnya dipakai menarik kembali stok yang dulu ditambahkan batch ini.
 pub async fn find_batch(
     tx: &mut Transaction<'_, Postgres>,
     product_id: Uuid,
@@ -730,17 +641,7 @@ pub async fn find_batch(
     Ok(row)
 }
 
-/// Kolom batch yang boleh dikoreksi sesudah kirimannya dicatat.
-///
-/// Semuanya `Ubah`: tidak disebut berarti biarkan, `null` berarti kosongkan.
-/// Ketiganya harus bisa dikembalikan ke kosong -- harga beli yang salah
-/// ketik, tanggal kedaluwarsa yang ternyata tidak ada di kemasan, dan rak
-/// yang barangnya sudah dipindah entah ke mana.
-///
-/// `quantity` TIDAK ada di sini dan tidak akan pernah ada. Ia menggerakkan
-/// stok, dan satu-satunya jalan stok berubah adalah lewat `stock.rs` supaya
-/// tiap butir punya baris ledger yang menjelaskan asalnya. Batch yang salah
-/// jumlahnya dibatalkan lalu dicatat ulang.
+/// Kolom batch yang boleh dikoreksi (harga beli, kedaluwarsa, rak), semuanya `Ubah`; `quantity` tak ada karena menggerakkan stok.
 #[derive(Default)]
 pub struct BatchPatch {
     pub purchase_price: Ubah<Decimal>,
@@ -748,20 +649,7 @@ pub struct BatchPatch {
     pub storage_location: Ubah<String>,
 }
 
-/// Mengoreksi batch yang sudah tercatat.
-///
-/// HARGA BELI. Batch yang sudah ada sejak sebelum migrasi 0014 tidak punya
-/// harga beli sama sekali, dan tanpa jalan ini laporan laba akan selamanya
-/// menghitungnya nol.
-///
-/// KEDALUWARSA. Tanggal yang salah ketik bukan cuma angka yang jelek di
-/// layar: ia menentukan urutan FEFO dan menyalakan peringatan merah di
-/// daftar produk. Mengoreksinya di sini aman karena tidak ada butir stok
-/// yang berpindah -- yang berubah hanya urutan keluarnya batch berikutnya.
-///
-/// LOKASI. Rak tempat kiriman ini ditaruh, dibaca pengepak. Barang memang
-/// dipindah antar rak, jadi kolom yang tidak bisa dikoreksi akan menjadi
-/// petunjuk yang salah dalam hitungan minggu.
+/// Mengoreksi batch: harga beli (batch sebelum migrasi 0014 tak punya), kedaluwarsa (menentukan FEFO dan peringatan merah), dan rak (barang memang dipindah); tak ada butir stok yang berpindah.
 pub async fn update_batch(
     pool: &PgPool,
     product_id: Uuid,
@@ -882,15 +770,7 @@ pub struct SkuCode {
     pub code: String,
 }
 
-/// Seluruh isi kamus, dirakit jadi bentuk yang dipakai `catalog::sku`.
-///
-/// Dibaca sekali per perakitan SKU, bukan satu query per bagian: isinya
-/// puluhan baris dan perakitan SKU cuma terjadi saat produk dibuat.
-///
-/// Baris ber-`kind` di luar daftar yang dikenal dilewati, bukan membuat
-/// seluruh perakitan gagal. CHECK constraint di database sudah menjaganya,
-/// jadi kalau sampai ada, itu bug -- dan menolak membuat produk karena satu
-/// baris kamus yang rusak menghentikan pekerjaan yang tidak ada hubungannya.
+/// Isi kamus dirakit jadi bentuk `catalog::sku`, dibaca sekali per perakitan; baris `kind` tak dikenal dilewati agar satu baris rusak tak menghentikan pembuatan produk.
 pub async fn kamus_sku(pool: &PgPool) -> AppResult<sku::Kamus> {
     let rows = sqlx::query!(r#"SELECT kind, source, code FROM sku_codes"#)
         .fetch_all(pool)
@@ -922,10 +802,7 @@ pub async fn list_sku_codes(pool: &PgPool) -> AppResult<Vec<SkuCode>> {
     Ok(rows)
 }
 
-/// `source_key` ditulis di sini, tidak pernah diterima dari pemanggil: ia
-/// turunan dari `source` lewat aturan yang sama dengan yang dipakai saat
-/// mencari (`sku::kunci`). Dua tempat yang menghitungnya sendiri-sendiri akan
-/// membuat entri yang tersimpan tidak pernah ditemukan.
+/// `source_key` diturunkan dari `source` lewat aturan yang sama dengan pencarian (`sku::kunci`), tak diterima dari pemanggil, agar entri tersimpan selalu ditemukan.
 pub async fn insert_sku_code(
     pool: &PgPool,
     kind: sku::Bagian,

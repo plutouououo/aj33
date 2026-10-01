@@ -1,18 +1,4 @@
-//! Adapter Shopee Open API v2.
-//!
-//! Dipotret dari spesifikasi endpoint di repo `congminh1254/shopee-sdk`
-//! (MIT) -- SDK-nya sendiri TypeScript, jadi yang dipakai spesifikasinya,
-//! bukan kodenya.
-//!
-//! Perbedaan yang paling terasa dibanding adapter TikTok:
-//!
-//! - Sukses ditandai `error` yang kosong, bukan `code == 0`.
-//! - Order ditarik dua langkah: `get_order_list` memberi nomor order,
-//!   `get_order_detail` memberi isinya.
-//! - `item_list` menyebut jumlah barang secara eksplisit lewat
-//!   `model_quantity_purchased`, jadi tidak perlu digabung per unit seperti
-//!   `line_items` TikTok.
-//! - Harga berupa angka, bukan string.
+//! Adapter Shopee Open API v2 dari spesifikasi `congminh1254/shopee-sdk` (MIT); beda dari TikTok: sukses = `error` kosong, order ditarik dua langkah, harga berupa angka.
 
 pub mod auth;
 pub mod client;
@@ -22,12 +8,10 @@ use super::{NormalizedOrder, NormalizedOrderItem, OrderStatus};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-/// Nama platform di tabel `platforms`. Dibatasi CHECK constraint
-/// `platforms_platform_name_check`.
+/// Nama platform di tabel `platforms`, dibatasi CHECK `platforms_platform_name_check`.
 pub const NAMA_PLATFORM: &str = "shopee";
 
-/// Bentuk order dari Shopee. Hanya field yang benar-benar dipakai yang
-/// didaftarkan; sisanya tetap tersimpan utuh di `raw_payload`.
+/// Bentuk order Shopee; hanya field yang dipakai didaftarkan, sisanya utuh di `raw_payload`.
 #[derive(Debug, Deserialize)]
 pub struct ShopeeOrder {
     pub order_sn: String,
@@ -56,19 +40,7 @@ pub struct ShopeeItem {
     pub model_discounted_price: Option<f64>,
 }
 
-/// Memetakan status Shopee ke status internal.
-///
-/// Dua keputusan yang perlu diketahui sebelum dipakai ke toko sungguhan:
-///
-/// - `IN_CANCEL` (pembeli minta batal, tapi order belum batal) dipetakan ke
-///   `New`, BUKAN `Processing`. Alasannya bukan kerapian: `Processing`
-///   adalah antrean packing, dan order yang sedang diminta batal tidak boleh
-///   ikut dipacking lalu terlanjur dikirim. `New` menaruhnya di daftar yang
-///   ditinjau Owner. Status permintaan batalnya sendiri tidak terwakili di
-///   enum internal dan tetap ada di `raw_payload`.
-/// - Status yang tidak dikenal juga jatuh ke `New`, sama seperti adapter
-///   TikTok: order yang statusnya asing tetap harus terlihat, bukan hilang
-///   diam-diam.
+/// `IN_CANCEL` dipetakan ke `New` (bukan `Processing`) agar order yang diminta batal tak ikut dipacking; status tak dikenal juga ke `New` agar tetap terlihat.
 pub fn petakan_status(status: &str) -> OrderStatus {
     match status {
         "UNPAID" | "PENDING" | "INVOICE_PENDING" | "IN_CANCEL" => OrderStatus::New,
@@ -80,11 +52,7 @@ pub fn petakan_status(status: &str) -> OrderStatus {
     }
 }
 
-/// Shopee mengirim uang sebagai angka JSON, bukan string seperti TikTok.
-///
-/// Lewat `f64` memang ada potensi kehilangan presisi, tapi hanya di atas
-/// 2^53 -- jauh di luar nilai transaksi mana pun -- dan `from_f64_retain`
-/// mempertahankan angka yang dikirim apa adanya.
+/// Shopee mengirim uang sebagai angka JSON; lewat `f64` presisi hanya hilang di atas 2^53 (jauh di luar transaksi) dan `from_f64_retain` mempertahankan angkanya.
 fn uang(nilai: Option<f64>) -> Option<Decimal> {
     nilai.and_then(Decimal::from_f64_retain)
 }
@@ -95,9 +63,7 @@ pub fn normalisasi(order: &ShopeeOrder, raw: serde_json::Value) -> NormalizedOrd
         .item_list
         .iter()
         .map(|baris| NormalizedOrderItem {
-            // `model_sku` adalah SKU milik penjual -- itu yang dikenali
-            // katalog AJ33. `order_item_id` hanya dipakai kalau SKU-nya
-            // kosong, supaya barisnya tetap punya rujukan.
+            // `model_sku` adalah SKU penjual yang dikenali katalog AJ33; `order_item_id` hanya bila SKU kosong agar baris tetap punya rujukan.
             external_item_ref: baris
                 .model_sku
                 .clone()
@@ -108,9 +74,7 @@ pub fn normalisasi(order: &ShopeeOrder, raw: serde_json::Value) -> NormalizedOrd
                 .clone()
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| "Produk tanpa nama".to_string()),
-            // Jumlah yang hilang dianggap 1, bukan 0: baris yang ada di
-            // order berarti ada barangnya, dan qty 0 membuat tiket packing
-            // meminta nol barang.
+            // Jumlah hilang dianggap 1, bukan 0, karena baris ada berarti ada barangnya dan qty 0 membuat tiket meminta nol barang.
             qty: baris.model_quantity_purchased.unwrap_or(1).max(1),
             unit_price: uang(baris.model_discounted_price),
         })
@@ -160,8 +124,7 @@ mod tests {
 
     #[test]
     fn permintaan_batal_tidak_masuk_antrean_packing() {
-        // Kalau IN_CANCEL jatuh ke Processing, order yang sedang diminta
-        // batal ikut muncul di antrean packing dan bisa terlanjur dikirim.
+        // Bila IN_CANCEL jatuh ke Processing, order yang diminta batal muncul di antrean packing dan bisa terlanjur dikirim.
         assert_eq!(petakan_status("IN_CANCEL"), OrderStatus::New);
         assert_ne!(petakan_status("IN_CANCEL"), OrderStatus::Processing);
     }
@@ -173,8 +136,7 @@ mod tests {
 
     #[test]
     fn qty_diambil_dari_model_quantity_purchased() {
-        // Berbeda dari TikTok: satu baris mewakili beberapa unit sekaligus,
-        // jadi tidak ada yang perlu digabung.
+        // Berbeda dari TikTok: satu baris mewakili beberapa unit sehingga tak ada yang perlu digabung.
         let hasil = normalisasi_dari(order_json(serde_json::json!([
             {
                 "order_item_id": 23620853561i64,
@@ -259,8 +221,7 @@ mod tests {
 
     #[test]
     fn order_tanpa_item_tetap_bisa_dibaca() {
-        // `get_order_list` tanpa `response_optional_fields` mengembalikan
-        // order tanpa `item_list`.
+        // `get_order_list` tanpa `response_optional_fields` mengembalikan order tanpa `item_list`.
         let raw = serde_json::json!({
             "order_sn": "2404098R48U37H",
             "order_status": "CANCELLED"
@@ -283,8 +244,7 @@ mod tests {
 
     #[test]
     fn sla_ditebak_dari_nama_kurir_shopee() {
-        // Adapter hanya menyalin nama kurir; klasifikasinya milik modul
-        // marketplace dan berlaku sama untuk semua platform.
+        // Adapter hanya menyalin nama kurir; klasifikasi milik modul marketplace dan sama untuk semua platform.
         let hasil = normalisasi_dari(order_json(serde_json::json!([])));
         assert_eq!(
             crate::marketplace::klasifikasi_sla(hasil.shipping_carrier.as_deref()),

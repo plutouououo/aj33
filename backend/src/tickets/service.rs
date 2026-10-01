@@ -1,10 +1,4 @@
-//! Aturan tiket packing.
-//!
-//! Semua perubahan tiket dibuka sebagai satu transaksi database dan diawali
-//! `repo::kunci()`. Bukan kebiasaan gaya penulisan: status yang dibaca tanpa
-//! kunci bisa sudah basi saat dipakai memutuskan, dan keputusan yang paling
-//! mahal di modul ini -- serah-terima, yang mengurangi stok -- justru yang
-//! paling sering ditekan dua kali karena tombolnya lambat menjawab.
+//! Aturan tiket packing: semua perubahan satu transaksi database diawali `repo::kunci()` karena status tanpa kunci bisa basi dan serah-terima (mengurangi stok) paling sering ditekan dua kali.
 
 use super::repo::{self, TiketTerkunci};
 use super::TicketStatus;
@@ -15,13 +9,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// Membuat tiket packing untuk satu pesanan marketplace.
-///
-/// Barang yang listing-nya belum dipetakan ke produk internal membuat
-/// pembuatan tiket DITOLAK, bukan dilewati diam-diam: tiket yang isinya
-/// kurang akan dikemas sebagai paket yang kurang, dan stok yang berkurang
-/// pun tidak sesuai barang yang keluar. Owner diberi tahu persis barang mana
-/// yang perlu dipetakan lebih dulu.
+/// Membuat tiket pesanan marketplace; barang yang listing-nya belum dipetakan membuatnya DITOLAK agar paket tak kurang, dan Owner diberi tahu barang yang perlu dipetakan.
 pub async fn buat(pool: &PgPool, external_order_id: Uuid, notes: Option<&str>) -> AppResult<Uuid> {
     let mut tx = pool.begin().await?;
 
@@ -49,9 +37,7 @@ pub async fn buat(pool: &PgPool, external_order_id: Uuid, notes: Option<&str>) -
         )));
     }
 
-    // Dua listing marketplace bisa menunjuk produk yang sama. Digabung
-    // supaya pengepak melihat satu baris "ambil 3", bukan tiga baris yang
-    // mudah terlewat salah satunya.
+    // Dua listing bisa menunjuk produk sama; digabung agar pengepak melihat satu baris "ambil 3".
     let nama: HashMap<Uuid, String> = baris
         .iter()
         .filter_map(|b| {
@@ -96,11 +82,7 @@ pub async fn buat(pool: &PgPool, external_order_id: Uuid, notes: Option<&str>) -
     Ok(ticket_id)
 }
 
-/// Menugaskan tiket ke seorang pengepak.
-///
-/// Owner boleh menugaskan siapa saja; pengepak hanya boleh mengambil tiket
-/// untuk dirinya sendiri. Tanpa batas kedua itu, satu pengepak bisa
-/// melemparkan pekerjaannya ke rekan yang tidak tahu-menahu.
+/// Menugaskan tiket: Owner boleh siapa saja, pengepak hanya untuk dirinya agar tak melempar pekerjaan ke rekan yang tak tahu.
 pub async fn tugaskan(
     pool: &PgPool,
     ticket_id: Uuid,
@@ -135,13 +117,7 @@ pub async fn tugaskan(
     Ok(())
 }
 
-/// Memindahkan status tiket satu langkah.
-///
-/// Langkah terakhir, `handed_over`, adalah satu-satunya tempat stok
-/// berkurang untuk pesanan marketplace -- saat barang benar-benar diserahkan
-/// ke kurir, bukan saat tiket dibuat atau selesai dikemas. Sebelum itu
-/// barangnya masih ada di rak, dan menguranginya lebih awal membuat kasir
-/// menolak penjualan atas barang yang sebetulnya masih tersedia.
+/// Memindahkan status satu langkah; stok pesanan marketplace berkurang hanya saat `handed_over` (barang ke kurir), bukan lebih awal.
 pub async fn pindah_status(
     pool: &PgPool,
     ticket_id: Uuid,
@@ -167,15 +143,12 @@ pub async fn pindah_status(
             .map(|b| StockLine {
                 product_id: b.product_id,
                 qty: b.qty,
-                // Pesanan marketplace tidak lewat meja kasir, jadi tidak ada
-                // yang bisa memilih batch: FEFO satu-satunya aturan di sini.
+                // Pesanan marketplace tak lewat meja kasir sehingga tak ada yang memilih batch: FEFO satu-satunya aturan.
                 batch_id: None,
             })
             .collect();
 
-        // `reference_id` menunjuk pesanan, bukan tiket: pasangannya
-        // `reference_type = 'external_order'`, dan itulah yang dicari saat
-        // menelusuri kenapa stok sebuah produk berkurang.
+        // `reference_id` menunjuk pesanan, bukan tiket (pasangan `reference_type = 'external_order'`), yang dicari saat menelusuri kenapa stok berkurang.
         stock::kurangi(
             &mut tx,
             &lines,
@@ -199,11 +172,7 @@ pub async fn pindah_status(
     Ok(())
 }
 
-/// Mencentang satu barang sebagai sudah dikemas (atau membatalkannya).
-///
-/// Hanya boleh saat tiket sedang dikerjakan. Setelah `packed`, centangnya
-/// dibekukan -- kalau masih bisa diubah, pemeriksaan "semua barang sudah
-/// dikemas" yang meloloskan tiket tadi tidak lagi berarti apa-apa.
+/// Mencentang barang dikemas (atau membatalkan) hanya saat tiket dikerjakan; setelah `packed` dibekukan agar cek "semua barang dikemas" yang meloloskannya tak kehilangan arti.
 pub async fn tandai_item(
     pool: &PgPool,
     ticket_id: Uuid,
@@ -246,8 +215,7 @@ fn pastikan_boleh_mengerjakan(tiket: &TiketTerkunci, oleh: CurrentUser) -> AppRe
         return Ok(());
     }
 
-    // Dua sebab yang berbeda, dan pengepak hanya bisa berbuat sesuatu pada
-    // yang pertama -- jadi pesannya dibedakan.
+    // Dua sebab berbeda dan pengepak hanya bisa berbuat pada yang pertama, jadi pesannya dibedakan.
     Err(AppError::forbidden(match tiket.assigned_to_user_id {
         None => "Ambil tiket ini dulu sebelum mengerjakannya.",
         Some(_) => "Tiket ini ditugaskan ke orang lain.",

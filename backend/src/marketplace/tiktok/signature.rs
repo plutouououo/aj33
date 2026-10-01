@@ -1,27 +1,11 @@
-//! Tanda tangan permintaan TikTok Shop Open API.
-//!
-//! Algoritmanya: HMAC-SHA256 dengan kunci `app_secret`, atas rangkaian
-//! `app_secret + path + sorted_params + body + app_secret`, hasilnya hex
-//! huruf kecil.
-//!
-//! PERHATIAN: proyek lama menandai bagian ini "cocokkan ke dokumen App-mu
-//! di Partner Center" dan memakai huruf BESAR. Dokumen resmi TikTok berada
-//! di balik login, dan detailnya berbeda antar versi API. Sebelum dipakai ke
-//! toko sungguhan, cocokkan urutan dan huruf besar/kecilnya dengan dokumen
-//! App yang dipakai -- tanda tangan yang salah ditolak dengan kode error
-//! yang tidak menjelaskan bagian mana yang keliru.
+//! Tanda tangan TikTok Shop: HMAC-SHA256 `app_secret` atas `app_secret + path + sorted_params + body + app_secret`; cocokkan urutan dan huruf dengan dokumen App sebelum dipakai ke toko sungguhan.
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Menyusun bagian parameter untuk ditandatangani.
-///
-/// `sign` dan `access_token` sengaja dikecualikan: `sign` adalah hasil yang
-/// sedang dihitung, dan `access_token` memang tidak ikut ditandatangani.
-/// Sisanya diurutkan menurut nama, lalu digabung sebagai `namanilai` tanpa
-/// pemisah.
+/// Menyusun parameter untuk ditandatangani: `sign` dan `access_token` dikecualikan, sisanya diurut nama dan digabung `namanilai` tanpa pemisah.
 pub fn susun_parameter(params: &[(String, String)]) -> String {
     let mut urut: Vec<&(String, String)> = params
         .iter()
@@ -49,12 +33,7 @@ pub fn tanda_tangan(app_secret: &str, path: &str, parameter: &str, body: Option<
     hex::encode(mac.finalize().into_bytes())
 }
 
-/// Memeriksa tanda tangan webhook yang masuk.
-///
-/// Perbandingannya memakai `Mac::verify_slice`, yang membandingkan dalam
-/// waktu tetap. Membandingkan dua string biasa dengan `==` akan berhenti di
-/// byte pertama yang berbeda, dan selisih waktunya cukup untuk menebak
-/// tanda tangan yang benar byte demi byte.
+/// Memeriksa tanda tangan webhook dengan `Mac::verify_slice` (waktu tetap), karena `==` berhenti di byte pertama yang berbeda dan selisih waktunya cukup untuk menebak tanda tangan.
 pub fn webhook_sah(app_key: &str, app_secret: &str, raw_body: &str, signature_hex: &str) -> bool {
     let Ok(diterima) = hex::decode(signature_hex) else {
         return false;
@@ -167,8 +146,7 @@ mod tests {
             hex::encode(mac.finalize().into_bytes())
         };
 
-        // Inti dari verifikasi ini: payload yang diubah di tengah jalan --
-        // misalnya jumlah barang dinaikkan -- tidak boleh lolos.
+        // Inti verifikasi: payload yang diubah di tengah jalan (mis. jumlah dinaikkan) tak boleh lolos.
         let diubah = r#"{"type":1,"data":{"order_id":"999"}}"#;
         assert!(!webhook_sah("app-key", "rahasia", diubah, &sah));
     }

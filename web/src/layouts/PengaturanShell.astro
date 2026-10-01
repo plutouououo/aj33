@@ -1,18 +1,5 @@
 ---
-/**
- * Kerangka halaman Pengaturan.
- *
- * Sidebar aplikasi (AppShell) tetap tampil seperti biasa -- ini menambah
- * sub-navigasi kedua khusus di dalam area kontennya, membagi Pengaturan jadi
- * beberapa halaman (Akun, Platform, Kamus SKU). Daftar menunya sengaja
- * ditaruh di sini, bukan di AppShell, karena hanya relevan saat berada di
- * `/pengaturan/*`.
- *
- * Difilter dengan `bolehAkses` yang sama seperti menu utama, supaya
- * kasir/pengepak yang membuka /pengaturan/akun (satu-satunya sub-halaman
- * yang boleh mereka buka) tidak melihat tautan ke Platform/Kamus SKU yang
- * memang akan ditolak middleware.
- */
+/** Kerangka halaman Pengaturan: sub-navigasi (Akun, Platform, Kamus SKU) khusus di sini, difilter `bolehAkses` supaya kasir/pengepak tidak melihat tautan yang ditolak middleware. */
 import AppShell from './AppShell.astro';
 import type { User } from '../lib/api';
 import { bolehAkses } from '../lib/session';

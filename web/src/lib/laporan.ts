@@ -1,10 +1,4 @@
-/**
- * Saringan laporan penjualan.
- *
- * Halaman laporan dan endpoint ekspor membaca saringan yang sama persis dari
- * URL. Ditaruh di satu berkas supaya tombol "Ekspor" tidak pernah mengunduh
- * periode yang berbeda dari yang sedang dilihat di layar.
- */
+/** Saringan laporan penjualan, dibaca sama persis oleh halaman laporan dan ekspor agar "Ekspor" tak mengunduh periode berbeda dari yang terlihat. */
 
 export const PERIODE = [
   { nilai: 'today', label: 'Hari Ini' },
@@ -30,23 +24,14 @@ export interface Saringan {
   /** String kosong berarti "semua". */
   metode: string;
   jenis: string;
-  /**
-   * Periode kartu Produk Terlaris, terpisah dari `periode` di atas. String
-   * kosong berarti ikut `periode` -- lihat komentar di `kueriApi`.
-   */
+  /** Periode kartu Produk Terlaris terpisah dari `periode`; string kosong berarti ikut `periode` (lihat `kueriApi`). */
   top_periode: string;
 }
 
 /** Nilai baku periode. Sama dengan baku di backend. */
 const PERIODE_BAKU = 'month';
 
-/**
- * Nomor pesanan yang ditampilkan ke pengguna: 8 karakter awal UUID
- * transaksi, huruf besar. Bukan kolom database sendiri -- UUID transaksi
- * sudah unik, jadi potongannya cukup untuk membedakan antar transaksi tanpa
- * migrasi tambahan. Dipakai di tabel Penjualan, ekspor CSV, dan halaman
- * detail transaksi supaya ketiganya selalu menunjuk nomor yang sama.
- */
+/** Nomor pesanan tampil = 8 karakter awal UUID transaksi huruf besar (bukan kolom DB); dipakai di tabel, CSV, dan detail agar ketiganya menunjuk nomor yang sama. */
 export function nomorPesanan(id: string): string {
   return id.slice(0, 8).toUpperCase();
 }
@@ -55,10 +40,7 @@ function sah(nilai: string | null, pilihan: readonly { nilai: string }[]): strin
   return nilai && pilihan.some((p) => p.nilai === nilai) ? nilai : '';
 }
 
-/**
- * Membaca saringan dari URL. Nilai yang tidak dikenal dibuang di sini, jadi
- * backend tidak pernah menerima tebakan dari URL yang diketik tangan.
- */
+/** Nilai saringan dari URL yang tak dikenal dibuang di sini agar backend tak menerima tebakan dari URL ketikan tangan. */
 export function bacaSaringan(url: URL): Saringan {
   const p = url.searchParams;
   return {
@@ -74,8 +56,7 @@ export function kueriApi(s: Saringan, batas: number): string {
   const q = new URLSearchParams({ period: s.periode, sales_limit: String(batas) });
   if (s.metode) q.set('payment_method', s.metode);
   if (s.jenis) q.set('type', s.jenis);
-  // Kosong berarti "ikut periode utama" -- backend sudah menjawab itu
-  // sendiri kalau `top_period` tidak dikirim sama sekali.
+  // Kosong berarti "ikut periode utama", yang juga jawaban backend bila `top_period` tak dikirim.
   if (s.top_periode) q.set('top_period', s.top_periode);
   return q.toString();
 }

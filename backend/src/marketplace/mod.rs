@@ -1,19 +1,4 @@
-//! Integrasi marketplace.
-//!
-//! Bentuk order tiap platform berbeda-beda. Modul `orders` tidak boleh tahu
-//! bentuk aslinya: adapter yang menerjemahkan payload platform menjadi
-//! `NormalizedOrder`, dan hanya bentuk itu yang masuk ke basis data.
-//!
-//! Sekarang ada dua adapter: TikTok Shop dan Shopee. Tetap belum ada trait
-//! `PlatformAdapter` dengan dispatch dinamis seperti di proyek lama, karena
-//! yang memanggil adapter selalu tahu platform mana yang dimaksud -- route
-//! `/platforms/shopee/...` tidak pernah perlu memilih adapter saat runtime.
-//! Yang menjaga modularitas tetap `NormalizedOrder`: kedua adapter bermuara
-//! ke bentuk itu, dan hanya bentuk itu yang masuk ke modul `orders`.
-//!
-//! Yang benar-benar sama antar keduanya sudah dipisah: `crypto` untuk
-//! enkripsi token, dan `token` untuk membaca/menulisnya di tabel
-//! `platforms`.
+//! Adapter (TikTok Shop, Shopee) menerjemahkan payload ke `NormalizedOrder`, satu-satunya bentuk yang masuk ke `orders`; tanpa trait karena pemanggil tahu platformnya.
 
 pub mod crypto;
 pub mod shopee;
@@ -22,8 +7,7 @@ pub mod token;
 
 use chrono::{DateTime, Duration, Utc};
 
-/// Status order setelah dipetakan ke istilah internal. Nilainya dibatasi
-/// CHECK constraint `external_orders_status_check`.
+/// Status order setelah dipetakan ke istilah internal, dibatasi CHECK `external_orders_status_check`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderStatus {
     New,
@@ -71,13 +55,7 @@ impl SlaType {
     }
 }
 
-/// Menebak SLA dari nama kurir.
-///
-/// Ini heuristik, bukan data resmi: platform belum menyediakan metadata
-/// tingkat layanan yang seragam. Konsekuensinya tenggat packing bisa
-/// meleset untuk kurir yang namanya tidak dikenali -- dan yang tidak
-/// dikenali jatuh ke `Reguler`, tenggat paling longgar, supaya tidak ada
-/// order yang salah ditandai mendesak.
+/// Menebak SLA dari nama kurir adalah heuristik (platform tak punya metadata seragam); kurir tak dikenal jatuh ke `Reguler`, tenggat terlonggar, agar tak ada order salah ditandai mendesak.
 pub fn klasifikasi_sla(shipping_carrier: Option<&str>) -> SlaType {
     let nama = shipping_carrier.unwrap_or_default().to_lowercase();
 
@@ -105,9 +83,7 @@ pub struct NormalizedOrderItem {
     pub unit_price: Option<rust_decimal::Decimal>,
 }
 
-/// Satu order dari platform mana pun, sudah diterjemahkan ke istilah
-/// internal. Ini satu-satunya bentuk yang boleh menyeberang dari modul
-/// marketplace ke modul `orders`.
+/// Satu order dari platform mana pun dalam istilah internal, satu-satunya bentuk yang boleh menyeberang dari `marketplace` ke `orders`.
 #[derive(Debug, Clone)]
 pub struct NormalizedOrder {
     pub external_order_id: String,
@@ -140,9 +116,7 @@ mod tests {
 
     #[test]
     fn kurir_tak_dikenal_jatuh_ke_reguler() {
-        // Jatuh ke tenggat paling longgar, bukan paling ketat: salah
-        // menandai order biasa sebagai mendesak membuat antrean packing
-        // kehilangan arti.
+        // Jatuh ke tenggat terlonggar, karena salah menandai order biasa sebagai mendesak membuat antrean packing kehilangan arti.
         assert_eq!(
             klasifikasi_sla(Some("Kurir Antah Berantah")),
             SlaType::Reguler

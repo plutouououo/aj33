@@ -1,11 +1,4 @@
-//! Pemanggilan HTTP ke Shopee Open API v2.
-//!
-//! Satu aturan yang menentukan bentuk modul ini: path yang ditandatangani
-//! harus PERSIS path yang diminta. Karena itu path lengkap (`/api/v2/...`)
-//! ditulis utuh di tiap pemanggil dan dipakai untuk keduanya sekaligus --
-//! tidak ada `base_url` berisi `/api/v2` yang harus digabung ulang saat
-//! menandatangani, karena di situlah selisih satu segmen bisa menyelinap
-//! dan menghasilkan `error_sign` yang tidak menjelaskan apa-apa.
+//! Path yang ditandatangani harus persis path yang diminta, jadi path lengkap (`/api/v2/...`) ditulis utuh di tiap pemanggil agar tak ada `error_sign`.
 
 use super::auth::Kredensial;
 use super::signature;
@@ -16,16 +9,14 @@ use serde::Deserialize;
 
 const PATH_DAFTAR_ORDER: &str = "/api/v2/order/get_order_list";
 const PATH_DETAIL_ORDER: &str = "/api/v2/order/get_order_detail";
-// Tiga path di bawah milik bagian pengiriman, yang belum dipanggil dari
-// mana pun -- lihat catatan di bagian "Memperbarui status pengiriman".
+// Tiga path di bawah milik bagian pengiriman yang belum dipanggil dari mana pun (lihat "Memperbarui status pengiriman").
 #[allow(dead_code)]
 const PATH_PARAMETER_KIRIM: &str = "/api/v2/logistics/get_shipping_parameter";
 #[allow(dead_code)]
 const PATH_KIRIM_ORDER: &str = "/api/v2/logistics/ship_order";
 #[allow(dead_code)]
 const PATH_NOMOR_RESI: &str = "/api/v2/logistics/get_tracking_number";
-// Belum dipanggil dari mana pun juga -- lihat catatan di bagian "Rincian
-// akuntansi pesanan (escrow)".
+// Belum dipanggil dari mana pun juga (lihat "Rincian akuntansi pesanan (escrow)").
 #[allow(dead_code)]
 const PATH_DETAIL_ESCROW: &str = "/api/v2/payment/get_escrow_detail";
 
@@ -35,16 +26,10 @@ const MAKS_PER_HALAMAN: i32 = 100;
 /// Batas `order_sn_list` menurut dokumentasi `get_order_detail`.
 pub const MAKS_DETAIL_SEKALI_MINTA: usize = 50;
 
-/// Rentang waktu terlebar yang diterima `get_order_list`, dalam detik
-/// (15 hari). Permintaan yang lebih lebar ditolak Shopee.
+/// Rentang terlebar `get_order_list` dalam detik (15 hari); lebih lebar ditolak Shopee.
 const MAKS_RENTANG_DETIK: i64 = 15 * 24 * 60 * 60;
 
-/// Bentuk jawaban baku Shopee: sukses ditandai `error` yang KOSONG, bukan
-/// kode angka. Isi sebenarnya ada di `response`.
-///
-/// Bound dituliskan sendiri karena derive serde akan menambahkan
-/// `T: Default` gara-gara `#[serde(default)]` di `response` -- padahal yang
-/// diberi nilai default adalah `Option<T>`, bukan `T`.
+/// Jawaban baku Shopee: sukses = `error` KOSONG, isi di `response`; bound ditulis sendiri karena `#[serde(default)]` menambah `T: Default`.
 #[derive(Debug, Deserialize)]
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct Amplop<T> {
@@ -98,8 +83,7 @@ pub fn url_publik(cfg: &ShopeeConfig, path: &str) -> String {
     )
 }
 
-/// URL endpoint level toko: menambahkan `access_token` dan `shop_id`, yang
-/// juga ikut ditandatangani.
+/// URL endpoint level toko: menambah `access_token` dan `shop_id` yang ikut ditandatangani.
 fn url_toko(
     cfg: &ShopeeConfig,
     kredensial: &Kredensial,
@@ -166,15 +150,7 @@ struct RingkasanOrder {
     order_sn: String,
 }
 
-/// Mengambil semua `order_sn` dalam satu rentang waktu.
-///
-/// `get_order_list` hanya mengembalikan nomor order, bukan isinya -- jadi
-/// hasilnya diumpankan ke `detail_order`. Pemisahan itu memang bentuk API
-/// Shopee, bukan pilihan kita.
-///
-/// Rentangnya dibatasi 15 hari oleh Shopee, dan itu diperiksa di sini
-/// supaya penyebabnya jelas di log kita sendiri, bukan muncul sebagai
-/// `error_param` yang tidak menyebut batasnya.
+/// Mengambil semua `order_sn` dalam satu rentang; batas 15 hari diperiksa di sini agar penyebabnya jelas di log, bukan `error_param`.
 pub async fn daftar_order(
     cfg: &ShopeeConfig,
     kredensial: &Kredensial,
@@ -217,9 +193,7 @@ pub async fn daftar_order(
 
         hasil.extend(data.order_list.into_iter().map(|o| o.order_sn));
 
-        // Cursor kosong dengan `more` true berarti halaman berikutnya tidak
-        // bisa ditentukan; berhenti daripada meminta halaman yang sama
-        // berulang kali.
+        // Cursor kosong dengan `more` true berarti halaman berikutnya tak bisa ditentukan; berhenti daripada meminta halaman sama berulang.
         if !data.more || data.next_cursor.is_empty() {
             break;
         }
@@ -235,10 +209,7 @@ struct DetailOrder {
     order_list: Vec<serde_json::Value>,
 }
 
-/// Mengambil detail beberapa order sekaligus, paling banyak 50 per panggilan.
-///
-/// Dikembalikan sebagai JSON mentah supaya `normalisasi` yang memutuskan
-/// field mana yang dipakai, dan sisanya tetap utuh di `raw_payload`.
+/// Mengambil detail beberapa order (maksimum 50 per panggilan) sebagai JSON mentah agar `normalisasi` yang memilih field dan sisanya utuh di `raw_payload`.
 pub async fn detail_order(
     cfg: &ShopeeConfig,
     kredensial: &Kredensial,
@@ -259,9 +230,7 @@ pub async fn detail_order(
         PATH_DETAIL_ORDER,
         &[
             ("order_sn_list", order_sn.join(",")),
-            // Tanpa ini Shopee hanya mengembalikan sedikit field, dan
-            // `item_list` -- yang dipakai membuat tiket packing -- tidak
-            // termasuk di dalamnya.
+            // Tanpa ini Shopee hanya mengembalikan sedikit field dan `item_list` (untuk tiket packing) tak ikut.
             (
                 "response_optional_fields",
                 "item_list,recipient_address,payment_method,total_amount,shipping_carrier,package_list,order_status,pay_time,ship_by_date"
@@ -275,20 +244,7 @@ pub async fn detail_order(
     Ok(data.map(|d| d.order_list).unwrap_or_default())
 }
 
-// --- Memperbarui status pengiriman ---
-//
-// BELUM TERSAMBUNG. Separuh pembaca order (`daftar_order`, `detail_order`)
-// sudah dipakai; separuh pengiriman di bawah ini sudah ditulis terhadap
-// spesifikasi Shopee tapi belum dipanggil route mana pun, dan belum ada
-// tes yang menyentuhnya karena ketiganya memanggil HTTP langsung.
-//
-// Karena itu tiap itemnya diberi `#[allow(dead_code)]`: CI menjalankan
-// `cargo clippy --all-targets -- -D warnings`, jadi tanpa ini seluruh
-// bagian ini menggagalkan build. Atributnya sengaja dipasang per item,
-// BUKAN sekali untuk seluruh berkas -- begitu bagian ini dipanggil dari
-// `orders`, atribut yang tersisa langsung menunjuk apa yang masih
-// menganggur. Satu `allow` di kepala berkas akan menyembunyikannya
-// selamanya, termasuk kode mati yang benar-benar tidak sengaja.
+// Pembaruan pengiriman BELUM TERSAMBUNG (belum dipanggil dan belum dites); `#[allow(dead_code)]` dipasang per item, bukan per berkas, agar yang menganggur terlihat nanti.
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
@@ -306,11 +262,7 @@ struct InfoDiperlukan {
     dropoff: Option<Vec<String>>,
 }
 
-/// Cara pengiriman yang diminta Shopee untuk satu order.
-///
-/// Bukan pilihan kita: tiap kurir menentukan sendiri apakah paket dijemput
-/// atau diantar ke titik drop-off, dan mengirim bentuk yang salah ditolak.
-/// Karena itu bentuknya selalu ditanyakan dulu lewat `parameter_pengiriman`.
+/// Cara pengiriman yang diminta Shopee per order; tiap kurir menentukan jemput atau drop-off dan bentuk salah ditolak, jadi selalu ditanyakan dulu lewat `parameter_pengiriman`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetodeKirim {
@@ -320,12 +272,7 @@ pub enum MetodeKirim {
     Dropoff,
 }
 
-/// Menanyakan bentuk pengiriman yang diminta untuk satu order.
-///
-/// `info_needed` yang kosong di kedua sisi berarti Shopee tidak menyebut
-/// cara mana pun -- biasanya karena ordernya belum siap dikirim. Itu
-/// dikembalikan sebagai `None` supaya pemanggil bisa membedakannya dari
-/// order yang memang perlu dijemput.
+/// Menanyakan bentuk pengiriman satu order; `info_needed` kosong di kedua sisi berarti Shopee tak menyebut cara (biasanya order belum siap) dan dikembalikan `None`.
 #[allow(dead_code)]
 pub async fn parameter_pengiriman(
     cfg: &ShopeeConfig,
@@ -345,8 +292,7 @@ pub async fn parameter_pengiriman(
         return Ok(None);
     };
 
-    // Shopee mengirim daftar kosong (bukan field yang hilang) untuk cara
-    // yang tidak berlaku, jadi yang menentukan adalah daftar yang ADA ISINYA.
+    // Shopee mengirim daftar kosong (bukan field hilang) untuk cara yang tak berlaku, jadi yang menentukan adalah daftar yang ada isinya.
     Ok(match (terisi(&info.pickup), terisi(&info.dropoff)) {
         (true, _) => Some(MetodeKirim::Pickup),
         (_, true) => Some(MetodeKirim::Dropoff),
@@ -359,12 +305,7 @@ fn terisi(daftar: &Option<Vec<String>>) -> bool {
     daftar.as_ref().is_some_and(|d| !d.is_empty())
 }
 
-/// Mengatur pengiriman satu order -- inilah yang memindahkan order dari
-/// READY_TO_SHIP ke PROCESSED di Shopee.
-///
-/// Field `pickup`/`dropoff` tetap dikirim sebagai objek kosong walaupun
-/// isinya tidak ada: dokumentasi `ship_order` menyebut field-nya harus tetap
-/// ada, dan menghilangkannya ditolak.
+/// Mengatur pengiriman satu order (READY_TO_SHIP ke PROCESSED di Shopee); `pickup`/`dropoff` tetap dikirim sebagai objek kosong karena dokumentasi `ship_order` mewajibkan field-nya ada.
 #[allow(dead_code)]
 pub async fn kirim_order(
     cfg: &ShopeeConfig,
@@ -396,11 +337,7 @@ struct NomorResi {
     tracking_number: Option<String>,
 }
 
-/// Mengambil nomor resi setelah pengiriman diatur.
-///
-/// Dipisah dari `kirim_order` karena memang terbit belakangan: sebagian
-/// kurir baru menerbitkan resi beberapa saat setelah pengiriman diatur,
-/// jadi resi yang belum ada bukan kegagalan -- itu `None`.
+/// Mengambil nomor resi setelah pengiriman diatur, dipisah dari `kirim_order` karena sebagian kurir menerbitkannya belakangan (resi belum ada = `None`, bukan gagal).
 #[allow(dead_code)]
 pub async fn nomor_resi(
     cfg: &ShopeeConfig,
@@ -421,33 +358,9 @@ pub async fn nomor_resi(
         .filter(|n| !n.trim().is_empty()))
 }
 
-// --- Rincian akuntansi pesanan (escrow) ---
-//
-// BELUM TERSAMBUNG, sama seperti bagian pengiriman di atas: `SHOPEE_PARTNER_ID`
-// dkk. di `.env` masih kosong, jadi belum ada toko yang benar-benar
-// tersambung untuk dipanggil. Disiapkan lebih dulu supaya begitu toko
-// tersambung, tinggal dipanggil dari `orders` atau `reports` -- bukan
-// ditulis dari nol saat kebutuhannya baru muncul.
-//
-// KENAPA ENDPOINT INI. Model biaya platform Shopee di `pos::service`
-// (migrasi 0017/0018 -- `commission_fee`, `service_fee`, `withholding_tax`,
-// `seller_order_processing_fee`) adalah PERKIRAAN yang kasir masukkan
-// sendiri sebelum transaksi disimpan. `get_escrow_detail` adalah satu-
-// satunya sumber angka SUNGGUHAN: laporan akuntansi resmi Shopee per
-// pesanan, dibuat setelah pesanan selesai. Begitu toko tersambung, inilah
-// yang dipanggil untuk membandingkan (atau menggantikan) perkiraan kasir
-// dengan angka yang benar-benar Shopee potong.
-//
-// BENTUK RESPONSNYA ~80 FIELD (lihat skema `v2.payment.get_escrow_detail`
-// di `congminh1254/shopee-sdk`); yang didaftarkan di `RincianEscrow`/
-// `PendapatanOrder` cuma yang relevan untuk perbandingan itu. Field lain
-// (pajak lintas-negara, kompensasi Shopee Ads, dst.) sengaja tidak
-// didaftarkan -- kalau suatu saat perlu, tinggal ditambah, bukan ditulis
-// ulang.
+// Rincian escrow BELUM TERSAMBUNG: `get_escrow_detail` adalah sumber angka sungguhan untuk membandingkan perkiraan biaya kasir; hanya field relevan dari ~80 yang didaftarkan.
 
-/// Bentuk jawaban `get_escrow_detail`. Hanya field tingkat atas yang dipakai
-/// yang didaftarkan; sisanya (mis. `buyer_payment_info`) tidak diambil sama
-/// sekali.
+/// Bentuk jawaban `get_escrow_detail`; hanya field tingkat atas yang dipakai yang didaftarkan.
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct RincianEscrow {
@@ -457,45 +370,30 @@ pub struct RincianEscrow {
     pub order_income: Option<PendapatanOrder>,
 }
 
-/// Subset `order_income` dari `get_escrow_detail` -- angka yang benar-benar
-/// dibandingkan dengan perkiraan kasir di `pos::service::checkout`.
-///
-/// Semuanya `Option<f64>`, bukan `Decimal` atau wajib ada: dokumentasi
-/// Shopee menyebut banyak field ini "Only display for non cb sip affiliate
-/// shop", jadi ketidakhadirannya bukan kegagalan parsing.
+/// Subset `order_income` yang dibandingkan dengan perkiraan kasir; semuanya `Option<f64>` karena banyak field hanya tampil untuk toko tertentu.
 #[allow(dead_code)]
 #[derive(Debug, Default, Deserialize)]
 pub struct PendapatanOrder {
-    /// Uang yang sungguh cair ke toko untuk pesanan ini. Bandingkan dengan
-    /// `total_amount` yang kasir catat di `pos::service::checkout`.
+    /// Uang yang sungguh cair ke toko untuk pesanan ini; bandingkan dengan `total_amount` kasir.
     #[serde(default)]
     pub escrow_amount: Option<f64>,
     #[serde(default)]
     pub buyer_total_amount: Option<f64>,
-    /// "The commission fee charged by Shopee platform if applicable."
-    /// Bandingkan dengan `platform_commission_fee` kasir.
+    /// Komisi Shopee (jika berlaku); bandingkan dengan `platform_commission_fee` kasir.
     #[serde(default)]
     pub commission_fee: Option<f64>,
-    /// "Amount charged by Shopee to seller for additional services"
-    /// (mis. Gratis Ongkir Xtra, Star+). Bandingkan dengan
-    /// `platform_service_fee` kasir.
+    /// Biaya layanan tambahan (mis. Gratis Ongkir Xtra, Star+); bandingkan dengan `platform_service_fee` kasir.
     #[serde(default)]
     pub service_fee: Option<f64>,
     #[serde(default)]
     pub seller_transaction_fee: Option<f64>,
-    /// "Cross-border tax imposed by the Indonesian government on sellers."
-    /// TIDAK dimodelkan di `pos::service` -- lihat catatan perbandingan.
+    /// Pajak lintas negara dari pemerintah Indonesia; tidak dimodelkan di `pos::service`.
     #[serde(default)]
     pub escrow_tax: Option<f64>,
-    /// "According to regulations issued by Directorate General of Taxation
-    /// in ID, the Withholding Tax is applied to the income stated in the
-    /// invoice..." -- PPh final UMKM. Bandingkan dengan
-    /// `platform_withholding_tax` kasir.
+    /// Withholding tax (PPh final UMKM) atas pendapatan di faktur; bandingkan dengan `platform_withholding_tax` kasir.
     #[serde(default)]
     pub withholding_tax: Option<f64>,
-    /// "Order Processing Fee is the amount charged to sellers for every
-    /// order created." Bandingkan dengan `platform_order_processing_fee`
-    /// kasir.
+    /// Order Processing Fee per order; bandingkan dengan `platform_order_processing_fee` kasir.
     #[serde(default)]
     pub seller_order_processing_fee: Option<f64>,
     #[serde(default)]
@@ -504,12 +402,7 @@ pub struct PendapatanOrder {
     pub buyer_paid_shipping_fee: Option<f64>,
 }
 
-/// Mengambil rincian akuntansi satu pesanan.
-///
-/// Berbeda dari `detail_order`: dipanggil SETELAH pesanan selesai (angkanya
-/// baru final saat itu), satu order per panggilan (Shopee juga punya
-/// `get_escrow_detail_batch` untuk sampai 50 sekaligus, belum disiapkan di
-/// sini karena belum ada pemanggil yang butuh itu).
+/// Mengambil rincian akuntansi satu pesanan; dipanggil setelah pesanan selesai (angka baru final), satu order per panggilan (`get_escrow_detail_batch` belum disiapkan karena belum ada yang butuh).
 #[allow(dead_code)]
 pub async fn detail_escrow(
     cfg: &ShopeeConfig,
@@ -601,8 +494,7 @@ mod tests {
 
     #[test]
     fn tanda_tangan_url_toko_cocok_dengan_yang_dihitung_ulang() {
-        // Tanda tangan dan parameter dirakit dari sumber yang sama; kalau
-        // suatu saat dipisah, tes ini yang gagal lebih dulu.
+        // Tanda tangan dan parameter dirakit dari sumber yang sama; bila dipisah, tes ini gagal lebih dulu.
         let url = url_toko(&cfg(), &kredensial(), PATH_DAFTAR_ORDER, &[]);
 
         let timestamp: i64 = potong(&url, "timestamp=").parse().unwrap();
@@ -668,8 +560,7 @@ mod tests {
 
     #[tokio::test]
     async fn detail_tanpa_order_tidak_memanggil_shopee() {
-        // Kalau ini sampai memanggil jaringan, tesnya yang gagal duluan --
-        // host `partner.test` tidak ada.
+        // Bila ini sampai memanggil jaringan tesnya gagal duluan karena host `partner.test` tak ada.
         let hasil = detail_order(&cfg(), &kredensial(), &[]).await.unwrap();
         assert!(hasil.is_empty());
     }
@@ -697,10 +588,7 @@ mod tests {
         assert!(url.contains("sign="));
     }
 
-    /// Potongan nyata dari skema `v2.payment.get_escrow_detail` (SDK
-    /// `congminh1254/shopee-sdk`) -- memastikan `RincianEscrow` membaca field
-    /// yang benar-benar dipakai untuk perbandingan, bukan salah ketik nama
-    /// field yang baru ketahuan saat toko sungguhan tersambung.
+    /// Potongan nyata skema `get_escrow_detail` untuk memastikan `RincianEscrow` membaca field yang benar, bukan salah ketik yang baru ketahuan saat tersambung.
     #[test]
     fn rincian_escrow_membaca_field_yang_dibandingkan_dengan_kasir() {
         let raw = serde_json::json!({
@@ -731,9 +619,7 @@ mod tests {
 
     #[test]
     fn rincian_escrow_field_yang_tidak_dikirim_shopee_tidak_gagal_parse() {
-        // Banyak field `order_income` "hanya tampil untuk non cb sip
-        // affiliate shop" menurut dokumentasi Shopee -- payload yang
-        // memangkasnya harus tetap terbaca, bukan menolak seluruh respons.
+        // Banyak field `order_income` "hanya tampil untuk non cb sip affiliate shop"; payload yang memangkasnya harus tetap terbaca.
         let raw = serde_json::json!({
             "order_sn": "2404098R48U37H",
             "order_income": {

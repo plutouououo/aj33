@@ -7,20 +7,7 @@ use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Pelanggan toko beserta ringkasan belanjanya.
-///
-/// `name` boleh kosong sejak skema awal: pelanggan yang lahir dari impor
-/// pesanan marketplace kadang hanya membawa username, bukan nama. Yang
-/// menampilkan harus siap menghadapinya.
-///
-/// Angka belanja ikut di sini, tidak dipisah ke endpoint lain. Daftar
-/// pelanggan tanpa "sudah belanja berapa" hampir tidak pernah cukup untuk
-/// pertanyaan yang dibawa pemilik toko ke halaman ini, dan menghitungnya
-/// di satu query jauh lebih murah daripada menarik seluruh transaksi ke
-/// frontend lalu menjumlahkannya di sana.
-///
-/// OMZET ADALAH `subtotal - discount_amount`, BUKAN `total_amount` -- sama seperti di modul
-/// laporan. Ongkir bukan belanja pelanggan atas barang.
+/// Pelanggan beserta ringkasan belanja (`name` boleh kosong karena impor marketplace); omzet = `subtotal - discount_amount`, bukan `total_amount`, seperti laporan.
 #[derive(Debug, Serialize)]
 pub struct Customer {
     pub id: Uuid,
@@ -40,16 +27,13 @@ pub struct Customer {
 
 pub struct CustomerFilter {
     pub search: Option<String>,
-    /// `belanja` = hanya yang pernah bertransaksi, `walk_in` / `marketplace`
-    /// = asal pelanggan. Kosong berarti semua.
+    /// `belanja` = hanya yang pernah bertransaksi, `walk_in`/`marketplace` = asal pelanggan, kosong = semua.
     pub scope: Option<String>,
     pub limit: i64,
     pub offset: i64,
 }
 
-/// Urutan daftar. Nama untuk mencari orang, belanja untuk melihat siapa
-/// yang paling berharga -- dua pertanyaan berbeda yang sama-sama dibawa ke
-/// halaman ini.
+/// Urutan daftar: nama untuk mencari orang, belanja untuk melihat siapa paling berharga.
 pub enum Urutan {
     Nama,
     Belanja,
@@ -74,10 +58,7 @@ impl Urutan {
     }
 }
 
-/// Daftar pelanggan beserta jumlah seluruh baris yang cocok saringan.
-///
-/// Totalnya ikut dikembalikan supaya halaman bisa mengatakan "menampilkan
-/// 25 dari 300", bukan diam-diam memotong daftar di batas `limit`.
+/// Daftar pelanggan beserta total baris yang cocok, agar halaman bisa mengatakan "menampilkan 25 dari 300", bukan diam-diam memotong di `limit`.
 pub async fn list_customers(
     pool: &PgPool,
     filter: &CustomerFilter,
@@ -164,11 +145,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Customer>> 
     Ok(row)
 }
 
-/// Pelanggan dengan nomor telepon tertentu, kalau ada.
-///
-/// Dipakai supaya pelanggan langganan yang kembali tidak melahirkan baris
-/// baru setiap kali kasir mengetikkan namanya lagi. Memakai
-/// `idx_customers_phone` yang sudah ada sejak skema awal.
+/// Pelanggan dengan nomor telepon tertentu agar langganan yang kembali tak melahirkan baris baru tiap diketik ulang; memakai `idx_customers_phone` sejak skema awal.
 pub async fn find_by_phone(pool: &PgPool, phone: &str) -> AppResult<Option<Customer>> {
     let id = sqlx::query_scalar!(
         r#"
@@ -188,9 +165,7 @@ pub async fn find_by_phone(pool: &PgPool, phone: &str) -> AppResult<Option<Custo
     }
 }
 
-/// `source` diisi tegas, bukan mengandalkan default kolom: pelanggan yang
-/// dibuat di meja kasir memang walk-in, dan menuliskannya berarti perubahan
-/// default kolom di kemudian hari tidak bisa diam-diam menandai ulang mereka.
+/// `source` diisi tegas, bukan default kolom, agar perubahan default kelak tak diam-diam menandai ulang pelanggan walk-in.
 pub async fn insert_customer(
     pool: &PgPool,
     name: &str,
@@ -210,17 +185,13 @@ pub async fn insert_customer(
     .fetch_one(pool)
     .await?;
 
-    // Dibaca ulang lewat jalur yang sama dengan pembacaan lain supaya bentuk
-    // yang dikembalikan tidak pernah berbeda dari yang dikembalikan daftar.
+    // Dibaca ulang lewat jalur sama dengan bacaan lain agar bentuk yang dikembalikan tak beda dari daftar.
     find_by_id(pool, id)
         .await?
         .ok_or_else(|| sqlx::Error::RowNotFound.into())
 }
 
-/// Bidang yang boleh diubah. `None` berarti "jangan sentuh", sedangkan
-/// `Some(None)` berarti "kosongkan" -- dua hal yang berbeda, dan
-/// membedakannya di tipe berarti tidak ada handler yang bisa salah
-/// menghapus nomor telepon hanya karena form tidak mengirimkannya.
+/// Bidang yang boleh diubah: `None` = jangan sentuh, `Some(None)` = kosongkan; dibedakan di tipe agar tak ada handler yang menghapus telepon hanya karena form tak mengirimnya.
 #[derive(Debug, Default)]
 pub struct CustomerPatch {
     pub name: Option<String>,
@@ -271,10 +242,7 @@ impl Rujukan {
     }
 }
 
-/// Foreign key di skema awal adalah `ON DELETE NO ACTION`, jadi Postgres
-/// sudah menolak penghapusan pelanggan yang masih dirujuk. Dihitung di sini
-/// supaya penolakannya bisa dijelaskan ("masih punya 3 transaksi"), bukan
-/// muncul sebagai galat constraint yang tidak berarti apa-apa bagi kasir.
+/// Foreign key skema awal `ON DELETE NO ACTION` sudah menolak hapus pelanggan yang dirujuk; dihitung di sini agar penolakan bisa dijelaskan ("masih punya 3 transaksi") alih-alih galat constraint.
 pub async fn hitung_rujukan(pool: &PgPool, id: Uuid) -> AppResult<Rujukan> {
     let row = sqlx::query!(
         r#"

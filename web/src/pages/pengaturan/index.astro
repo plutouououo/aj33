@@ -1,6 +1,4 @@
 ---
-// Tidak ada isi sendiri -- "Pengaturan" di sidebar selalu masuk lewat sini
-// supaya path-nya (/pengaturan) bisa jadi prefix pencocokan "aktif" yang
-// benar untuk semua sub-halaman (akun, platform, sku) sekaligus.
+// Tanpa isi sendiri; "Pengaturan" di sidebar masuk lewat sini agar `/pengaturan` jadi prefix "aktif" bagi semua sub-halaman.
 return Astro.redirect('/pengaturan/akun', 302);
 ---

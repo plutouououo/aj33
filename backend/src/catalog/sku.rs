@@ -1,61 +1,4 @@
-//! Perakitan dan validasi SKU.
-//!
-//! Bentuknya `[JENIS][GRADE]-[MEREK]-[UKURAN]`, huruf besar semua, `-` hanya
-//! sebagai pemisah, panjang 6 sampai 12 karakter termasuk pemisah:
-//!
-//! ```text
-//! Ceker Bersih + Super Besar + AFCO + 2 kg  ->  CBSB-AFC-2KG   (12)
-//! Hati Jantung Ampela + AFCO               ->  HJA-AFC        (7)
-//! Dada + SP 08 + Best Chicken + 1 kg       ->  D08-BEC-1KG    (11)
-//! ```
-//!
-//! Aturan ini bukan karangan baru: toko sudah memakainya bertahun-tahun,
-//! diketik tangan di nama produk. `CBSB` adalah **C**eker **B**ersih
-//! **S**uper **B**esar, `HJA` adalah **H**ati **J**antung **A**mpela. Yang
-//! berubah hanya siapa yang mengetiknya.
-//!
-//! # Dua cara sebuah bagian jadi kode
-//!
-//! Pertama, KAMUS: pemetaan nilai atribut ke kode pendek yang disimpan di
-//! tabel `sku_codes` dan bisa diubah pemilik toko. Kedua, INISIAL BEBAS:
-//! huruf pertama tiap kata, dipakai kalau bagian itu belum ada di kamus.
-//!
-//! Inisial bebas hanya boleh dipakai selama hasil akhirnya masih muat di 12
-//! karakter. Begitu lewat, perakitan BERHENTI DENGAN GALAT yang menyebut
-//! bagian mana yang harus didaftarkan -- bukan memotong kodenya. Kode yang
-//! terpenggal (`DSP0` untuk grade `SP 08`) berhenti bisa dibaca, dan SKU yang
-//! tidak bisa dibaca tidak lebih berguna daripada tidak punya SKU.
-//!
-//! # SKU dibekukan setelah dirakit
-//!
-//! Sekali terpasang, SKU tidak pernah dirakit ulang -- termasuk saat atribut
-//! pembentuknya disunting. SKU yang ikut berubah memutus tiga hal sekaligus:
-//! label yang sudah dicetak dan ditempel di pack, listing marketplace yang
-//! sudah memetakan SKU lama, dan hafalan pegawai yang mencari dengan kode
-//! lama. Atribut adalah kebenaran barangnya; SKU cuma namanya, dan nama tidak
-//! ikut berubah tiap kali keterangannya diperbaiki.
-//!
-//! Karena beku, harus ada jalan koreksi untuk salah ketik di awal, dan itu
-//! `normalkan`: SKU boleh diperbaiki manual kapan pun, termasuk setelah
-//! produknya terjual di kasir, masuk tiket packing, atau tercatat di pesanan
-//! marketplace -- itu semua catatan historis di dalam sistem ini sendiri.
-//! Yang tetap mengunci hanya varian (kode induk jadi awalan SKU seluruh
-//! variannya) dan listing marketplace yang sudah memetakan SKU ini secara
-//! aktif (penjagaannya `repo::penahan_ubah_sku`, lebih longgar dari
-//! `repo::penahan_hapus` yang dipakai larangan hapus).
-//!
-//! # Tidak ada akhiran pembeda otomatis
-//!
-//! Dua produk dengan jenis, grade, merek, dan ukuran yang sama persis
-//! menghasilkan SKU yang sama, dan yang kedua DITOLAK. Menambahkan `-2`
-//! otomatis akan melewati batas 12 karakter untuk SKU yang sudah penuh, dan
-//! -- lebih penting -- `CBSB-AFC-2KG-2` tidak memberi tahu siapa pun apa
-//! bedanya dari `CBSB-AFC-2KG`. Kalau dua barang memang berbeda, yang
-//! membedakannya harus ada di atributnya.
-//!
-//! Modul ini murni perhitungan teks: tidak ada SQL, dan seluruh aturan di
-//! atas bisa diuji tanpa database. Kamusnya dibaca pemanggil lalu diserahkan
-//! ke sini sebagai `Kamus`.
+//! Perakitan dan validasi SKU `[JENIS][GRADE]-[MEREK]-[UKURAN]` (huruf besar, 6-12 karakter): kode dari kamus atau inisial bebas, galat bila lewat 12, beku setelah dirakit, tanpa akhiran pembeda.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -76,8 +19,7 @@ pub enum Bagian {
 }
 
 impl Bagian {
-    /// Nilai yang tersimpan di kolom `sku_codes.kind`. Dikunci CHECK
-    /// constraint di database, jadi daftar di sini harus sama persis.
+    /// Nilai kolom `sku_codes.kind`, dikunci CHECK constraint sehingga daftar di sini harus sama persis.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Jenis => "jenis",
@@ -108,11 +50,7 @@ impl Bagian {
     }
 }
 
-/// Kunci pencarian di kamus: huruf besar, tanpa spasi dan tanda baca.
-///
-/// Dengan ini `SP 08`, `sp08`, dan `Sp-08` menemukan entri yang sama. Tanpa
-/// itu, satu entri kamus hanya berlaku untuk satu cara mengetik, dan
-/// pemiliknya harus mendaftarkan tiap ejaan satu per satu.
+/// Kunci pencarian kamus: huruf besar tanpa spasi dan tanda baca, sehingga `SP 08`, `sp08`, `Sp-08` menemukan entri yang sama.
 pub fn kunci(nilai: &str) -> String {
     nilai
         .chars()
@@ -142,19 +80,14 @@ impl Kamus {
     }
 }
 
-/// Alasan sebuah SKU tidak bisa dipakai. Pesannya ditulis untuk dibaca
-/// pemilik toko, bukan untuk log.
+/// Alasan SKU tak bisa dipakai, pesannya ditulis untuk pemilik toko, bukan log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GalatSku {
     /// Perakitan: tidak ada satu pun atribut yang terisi.
     TanpaAtribut,
-    /// Pemeriksaan: tidak tersisa satu pun huruf atau angka. Terpisah dari
-    /// `TanpaAtribut` karena jalur koreksi manual tidak merakit apa pun dari
-    /// atribut -- menyuruh pemiliknya "mengisi grade" di sana menjawab
-    /// pertanyaan yang tidak dia ajukan.
+    /// Tak tersisa huruf atau angka; terpisah dari `TanpaAtribut` karena koreksi manual tak merakit dari atribut.
     Kosong,
-    /// Lebih dari `SKU_MAKS`. `calon` adalah bagian yang masih memakai
-    /// inisial bebas -- itulah yang bisa dipendekkan lewat kamus.
+    /// Lebih dari `SKU_MAKS`; `calon` adalah bagian berinisial bebas yang bisa dipendekkan lewat kamus.
     TerlaluPanjang {
         sku: String,
         calon: Vec<(Bagian, String)>,
@@ -224,8 +157,7 @@ impl fmt::Display for GalatSku {
     }
 }
 
-/// Kode satu bagian, beserta asalnya. `dari_kamus` menentukan apakah bagian
-/// ini masih bisa dipendekkan saat SKU-nya kelewat panjang.
+/// Kode satu bagian beserta asalnya; `dari_kamus` menentukan apakah masih bisa dipendekkan.
 struct Kode {
     teks: String,
     dari_kamus: bool,
@@ -252,14 +184,10 @@ fn kode_bagian(kamus: &Kamus, bagian: Bagian, nilai: Option<&str>) -> Kode {
     }
 }
 
-/// Kode yang diturunkan dari teks atributnya sendiri, dipakai selama bagian
-/// itu belum ada di kamus.
+/// Kode yang diturunkan dari teks atribut sendiri, dipakai selama bagian belum ada di kamus.
 fn kode_bebas(bagian: Bagian, nilai: &str) -> String {
     match bagian {
-        // Merek selalu tiga huruf, dibagi menurut jumlah katanya: satu kata
-        // mengambil tiga huruf pertama (afco -> AFC), dua kata dua huruf dari
-        // yang pertama dan satu dari yang kedua (best chicken -> BEC), tiga
-        // kata atau lebih satu huruf dari masing-masing tiga kata pertama.
+        // Merek selalu tiga huruf: satu kata ambil tiga huruf pertama (afco → AFC), dua kata 2+1 (best chicken → BEC), tiga kata atau lebih satu huruf dari tiga kata pertama.
         Bagian::Merek => {
             let kata: Vec<&str> = nilai.split_whitespace().collect();
             let ambil = |kata: &str, n: usize| -> String {
@@ -278,14 +206,9 @@ fn kode_bebas(bagian: Bagian, nilai: &str) -> String {
                 }
             }
         }
-        // Ukuran dibawa utuh: "2 kg" jadi "2KG". Inisialnya ("2K") membuang
-        // satuan, dan ukuran tanpa satuan tidak berarti apa-apa.
+        // Ukuran dibawa utuh ("2 kg" → "2KG") karena inisial membuang satuan dan ukuran tanpa satuan tak bermakna.
         Bagian::Ukuran => kunci(nilai),
-        // Jenis dan grade diambil inisialnya -- itu yang melahirkan CBSB dan
-        // HJA. Kecuali yang mengandung angka: grade "SP 08" yang menyusut
-        // jadi "S0" berhenti menunjuk kelas ukuran yang mana, jadi dibawa
-        // utuh sebagai "SP08". Kalau itu membuat SKU-nya kelewat panjang,
-        // kamus yang memendekkannya -- bukan pemenggalan.
+        // Jenis dan grade diambil inisialnya (CBSB, HJA), kecuali yang mengandung angka dibawa utuh ("SP 08" → "SP08"); bila terlalu panjang kamus yang memendekkan, bukan pemenggalan.
         Bagian::Jenis | Bagian::Grade => {
             if nilai.chars().any(|c| c.is_ascii_digit()) {
                 return kunci(nilai);
@@ -299,12 +222,7 @@ fn kode_bebas(bagian: Bagian, nilai: &str) -> String {
     }
 }
 
-/// Merakit SKU dari atribut produk.
-///
-/// Jenis dan grade menyatu tanpa pemisah -- itulah yang menghasilkan `CBSB`
-/// dari "Ceker Bersih" + "Super Besar". Bagian yang kosong dilewati, bukan
-/// menyisakan pemisah menggantung, jadi barang tanpa grade dan tanpa ukuran
-/// tetap dapat SKU yang bersih.
+/// Merakit SKU dari atribut: jenis dan grade menyatu tanpa pemisah, bagian kosong dilewati agar tak ada pemisah menggantung.
 pub fn rakit(
     kamus: &Kamus,
     jenis_produk: Option<&str>,
@@ -336,9 +254,7 @@ pub fn rakit(
 
     let sku = segmen.join(&PEMISAH.to_string());
 
-    // Galat panjang dijawab lebih dulu dengan daftar bagian yang masih
-    // memakai inisial bebas: itulah satu-satunya yang bisa diperbuat
-    // pemiliknya, dan pesan yang tidak menyebutkannya membuat dia menebak.
+    // Galat panjang menyebut dulu bagian yang masih berinisial bebas karena hanya itu yang bisa diperbuat pemilik.
     if sku.chars().count() > SKU_MAKS {
         let mut calon: Vec<(Bagian, String)> = [
             (Bagian::Jenis, jenis_produk, &jenis),
@@ -356,8 +272,7 @@ pub fn rakit(
         })
         .collect();
 
-        // Yang kodenya paling panjang disebut lebih dulu: mendaftarkan yang
-        // itu paling besar peluangnya langsung menyelesaikan masalahnya.
+        // Bagian berkode terpanjang disebut lebih dulu karena mendaftarkannya paling mungkin menyelesaikan masalah.
         calon.sort_by_key(|(bagian, nilai)| {
             std::cmp::Reverse(kode_bebas(*bagian, nilai).chars().count())
         });
@@ -369,11 +284,7 @@ pub fn rakit(
     Ok(sku)
 }
 
-/// Memeriksa bentuk dan panjang sebuah SKU.
-///
-/// Dipakai untuk hasil rakitan maupun koreksi manual: satu pemeriksaan untuk
-/// keduanya, supaya tidak ada SKU yang lolos lewat satu jalan tapi ditolak di
-/// jalan lain.
+/// Memeriksa bentuk dan panjang SKU, satu pemeriksaan untuk hasil rakitan dan koreksi manual agar tak ada yang lolos lewat satu jalan tapi ditolak di jalan lain.
 pub fn periksa(sku: &str) -> Result<(), GalatSku> {
     if sku.is_empty() {
         return Err(GalatSku::Kosong);
@@ -411,18 +322,10 @@ pub fn periksa(sku: &str) -> Result<(), GalatSku> {
     Ok(())
 }
 
-/// Membersihkan SKU yang diketik manusia menjadi bentuk yang sama dengan
-/// hasil rakitan: huruf besar semua, dan tiap rentetan karakter bukan
-/// huruf-angka -- spasi, garis bawah, garis miring, pemisah berulang --
-/// menyusut jadi satu pemisah. Tanpa ini "cbsb afc / 2kg" dan "CBSB-AFC-2KG"
-/// lolos sebagai dua SKU berbeda untuk barang yang sama, yang justru
-/// penyimpangan yang dihindari dengan merakit SKU otomatis.
-///
-/// Dipakai hanya di jalur koreksi; produk baru tidak pernah mengetik SKU.
+/// Membersihkan SKU ketikan manusia ke bentuk hasil rakitan (huruf besar, rentetan non-huruf-angka jadi satu pemisah) agar "cbsb afc / 2kg" dan "CBSB-AFC-2KG" tak jadi dua SKU; hanya jalur koreksi.
 pub fn normalkan(kode: &str) -> Result<String, GalatSku> {
     let mut hasil = String::new();
-    // Pemisah baru benar-benar ditulis saat ada isi sesudahnya, jadi pemisah
-    // di ujung depan dan ujung belakang tidak pernah ikut tersimpan.
+    // Pemisah ditulis hanya bila ada isi sesudahnya sehingga tak ada pemisah di ujung depan/belakang.
     let mut tertunda = false;
 
     for c in kode.chars() {
@@ -441,19 +344,10 @@ pub fn normalkan(kode: &str) -> Result<String, GalatSku> {
     Ok(hasil)
 }
 
-/// Panjang maksimum satu kode kamus.
-///
-/// Lebih ketat dari `SKU_MAKS`: satu bagian tidak boleh sendirian
-/// menghabiskan jatah SKU, harus tersisa ruang untuk pemisah dan bagian
-/// lain.
+/// Panjang maksimum satu kode kamus, lebih ketat dari `SKU_MAKS` agar satu bagian tak menghabiskan jatah SKU.
 pub const KODE_MAKS: usize = SKU_MAKS - 2;
 
-/// Alasan sebuah kode kamus ditolak.
-///
-/// Terpisah dari `GalatSku` karena aturannya memang berbeda, dan pesan yang
-/// dipinjam akan membantah dirinya sendiri: `-` boleh ada di SKU tapi tidak
-/// di dalam kode satu bagian, dan batas panjangnya bukan 12 melainkan
-/// `KODE_MAKS`.
+/// Alasan kode kamus ditolak, terpisah dari `GalatSku` karena aturannya beda (`-` tak boleh di kode satu bagian, batas `KODE_MAKS`, bukan 12).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GalatKode {
     Kosong,
@@ -481,10 +375,7 @@ impl fmt::Display for GalatKode {
     }
 }
 
-/// Kode yang boleh disimpan sebagai entri kamus: huruf besar dan angka saja,
-/// tanpa pemisah. Pemisah di dalam kode satu bagian akan melahirkan SKU
-/// dengan lebih dari tiga bagian, yang bukan lagi bentuk yang dijanjikan
-/// modul ini.
+/// Kode kamus: huruf besar dan angka saja, karena pemisah di kode satu bagian melahirkan SKU dengan lebih dari tiga bagian.
 pub fn periksa_kode_kamus(kode: &str) -> Result<(), GalatKode> {
     if kode.is_empty() {
         return Err(GalatKode::Kosong);
@@ -513,9 +404,7 @@ pub fn periksa_kode_kamus(kode: &str) -> Result<(), GalatKode> {
 mod tests {
     use super::*;
 
-    /// Kamus yang dipakai toko. Sama isinya dengan yang dipasang migrasi
-    /// 0013 -- kalau keduanya berbeda, test ini lulus sementara produksi
-    /// menolak produk yang di sini diterima.
+    /// Kamus yang dipakai toko, sama dengan yang dipasang migrasi 0013; bila beda, test lulus sementara produksi menolak produk yang di sini diterima.
     fn kamus_toko() -> Kamus {
         Kamus::baru([
             (Bagian::Merek, "AFCO".to_string(), "AFC".to_string()),
@@ -531,9 +420,7 @@ mod tests {
         Kamus::default()
     }
 
-    // ------------------------------------------------------------------
-    // Contoh yang ditulis di permintaan
-    // ------------------------------------------------------------------
+    // Contoh yang ditulis di permintaan.
 
     #[test]
     fn contoh_ceker_bersih_super_besar_afco_2kg() {
@@ -565,9 +452,7 @@ mod tests {
 
     #[test]
     fn contoh_dada_sp08_best_chicken_1kg_butuh_kamus() {
-        // Inisial bebas menghasilkan DSP08-BEC-1KG = 13 karakter, lewat satu
-        // dari batas 12. Tanpa kamus perakitan harus BERHENTI, bukan
-        // memenggal grade jadi "SP0".
+        // Inisial bebas menghasilkan DSP08-BEC-1KG (13 karakter, lewat batas 12); tanpa kamus perakitan harus berhenti, bukan memenggal grade jadi "SP0".
         let galat = rakit(
             &kosong(),
             Some("Dada"),
@@ -581,15 +466,13 @@ mod tests {
             GalatSku::TerlaluPanjang { sku, calon } => {
                 assert_eq!(sku, "DSP08-BEC-1KG");
                 assert_eq!(sku.chars().count(), 13);
-                // Grade disebut lebih dulu: kodenya ("SP08") paling panjang,
-                // jadi mendaftarkannya paling mungkin menyelesaikan masalah.
+                // Grade disebut lebih dulu karena kodenya ("SP08") terpanjang.
                 assert_eq!(calon.first(), Some(&(Bagian::Grade, "SP 08".to_string())));
             }
             lain => panic!("harusnya TerlaluPanjang, dapat {lain:?}"),
         }
 
-        // Pesannya menyebut bagian mana yang harus didaftarkan, bukan sekadar
-        // "SKU terlalu panjang".
+        // Pesan menyebut bagian yang harus didaftarkan, bukan sekadar "SKU terlalu panjang".
         let pesan = galat.to_string();
         assert!(pesan.contains("grade \"SP 08\""), "{pesan}");
 
@@ -606,9 +489,7 @@ mod tests {
         );
     }
 
-    /// Kode grade SP sengaja angkanya saja. Test ini yang menjaganya: dengan
-    /// "S08", produk toko sendiri ada yang tidak muat, dan itu baru ketahuan
-    /// saat pemiliknya gagal menyimpan produk.
+    /// Kode grade SP sengaja angka saja; test ini menjaganya karena dengan "S08" produk toko ada yang tak muat dan baru ketahuan saat gagal menyimpan.
     #[test]
     fn kode_grade_sp_cukup_pendek_untuk_seluruh_jenis_yang_dijual() {
         assert_eq!(
@@ -623,9 +504,7 @@ mod tests {
         );
     }
 
-    // ------------------------------------------------------------------
-    // Bentuk dan panjang
-    // ------------------------------------------------------------------
+    // Bentuk dan panjang.
 
     #[test]
     fn setiap_hasil_rakitan_lolos_aturan_bentuknya_sendiri() {
@@ -722,8 +601,7 @@ mod tests {
 
     #[test]
     fn spasi_dan_tanda_baca_dibuang_dari_tiap_bagian() {
-        // "2 kg" -> "2KG", "SP 08" -> "SP08": yang hilang hanya pemisahnya,
-        // isinya utuh.
+        // "2 kg" → "2KG", "SP 08" → "SP08": hanya pemisah yang hilang, isinya utuh.
         assert_eq!(kode_bebas(Bagian::Ukuran, "2 kg"), "2KG");
         assert_eq!(kode_bebas(Bagian::Ukuran, "1,5 KG"), "15KG");
         assert_eq!(kode_bebas(Bagian::Grade, "SP 08"), "SP08");
@@ -749,9 +627,7 @@ mod tests {
         assert_eq!(a, Ok("CBSB-AFC".to_string()));
     }
 
-    // ------------------------------------------------------------------
-    // Bagian kosong
-    // ------------------------------------------------------------------
+    // Bagian kosong.
 
     #[test]
     fn bagian_kosong_dilewati_bukan_menyisakan_pemisah_ganda() {
@@ -778,8 +654,7 @@ mod tests {
 
     #[test]
     fn atribut_terlalu_sedikit_ditolak_karena_terlalu_pendek() {
-        // "Dada" sendirian menghasilkan "D": satu karakter, jauh di bawah 6.
-        // Ditolak dengan pesan yang menyuruh melengkapi atributnya.
+        // "Dada" sendirian menghasilkan "D" (jauh di bawah 6) dan ditolak dengan pesan melengkapi atribut.
         let galat = rakit(&kosong(), Some("Dada"), None, None, None).unwrap_err();
         assert_eq!(
             galat,
@@ -790,9 +665,7 @@ mod tests {
         assert!(galat.to_string().contains("Lengkapi"), "{galat}");
     }
 
-    // ------------------------------------------------------------------
-    // Kamus
-    // ------------------------------------------------------------------
+    // Kamus.
 
     #[test]
     fn kamus_menang_atas_inisial_bebas() {
@@ -833,9 +706,7 @@ mod tests {
 
     #[test]
     fn bagian_yang_sudah_dari_kamus_tidak_disarankan_lagi() {
-        // Grade sudah punya entri, jadi yang tersisa untuk didaftarkan cuma
-        // jenis dan ukuran. Menyarankan grade lagi akan menyuruh pemiliknya
-        // memperbaiki yang sudah benar.
+        // Grade sudah punya entri sehingga yang disarankan hanya jenis dan ukuran.
         let kamus = Kamus::baru([(Bagian::Grade, "SP 08".to_string(), "SP08".to_string())]);
         let galat = rakit(
             &kamus,
@@ -865,8 +736,7 @@ mod tests {
             periksa_kode_kamus("s08"),
             Err(GalatKode::KarakterIlegal { .. })
         ));
-        // Pemisah di dalam kode satu bagian akan melahirkan SKU berbagian
-        // lebih dari tiga.
+        // Pemisah di kode satu bagian melahirkan SKU berbagian lebih dari tiga.
         assert!(matches!(
             periksa_kode_kamus("S-08"),
             Err(GalatKode::KarakterIlegal { karakter: '-', .. })
@@ -882,9 +752,7 @@ mod tests {
 
     #[test]
     fn pesan_galat_kode_kamus_tidak_meminjam_aturan_sku() {
-        // Dipinjam dari `GalatSku`, pesannya membantah dirinya sendiri:
-        // menyebut "-" boleh padahal baru saja ditolak, dan menyebut batas 12
-        // untuk kode 11 karakter yang memang melewati batasnya sendiri (10).
+        // Dipinjam dari `GalatSku`, pesannya membantah dirinya sendiri (menyebut "-" boleh dan batas 12 untuk kode 11 karakter yang lewat batas 10).
         let pemisah = periksa_kode_kamus("S-08").unwrap_err().to_string();
         assert!(pemisah.contains("tanpa tanda"), "{pemisah}");
 
@@ -900,9 +768,7 @@ mod tests {
         assert!(!kosong.contains("SKU"), "{kosong}");
     }
 
-    // ------------------------------------------------------------------
-    // Inisial bebas per bagian
-    // ------------------------------------------------------------------
+    // Inisial bebas per bagian.
 
     #[test]
     fn merek_selalu_tiga_huruf_dibagi_menurut_jumlah_katanya() {
@@ -921,15 +787,11 @@ mod tests {
         assert_eq!(kode_bebas(Bagian::Grade, "SP 08"), "SP08");
     }
 
-    // ------------------------------------------------------------------
-    // Koreksi manual
-    // ------------------------------------------------------------------
+    // Koreksi manual.
 
     #[test]
     fn koreksi_manual_dinormalkan_ke_bentuk_yang_sama_dengan_rakitan() {
-        // Tiga ketikan untuk barang yang sama harus bermuara ke satu SKU,
-        // kalau tidak koreksi manual justru melahirkan penyimpangan yang
-        // dihindari dengan merakit otomatis.
+        // Tiga ketikan untuk barang yang sama harus bermuara ke satu SKU, kalau tidak koreksi manual melahirkan penyimpangan.
         for ketikan in ["cbsb afc 2kg", "CBSB-AFC-2KG", "  cbsb / afc__2kg  "] {
             assert_eq!(
                 normalkan(ketikan),
@@ -953,23 +815,18 @@ mod tests {
 
     #[test]
     fn koreksi_manual_tanpa_huruf_maupun_angka_ditolak() {
-        // Tanpa ini SKU bisa jadi "-" atau string kosong, dan produk berhenti
-        // bisa dikenali sama sekali.
+        // Tanpa ini SKU bisa jadi "-" atau kosong dan produk tak bisa dikenali.
         for ketikan in ["   ", "---", ""] {
             assert_eq!(normalkan(ketikan), Err(GalatSku::Kosong), "{ketikan}");
         }
-        // Pesannya tidak boleh menyuruh mengisi atribut: jalur koreksi tidak
-        // merakit apa pun dari atribut.
+        // Pesan tak boleh menyuruh mengisi atribut karena jalur koreksi tak merakit dari atribut.
         let pesan = normalkan("---").unwrap_err().to_string();
         assert!(!pesan.contains("jenis produk"), "{pesan}");
     }
 
     #[test]
     fn tanda_baca_di_koreksi_manual_jadi_pemisah_bukan_penolakan() {
-        // "Hilangkan spasi dan tanda baca dari setiap bagian": yang diketik
-        // pemiliknya dibersihkan, bukan ditolak. Yang BENAR-BENAR ditolak
-        // adalah karakter yang tersisa setelah pembersihan dan tetap tidak
-        // boleh ada di SKU -- huruf beraksen, misalnya.
+        // Ketikan pemilik dibersihkan, bukan ditolak; yang ditolak hanya karakter tersisa yang tak boleh ada di SKU (mis. huruf beraksen).
         assert_eq!(normalkan("CBSB@AFC"), Ok("CBSB-AFC".to_string()));
         assert_eq!(
             normalkan("CBSB / AFC . 2KG"),
@@ -986,8 +843,7 @@ mod tests {
 
     #[test]
     fn koreksi_manual_memotong_di_batas_karakter_bukan_byte() {
-        // Tanpa ini, menghitung panjang dalam byte membuat SKU berkarakter
-        // multi-byte ditolak/diterima berdasarkan angka yang salah.
+        // Panjang dihitung dalam karakter, bukan byte, agar SKU multi-byte tak diterima/ditolak berdasarkan angka salah.
         let galat = normalkan(&"é".repeat(7)).unwrap_err();
         assert!(
             matches!(galat, GalatSku::KarakterIlegal { .. }),
@@ -995,15 +851,11 @@ mod tests {
         );
     }
 
-    // ------------------------------------------------------------------
-    // Awalan varian
-    // ------------------------------------------------------------------
+    // Awalan varian.
 
     #[test]
     fn varian_yang_beda_ukuran_berbagi_awalan_dengan_induknya() {
-        // Inilah yang membuat satu pencarian "CBSB-AFC" menemukan seluruh
-        // ukurannya. Tidak butuh aturan khusus: ukuran memang bagian
-        // terakhir, jadi awalannya otomatis sama.
+        // Ini yang membuat pencarian "CBSB-AFC" menemukan semua ukurannya; ukuran bagian terakhir sehingga awalannya otomatis sama.
         let dua = rakit(
             &kosong(),
             Some("Ceker Bersih"),
@@ -1028,9 +880,7 @@ mod tests {
 
     #[test]
     fn atribut_sama_persis_menghasilkan_sku_sama_persis() {
-        // Yang menolak duplikatnya adalah database (indeks unik) lewat
-        // `repo::sku_dipakai`; modul ini cuma harus konsisten, supaya dua
-        // barang yang sama tidak pernah lolos sebagai dua SKU berbeda.
+        // Yang menolak duplikat adalah database (indeks unik, `repo::sku_dipakai`); modul ini hanya harus konsisten agar dua barang sama tak lolos sebagai dua SKU.
         let a = rakit(
             &kosong(),
             Some("Ceker Bersih"),

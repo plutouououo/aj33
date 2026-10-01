@@ -1,5 +1,4 @@
-//! Pelanggan toko: dipilih kasir saat checkout, dibuat di tempat kalau
-//! belum ada.
+//! Pelanggan toko: dipilih kasir saat checkout, dibuat di tempat bila belum ada.
 
 mod repo;
 mod routes;

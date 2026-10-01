@@ -1,9 +1,4 @@
-//! Autentikasi dan otorisasi.
-//!
-//! Bentuk token mengikuti proyek lama (`shared/middleware/auth.ts`): JWT
-//! HS256 dengan claim `sub` (id user) dan `role`, berlaku 8 jam. Yang berubah
-//! hanya tempat penyimpanannya di sisi frontend -- dulu di client, sekarang
-//! di cookie httpOnly supaya bisa dibaca Astro saat merender di server.
+//! Autentikasi: JWT HS256 (claim `sub` dan `role`, 8 jam) mengikuti proyek lama, hanya penyimpanannya yang pindah ke cookie httpOnly agar Astro bisa membacanya.
 
 mod repo;
 mod routes;
@@ -17,8 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
-/// Peran pengguna. Nilainya dikunci oleh CHECK constraint `users_role_check`
-/// di database, jadi daftar di sini harus sama persis.
+/// Peran pengguna dikunci CHECK `users_role_check` di database, jadi daftar di sini harus sama persis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -52,9 +46,7 @@ impl fmt::Display for Role {
     }
 }
 
-/// Pengguna yang sedang login, hasil pembacaan token. Handler mendapatkannya
-/// lewat extractor, jadi tidak ada handler yang bisa lupa memeriksa token:
-/// yang tidak menuliskannya di signature tidak akan bisa menyentuhnya.
+/// Pengguna yang login dari token, didapat lewat extractor sehingga handler yang tak menuliskannya di signature tak bisa menyentuhnya.
 #[derive(Debug, Clone, Copy)]
 pub struct CurrentUser {
     pub id: Uuid,

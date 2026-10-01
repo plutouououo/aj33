@@ -1,10 +1,4 @@
-//! Koneksi database.
-//!
-//! PENTING: RLS menyala di 30 tabel tapi tanpa satu pun policy (lihat
-//! `db/migrations/0002_rls_and_checks.sql`), jadi hanya role pemilik tabel
-//! yang bisa membaca. Koneksi harus memakai role yang sama dengan proyek
-//! lama; mengganti role di `DATABASE_URL` akan membuat semua query
-//! mengembalikan nol baris tanpa pesan error.
+//! Koneksi database; RLS menyala di 30 tabel tanpa policy (migrasi 0002), jadi hanya role pemilik tabel yang bisa membaca; ganti role di `DATABASE_URL` membuat query kosong tanpa error.
 
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;

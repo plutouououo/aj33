@@ -1,27 +1,14 @@
-# Kontainer backend AJ33.
-#
-# PENTING: build context-nya adalah AKAR REPO, bukan folder backend/.
-# `sqlx::migrate!("../db/migrations")` menanam isi folder migrasi ke dalam
-# binary saat compile, jadi `db/` harus ikut terlihat oleh build:
-#
-#   docker build -t aj33-backend .
-#
-# Menjalankan `docker build backend/` akan gagal saat kompilasi, dengan pesan
-# yang menunjuk makro migrate -- bukan ke penyebab sebenarnya.
+# Kontainer backend AJ33; build context harus AKAR REPO (`docker build -t aj33-backend .`) karena `sqlx::migrate!` menanam `db/migrations` ke binary.
 
 # --- Tahap build ------------------------------------------------------
 FROM rust:1.90-bookworm AS pembangun
 
 WORKDIR /app
 
-# Cache query sqlx dipakai menggantikan koneksi database saat compile.
-# Tanpa ini build butuh Postgres yang hidup, yang tidak ada di dalam builder.
+# Cache query sqlx menggantikan koneksi database saat compile; tanpanya build butuh Postgres hidup yang tak ada di builder.
 ENV SQLX_OFFLINE=true
 
-# Manifest disalin lebih dulu dan dependensinya dibangun terhadap main.rs
-# kosong. Lapisan itu hanya berubah kalau Cargo.toml/Cargo.lock berubah, jadi
-# perubahan kode biasa tidak memicu kompilasi ulang seluruh dependensi --
-# selisihnya belasan menit pada tiap deploy.
+# Manifest disalin dulu dan dependensi dibangun terhadap main.rs kosong, agar lapisan itu hanya berubah bila Cargo.toml/Cargo.lock berubah dan kode biasa tak memicu kompilasi ulang belasan menit.
 COPY backend/Cargo.toml backend/Cargo.lock ./backend/
 RUN mkdir -p backend/src \
     && echo 'fn main() {}' > backend/src/main.rs \
@@ -34,25 +21,20 @@ COPY db/ ./db/
 
 RUN cd backend && cargo build --release
 
-# --- Tahap jalan ------------------------------------------------------
-# Runtime cukup image slim: sqlx dan reqwest sama-sama memakai rustls, jadi
-# tidak ada OpenSSL yang perlu dibawa. Yang tetap dibutuhkan hanya sertifikat
-# root, untuk memverifikasi TLS ke Supabase dan ke API TikTok.
+# Tahap jalan: image slim cukup karena sqlx dan reqwest memakai rustls (tanpa OpenSSL); hanya sertifikat root yang dibutuhkan untuk TLS ke Supabase dan API TikTok.
 FROM debian:bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Berjalan sebagai pengguna biasa. Proses ini menghadap internet dan tidak
-# pernah perlu menulis ke filesystem -- seluruh state ada di Postgres.
+# Berjalan sebagai pengguna biasa karena proses menghadap internet dan tak pernah menulis ke filesystem (state di Postgres).
 RUN useradd --system --create-home --uid 10001 aj33
 USER aj33
 
 COPY --from=pembangun --chown=aj33:aj33 /app/backend/target/release/aj33-backend /usr/local/bin/aj33-backend
 
-# Sekadar penanda; port sebenarnya dibaca dari env PORT saat start, dan
-# penyedia hosting biasanya menyetelnya sendiri.
+# Sekadar penanda; port sebenarnya dari env PORT saat start dan biasanya disetel penyedia hosting.
 EXPOSE 3000
 
 CMD ["aj33-backend"]

@@ -1,12 +1,5 @@
 ---
-/**
- * Ganti password sendiri.
- *
- * Ada dua cara sampai ke sini, dan halamannya sama untuk keduanya: pengguna
- * yang sengaja membukanya, dan pengguna berpassword sementara yang
- * dipantulkan middleware ke sini dari halaman mana pun. Yang membedakan
- * hanya kalimat pembukanya -- alur, aturan, dan penegakannya satu.
- */
+/** Ganti password sendiri: dibuka sengaja atau dipantulkan middleware untuk password sementara, alurnya satu dan hanya kalimat pembuka yang beda. */
 import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type User } from '../../lib/api';
 import { berandaUntuk } from '../../lib/session';
@@ -28,8 +21,7 @@ if (Astro.request.method === 'POST') {
   if (!lama || !baru) {
     galat = 'Password lama dan password baru wajib diisi.';
   } else if (baru !== ulangi) {
-    // Diperiksa di sini, bukan di backend: backend tidak perlu tahu soal
-    // kolom ulangi sama sekali -- itu bantuan pengetikan, bukan aturan akun.
+    // Diperiksa di sini, bukan di backend, karena kolom ulangi hanya bantuan pengetikan, bukan aturan akun.
     galat = 'Ulangi password tidak sama dengan password baru.';
   } else {
     try {
@@ -39,8 +31,7 @@ if (Astro.request.method === 'POST') {
         body: { current_password: lama, new_password: baru },
       });
 
-      // Beranda, bukan halaman ini lagi: `must_change_password` sudah mati,
-      // jadi middleware tidak akan memantulkannya kembali ke sini.
+      // Redirect ke beranda, bukan halaman ini, karena `must_change_password` sudah mati sehingga middleware tak memantulkannya kembali.
       return Astro.redirect(berandaUntuk(user.role), 302);
     } catch (err) {
       galat =

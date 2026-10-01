@@ -1,20 +1,11 @@
-//! Bentuk response error `{ "error": { "code", "message" } }` dirakit HANYA
-//! di sini, sama seperti `shared/errors.ts` + error handler pusat di
-//! `app.ts` pada proyek lama.
-//!
-//! Aturan mainnya sama: handler dan service tidak pernah menyusun body error
-//! sendiri -- cukup kembalikan `Err(AppError::...)`, konversi ke HTTP terjadi
-//! di satu tempat. Begitu ada dua tempat yang merakit bentuk ini, suatu saat
-//! pasti berbeda dan frontend yang jadi korban.
+//! Bentuk response error `{ "error": { "code", "message" } }` dirakit hanya di sini; handler cukup mengembalikan `Err(AppError::...)`.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
-/// Daftar code error yang dipakai seluruh backend. Sengaja tertutup (bukan
-/// string bebas) supaya frontend bisa mencocokkan dengan yakin. Nilainya
-/// harus tetap sama dengan `ErrorCode` di `contracts/api.yaml`.
+/// Daftar code error seluruh backend, sengaja tertutup agar frontend mencocokkan dengan yakin; harus sama dengan `ErrorCode` di `contracts/api.yaml`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
     ValidationError,
@@ -53,9 +44,7 @@ impl ErrorCode {
     }
 }
 
-/// Error yang "diniatkan": kondisinya sudah diperkirakan dan pesannya aman
-/// dibaca pengguna. Berbeda dari error tak terduga (bug, database mati) yang
-/// pesan aslinya disembunyikan dan hanya masuk log.
+/// Error "diniatkan": kondisinya diperkirakan dan pesannya aman dibaca pengguna, beda dari error tak terduga yang pesan aslinya disembunyikan dan masuk log.
 #[derive(Debug)]
 pub struct AppError {
     code: ErrorCode,
@@ -93,9 +82,7 @@ impl AppError {
         Self::new(ErrorCode::NotFound, message)
     }
 
-    /// 409 -- bentrok dengan kondisi sekarang, misalnya stok tidak cukup.
-    /// Permintaan ditolak karena terlalu sering, bukan karena salah. Dipakai
-    /// pembatas percobaan login.
+    /// 409: bentrok dengan kondisi sekarang (mis. stok tak cukup); permintaan ditolak karena terlalu sering dipakai pembatas login.
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::TooManyRequests, message)
     }
@@ -104,9 +91,7 @@ impl AppError {
         Self::new(ErrorCode::Conflict, message)
     }
 
-    /// 500 -- kegagalan di sisi kita yang bukan berasal dari database.
-    /// Pesannya tetap harus aman dibaca pengguna; penyebab aslinya dicatat
-    /// pemanggil lewat `tracing::error!` sebelum mengembalikan ini.
+    /// 500: kegagalan di sisi kita bukan dari database; pesan tetap aman dibaca dan penyebab dicatat pemanggil lewat `tracing::error!`.
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::InternalError, message)
     }
@@ -124,9 +109,7 @@ impl std::error::Error for AppError {
     }
 }
 
-/// Error database tidak pernah sampai ke client apa adanya -- query dan host
-/// database bisa ikut terbawa di pesannya. Yang dikirim hanya pesan generik;
-/// detail lengkapnya masuk log lewat `source`.
+/// Error database tak pernah sampai ke client apa adanya (query dan host bisa ikut terbawa); yang dikirim pesan generik, detail masuk log lewat `source`.
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
         Self {
@@ -141,9 +124,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = self.code.status();
 
-        // Error 5xx berarti ada yang salah di sisi kita, bukan di pengirim
-        // request. Wajib tercatat lengkap, karena client hanya menerima
-        // pesan generik.
+        // Error 5xx berarti kesalahan di sisi kita dan wajib tercatat lengkap karena client hanya menerima pesan generik.
         if status.is_server_error() {
             match &self.source {
                 Some(cause) => tracing::error!(error = %self, cause = %cause, "internal error"),

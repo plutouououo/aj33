@@ -1,42 +1,4 @@
-//! Satu-satunya tempat stok produk boleh berubah.
-//!
-//! Di proyek lama logika ini ada dua salinan -- `commitCheckout()` untuk POS
-//! dan `updateTicketProgress()` untuk serah-terima tiket -- dengan aturan
-//! penguncian dan penulisan ledger yang sama, ditulis ulang. Dua salinan
-//! berarti dua kesempatan untuk menyimpang. Di sini keduanya memanggil
-//! fungsi yang sama.
-//!
-//! STOK ADA DI BATCH. Sejak migrasi 0011, stok sungguhan tersimpan sebagai
-//! `product_batches.remaining_qty`, dan `products.stock_qty` adalah
-//! ringkasannya. Invarian yang dijaga modul ini:
-//!
-//!     products.stock_qty = SUM(product_batches.remaining_qty) per produk
-//!
-//! Setiap penambahan stok masuk ke sebuah batch, dan setiap pengurangan
-//! keluar dari batch tertentu -- baik yang dipilih kasir maupun yang dipilih
-//! FEFO. Karena itu tidak ada butir stok yang tidak diketahui asal dan
-//! kedaluwarsanya.
-//!
-//! Aturan yang dijaga fungsi ini:
-//!
-//! 1. Baris produk dikunci `FOR UPDATE` setelah di-dedup dan diurutkan
-//!    berdasarkan `id`. Urutan yang konsisten inilah yang mencegah deadlock
-//!    saat dua transaksi menyentuh himpunan produk yang beririsan. Baris
-//!    batch dikunci SETELAH produknya; karena produk sudah terkunci, tidak
-//!    ada dua transaksi yang bisa berebut batch produk yang sama.
-//! 2. SELURUH item diperiksa kecukupan stoknya, lalu SELURUH alokasi batch
-//!    direncanakan, SEBELUM satu baris pun ditulis. Jadi tidak mungkin ada
-//!    keadaan setengah jadi: entah semua berhasil, atau tidak ada yang
-//!    berubah sama sekali.
-//! 3. Setiap perubahan menulis satu baris `stock_adjustments` berisi
-//!    `stock_before`, `stock_after`, dan `batch_id` -- ledger yang hanya
-//!    bertambah, tidak pernah diubah. Satu item yang mengambil dari dua
-//!    batch menulis dua baris; itu memang dua kejadian.
-//!
-//! Fungsi ini selalu menerima transaksi yang sudah dibuka pemanggilnya,
-//! bukan membuka sendiri. Dengan begitu pengurangan stok dan perubahan yang
-//! menyebabkannya (transaksi POS, status tiket) commit atau rollback
-//! bersama-sama.
+//! Satu-satunya tempat stok berubah (invarian `products.stock_qty = SUM(remaining_qty)`): produk dikunci berurut id, semua item dicek sebelum menulis, tiap perubahan masuk ledger `stock_adjustments`.
 
 use crate::error::{AppError, AppResult};
 use chrono::NaiveDate;
@@ -45,9 +7,7 @@ use sqlx::{Postgres, Transaction};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-/// Alasan stok berubah. Setiap alasan menentukan `reference_type`-nya
-/// sekaligus, karena keduanya dibatasi CHECK constraint di database dan
-/// pasangan yang salah baru ketahuan saat INSERT ditolak.
+/// Alasan stok berubah menentukan `reference_type`, keduanya dibatasi CHECK sehingga pasangan salah baru ketahuan saat INSERT ditolak.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StockReason {
     /// Penjualan POS.
@@ -56,14 +16,9 @@ pub enum StockReason {
     ExternalOrder,
     /// Koreksi manual oleh Owner.
     ManualAdjustment,
-    /// Barang masuk yang dicatat sebagai batch, lengkap dengan tanggal
-    /// kedaluwarsanya. Dibedakan dari koreksi manual supaya ledger bisa
-    /// menjawab "stok ini datang dari kiriman mana", bukan cuma "seseorang
-    /// mengubahnya".
+    /// Barang masuk sebagai batch lengkap dengan kedaluwarsa, dibedakan dari koreksi manual agar ledger menjawab "datang dari kiriman mana".
     Restock,
-    /// Pengembalian stok karena transaksi dibatalkan (void). Dibedakan dari
-    /// `ManualAdjustment` supaya ledger bisa menjawab "stok ini kembali
-    /// karena transaksi apa", bukan cuma "seseorang mengoreksinya".
+    /// Pengembalian stok karena void, dibedakan dari `ManualAdjustment` agar ledger menjawab "kembali karena transaksi apa".
     VoidReversal,
 }
 
@@ -80,13 +35,10 @@ impl StockReason {
 
     fn reference_type(self) -> &'static str {
         match self {
-            // Void mengacu balik ke transaksi yang dibatalkan, sama seperti
-            // penjualan aslinya mengacu ke transaksi yang sama.
+            // Void mengacu balik ke transaksi yang dibatalkan, sama seperti penjualan aslinya.
             Self::Sale | Self::VoidReversal => "transaction",
             Self::ExternalOrder => "external_order",
-            // Batch masuk tidak berasal dari transaksi maupun pesanan
-            // marketplace; "manual" adalah satu-satunya nilai yang
-            // diizinkan CHECK constraint untuk asal seperti itu.
+            // Batch masuk tak berasal dari transaksi/pesanan; "manual" satu-satunya nilai CHECK untuk asal seperti itu.
             Self::ManualAdjustment | Self::Restock => "manual",
         }
     }
@@ -98,36 +50,17 @@ pub struct StockLine {
     pub product_id: Uuid,
     /// Selalu positif. Arah perubahan ditentukan fungsi yang dipanggil.
     pub qty: i32,
-    /// Batch yang dipilih kasir. `None` berarti serahkan pada FEFO --
-    /// kedaluwarsa terdekat keluar lebih dulu.
-    ///
-    /// Pilihan manual ada karena FEFO adalah aturan yang benar untuk hampir
-    /// semua penjualan, tapi bukan untuk semuanya: pembeli yang meminta
-    /// barang untuk stok sendiri berhak mendapat yang kedaluwarsanya jauh,
-    /// dan kasir yang mengambil fisik dari rak lain harus bisa mencatat apa
-    /// yang benar-benar dia ambil. Yang penting bukan memaksa FEFO,
-    /// melainkan bahwa batch mana pun yang keluar TERCATAT.
+    /// Batch pilihan kasir; `None` = FEFO, tapi pilihan manual perlu karena FEFO tak cocok untuk semua penjualan; yang penting batch yang keluar tercatat.
     pub batch_id: Option<Uuid>,
 }
 
-/// Produk yang barisnya sedang terkunci.
-///
-/// `name` dan `price` ikut dibaca supaya pemanggil tidak perlu query kedua:
-/// POS memakainya untuk menetapkan harga dan menyimpan snapshot nama di
-/// baris transaksi, dan pesan "stok tidak cukup" menyebut namanya. Kalau
-/// keduanya diambil terpisah, pemanggil akan tergoda menulis SELECT ... FOR
-/// UPDATE sendiri -- dan salinan kedua aturan penguncian itulah yang justru
-/// ingin dihindari modul ini.
+/// Produk yang barisnya terkunci; `name` dan `price` ikut dibaca agar pemanggil tak menulis `SELECT ... FOR UPDATE` sendiri (salinan kedua aturan penguncian).
 #[derive(Debug)]
 pub struct LockedProduct {
     pub id: Uuid,
     pub name: String,
     pub price: Decimal,
-    /// Harga kanal, ikut terbaca di sini supaya penetapan harga saat
-    /// checkout memakai baris yang SAMA yang sedang terkunci. Membacanya
-    /// lewat query kedua berarti harga bisa berubah di antara dua bacaan,
-    /// dan yang tercetak di struk bukan yang dipakai memeriksa stok.
-    /// `None` berarti kanalnya belum diatur -- jatuh ke `price`.
+    /// Harga kanal dibaca dari baris terkunci yang sama agar harga tak bisa berubah antara dua bacaan; `None` = kanal belum diatur, jatuh ke `price`.
     pub price_shopee: Option<Decimal>,
     /// Mencakup Tokopedia; satu kanal dengan TikTok Shop.
     pub price_tiktok: Option<Decimal>,
@@ -144,9 +77,7 @@ struct LockedBatch {
 }
 
 impl LockedBatch {
-    /// Sebutan batch untuk pesan galat. Nomor batch kalau ada, kalau tidak
-    /// tanggal kedaluwarsanya -- keduanya lebih berguna bagi kasir yang
-    /// sedang berdiri di depan rak daripada UUID.
+    /// Sebutan batch untuk pesan galat: nomor batch atau tanggal kedaluwarsa, lebih berguna di depan rak daripada UUID.
     fn label(&self) -> String {
         match (&self.batch_number, self.expiry_date) {
             (Some(nomor), _) => nomor.clone(),
@@ -164,16 +95,7 @@ struct Alokasi {
     qty: i32,
 }
 
-/// Menggabungkan baris yang produk DAN batch-nya sama.
-///
-/// Kasir yang memindai barang yang sama dua kali mengirim dua baris. Tanpa
-/// digabung, pemeriksaan stok dilakukan per baris dan bisa lolos padahal
-/// totalnya melebihi stok yang ada. `BTreeMap` sekaligus memberi urutan
-/// berdasarkan id produk, yang dibutuhkan penguncian.
-///
-/// Baris dengan produk sama tapi batch berbeda TIDAK digabung: keduanya
-/// permintaan yang berbeda, dan menggabungkannya akan menghapus pilihan
-/// kasir.
+/// Menggabungkan baris produk DAN batch sama (pemindaian ganda) agar cek stok tak lolos; `BTreeMap` memberi urutan id untuk penguncian.
 pub fn gabungkan_baris_kembar(lines: &[StockLine]) -> Vec<StockLine> {
     let mut per_baris: BTreeMap<(Uuid, Option<Uuid>), i32> = BTreeMap::new();
     for line in lines {
@@ -191,9 +113,7 @@ pub fn gabungkan_baris_kembar(lines: &[StockLine]) -> Vec<StockLine> {
         .collect()
 }
 
-/// Total per produk, mengabaikan batch. Dipakai pemanggil yang menghitung
-/// harga dan menyimpan baris transaksi: satu produk tetap satu baris di
-/// struk walaupun barangnya diambil dari dua batch.
+/// Total per produk mengabaikan batch, agar satu produk tetap satu baris struk walau diambil dari dua batch.
 pub fn total_per_produk(lines: &[StockLine]) -> Vec<(Uuid, i32)> {
     let mut per_produk: BTreeMap<Uuid, i32> = BTreeMap::new();
     for line in lines {
@@ -202,12 +122,7 @@ pub fn total_per_produk(lines: &[StockLine]) -> Vec<(Uuid, i32)> {
     per_produk.into_iter().collect()
 }
 
-/// Mengunci baris produk yang akan diubah.
-///
-/// Urutan `ORDER BY id` bukan kosmetik: dua transaksi yang mengunci produk
-/// A dan B dalam urutan berlawanan akan saling menunggu selamanya. Dengan
-/// urutan yang sama di semua pemanggil, yang kedua cukup menunggu yang
-/// pertama selesai.
+/// Mengunci baris produk dengan `ORDER BY id` (bukan kosmetik): urutan berlawanan membuat dua transaksi saling menunggu selamanya.
 pub async fn kunci_produk(
     tx: &mut Transaction<'_, Postgres>,
     product_ids: &[Uuid],
@@ -233,14 +148,7 @@ pub async fn kunci_produk(
     Ok(rows.into_iter().map(|r| (r.id, r)).collect())
 }
 
-/// Batch satu produk dalam urutan FEFO: kedaluwarsa terdekat lebih dulu.
-///
-/// `NULLS LAST` disengaja. Batch tanpa tanggal kedaluwarsa bukan batch yang
-/// "kedaluwarsa tak terhingga", melainkan batch yang tanggalnya TIDAK
-/// DIKETAHUI -- termasuk saldo awal bentukan migrasi 0011. Mendahulukannya
-/// berarti menebak, sedangkan menaruhnya di belakang hanya berarti barang
-/// yang tanggalnya jelas diprioritaskan keluar. Yang kedua bisa
-/// dipertanggungjawabkan; yang pertama tidak.
+/// Batch urut FEFO dengan `NULLS LAST`: tanpa tanggal berarti tak diketahui (bukan tak terhingga), jadi barang bertanggal jelas diprioritaskan.
 async fn kunci_batch_fefo(
     tx: &mut Transaction<'_, Postgres>,
     product_id: Uuid,
@@ -262,11 +170,7 @@ async fn kunci_batch_fefo(
     Ok(rows)
 }
 
-/// Satu batch tertentu milik satu produk tertentu.
-///
-/// `product_id` ikut jadi syarat, bukan hanya `batch_id`: tanpa itu,
-/// permintaan yang menyebut batch milik produk lain akan diam-diam dilayani,
-/// dan stok dua produk berpindah tanpa ada yang tahu.
+/// Satu batch tertentu milik produk tertentu; `product_id` ikut syarat agar batch milik produk lain tak diam-diam dilayani.
 async fn kunci_batch_tunggal(
     tx: &mut Transaction<'_, Postgres>,
     product_id: Uuid,
@@ -289,13 +193,7 @@ async fn kunci_batch_tunggal(
     Ok(row)
 }
 
-/// Merencanakan dari batch mana saja satu baris permintaan akan diambil.
-///
-/// `sudah` mencatat butir yang sudah dijanjikan ke baris lain dalam
-/// perencanaan yang sama. Tanpa itu, dua baris untuk produk yang sama
-/// (mis. satu memilih batch tertentu, satu lagi menyerah pada FEFO) akan
-/// sama-sama melihat sisa yang belum berkurang dan menjanjikan butir yang
-/// sama dua kali.
+/// Merencanakan dari batch mana baris diambil; `sudah` mencatat butir yang dijanjikan ke baris lain agar dua baris produk sama tak menjanjikan butir yang sama.
 async fn rencanakan(
     tx: &mut Transaction<'_, Postgres>,
     product: &LockedProduct,
@@ -303,9 +201,7 @@ async fn rencanakan(
     sudah: &mut BTreeMap<Uuid, i32>,
 ) -> AppResult<Vec<Alokasi>> {
     match line.batch_id {
-        // Kasir memilih sendiri. Tidak ada jatuh-balik ke FEFO kalau
-        // batch-nya kurang: diam-diam mengambil dari batch lain berarti
-        // barang yang keluar dari gudang bukan barang yang tercatat keluar.
+        // Kasir memilih sendiri, tanpa jatuh-balik ke FEFO bila batch kurang: mengambil dari batch lain berarti barang keluar tak sesuai catatan.
         Some(batch_id) => {
             let batch = kunci_batch_tunggal(tx, product.id, batch_id)
                 .await?
@@ -360,11 +256,7 @@ async fn rencanakan(
             }
 
             if sisa > 0 {
-                // Invarian stok = jumlah sisa batch sudah dijaga migrasi dan
-                // seluruh fungsi di berkas ini, jadi sampai di sini hanya
-                // mungkin kalau ada yang menulis ke tabel di luar modul ini.
-                // Dijawab sebagai konflik dengan angka apa adanya, bukan
-                // panic: kasir tidak bisa berbuat apa-apa dengan panic.
+                // Invarian stok = jumlah sisa batch dijaga migrasi dan fungsi di berkas ini, jadi sampai di sini hanya bila ada yang menulis di luar modul; dijawab konflik dengan angka apa adanya, bukan panic.
                 return Err(AppError::conflict(format!(
                     "Stok \"{}\" yang tercatat di batch kurang {} butir dari yang diminta. \
                      Periksa batch produk ini.",
@@ -377,11 +269,7 @@ async fn rencanakan(
     }
 }
 
-/// Mengurangi stok untuk sekumpulan item dan mencatatnya di ledger.
-///
-/// Baris kembar digabung lebih dulu, jadi pemanggil boleh mengirim apa
-/// adanya. Mengembalikan `CONFLICT` kalau ada satu saja item yang stoknya
-/// tidak cukup -- dan dalam hal itu tidak ada apa pun yang tertulis.
+/// Mengurangi stok sekumpulan item dan mencatat di ledger; baris kembar digabung dulu, dan `CONFLICT` bila satu item pun tak cukup (tanpa tulisan apa pun).
 pub async fn kurangi(
     tx: &mut Transaction<'_, Postgres>,
     lines: &[StockLine],
@@ -397,9 +285,7 @@ pub async fn kurangi(
     let ids: Vec<Uuid> = lines.iter().map(|l| l.product_id).collect();
     let terkunci = kunci_produk(tx, &ids).await?;
 
-    // Tahap 1 -- periksa kecukupan per PRODUK, bukan per baris. Dua baris
-    // untuk produk yang sama bisa masing-masing muat tapi bersama-sama
-    // melebihi stok. Belum ada yang ditulis.
+    // Tahap 1: periksa kecukupan per produk, bukan per baris (dua baris bisa masing-masing muat tapi bersama melebihi stok); belum ada yang ditulis.
     for (product_id, total) in total_per_produk(&lines) {
         let product = terkunci
             .get(&product_id)
@@ -413,9 +299,7 @@ pub async fn kurangi(
         }
     }
 
-    // Tahap 2 -- rencanakan alokasi batch. Yang menyebut batch sendiri
-    // didahulukan supaya pilihan kasir tidak keburu dihabiskan FEFO milik
-    // baris lain untuk produk yang sama.
+    // Tahap 2: rencanakan alokasi batch; yang menyebut batch sendiri didahulukan agar pilihan kasir tak dihabiskan FEFO baris lain.
     let mut sudah: BTreeMap<Uuid, i32> = BTreeMap::new();
     let mut rencana: Vec<Alokasi> = Vec::new();
 
@@ -428,8 +312,7 @@ pub async fn kurangi(
         rencana.extend(rencanakan(tx, product, line, &mut sudah).await?);
     }
 
-    // Tahap 3 -- baru menulis. Semua sudah dipastikan cukup di atas, jadi
-    // tidak ada pemeriksaan yang bisa gagal di tengah jalan.
+    // Tahap 3: baru menulis; semua sudah dipastikan cukup sehingga tak ada pemeriksaan yang gagal di tengah.
     let mut berjalan: BTreeMap<Uuid, i32> =
         terkunci.iter().map(|(id, p)| (*id, p.stock_qty)).collect();
 
@@ -457,14 +340,7 @@ pub async fn kurangi(
     Ok(())
 }
 
-/// Menambah stok. Dipakai pencatatan batch baru dan koreksi manual ke atas.
-///
-/// Setiap penambahan harus mendarat di sebuah batch, karena di situlah stok
-/// sungguhan disimpan. Kalau pemanggil menyebut batch (`batch_id`), ke sana;
-/// kalau tidak -- koreksi manual hasil opname, misalnya -- dibuatkan batch
-/// tanpa nomor dan tanpa tanggal kedaluwarsa. Batch bentukan itu bukan basa-
-/// basi administratif: ia yang menjaga agar stok yang muncul entah dari mana
-/// tetap punya tempat, dan agar FEFO tidak pernah kehilangan jejak butir.
+/// Menambah stok selalu mendarat di sebuah batch; tanpa `batch_id` dibuatkan batch tanpa nomor/kedaluwarsa agar stok punya tempat dan FEFO tak kehilangan jejak.
 pub async fn tambah(
     tx: &mut Transaction<'_, Postgres>,
     lines: &[StockLine],
@@ -526,11 +402,7 @@ pub async fn tambah(
     Ok(())
 }
 
-/// Batch penampung untuk stok yang bertambah tanpa kiriman: selisih opname,
-/// barang kembali, dan sejenisnya.
-///
-/// `remaining_qty` mulai dari nol dan dinaikkan `ubah_sisa_batch` seperti
-/// batch lain, jadi hanya ada SATU tempat yang menulis kolom itu.
+/// Batch penampung stok tanpa kiriman (selisih opname, barang kembali); `remaining_qty` mulai nol dan dinaikkan `ubah_sisa_batch` sehingga hanya satu penulis kolom itu.
 async fn buat_batch_tanpa_asal(
     tx: &mut Transaction<'_, Postgres>,
     product_id: Uuid,
@@ -551,11 +423,7 @@ async fn buat_batch_tanpa_asal(
     Ok(id)
 }
 
-/// Menggeser sisa satu batch. `delta` negatif mengurangi.
-///
-/// CHECK constraint `product_batches_remaining_check` di database menolak
-/// hasil di luar 0..quantity, jadi kesalahan hitung di sini berhenti sebagai
-/// galat transaksi -- bukan sebagai sisa negatif yang menetap di tabel.
+/// Menggeser sisa satu batch (`delta` negatif mengurangi); CHECK `product_batches_remaining_check` menolak hasil di luar 0..quantity sehingga salah hitung berhenti sebagai galat transaksi.
 async fn ubah_sisa_batch(
     tx: &mut Transaction<'_, Postgres>,
     batch_id: Uuid,
@@ -572,9 +440,7 @@ async fn ubah_sisa_batch(
     Ok(())
 }
 
-/// Memperbarui `products.stock_qty` dan menulis satu baris ledger. Keduanya
-/// selalu terjadi bersama -- stok yang berubah tanpa jejak di ledger membuat
-/// audit tidak mungkin dilakukan.
+/// Memperbarui `products.stock_qty` dan menulis satu baris ledger bersama, karena stok berubah tanpa jejak membuat audit mustahil.
 #[allow(clippy::too_many_arguments)]
 async fn tulis_perubahan(
     tx: &mut Transaction<'_, Postgres>,
@@ -645,8 +511,7 @@ mod tests {
 
     #[test]
     fn batch_berbeda_tidak_digabung() {
-        // Menggabungkannya akan menghapus pilihan kasir: dua batch yang
-        // dipilih sengaja harus tetap keluar sebagai dua pengambilan.
+        // Digabung akan menghapus pilihan kasir: dua batch yang sengaja dipilih tetap dua pengambilan.
         let p = Uuid::from_u128(1);
         let b1 = Uuid::from_u128(10);
         let b2 = Uuid::from_u128(11);
@@ -678,8 +543,7 @@ mod tests {
 
     #[test]
     fn total_per_produk_mengabaikan_batch() {
-        // Satu produk tetap satu baris di struk walaupun diambil dari dua
-        // batch -- pembeli membeli barang, bukan kiriman.
+        // Satu produk tetap satu baris struk walau diambil dari dua batch.
         let p = Uuid::from_u128(1);
         let q = Uuid::from_u128(2);
 
@@ -702,8 +566,7 @@ mod tests {
 
     #[test]
     fn hasil_penggabungan_selalu_urut_berdasarkan_id() {
-        // Urutan inilah yang mencegah deadlock saat mengunci baris produk,
-        // jadi sifat ini harus tetap benar berapa pun urutan masukannya.
+        // Urutan ini mencegah deadlock saat mengunci produk, jadi harus benar berapa pun urutan masukan.
         let hasil = gabungkan_baris_kembar(&[
             baris(Uuid::from_u128(9), 1),
             baris(Uuid::from_u128(3), 1),

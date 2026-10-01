@@ -10,10 +10,7 @@ const token = Astro.locals.token!;
 const params = Astro.url.searchParams;
 const status = params.get('status') ?? '';
 
-// Pengepak membuka halaman ini untuk bertanya "mana pekerjaanku", owner untuk
-// mengawasi seluruh antrean -- jadi bawaannya berbeda per peran. Nilainya
-// selalu ikut terkirim lewat <select>, supaya pilihan "semua" tidak jatuh
-// kembali ke bawaan.
+// Bawaan beda per peran (pengepak "pekerjaanku", owner seluruh antrean); nilainya selalu terkirim lewat `<select>` agar "semua" tak jatuh ke bawaan.
 const punyaku = params.has('punyaku') ? params.get('punyaku') === '1' : user.role === 'pengepak';
 
 const kueri = new URLSearchParams();
@@ -68,9 +65,7 @@ const sekarang = Date.now();
         {
           daftar.map((t) => {
             const dikemas = t.items.filter((it) => it.is_packed).length;
-            // Tenggat yang lewat hanya menjadi peringatan selama tiketnya
-            // belum diserahkan -- setelah itu tidak ada lagi yang bisa
-            // dikerjakan, dan warna merah cuma jadi kebisingan.
+            // Tenggat lewat hanya jadi peringatan selama tiket belum diserahkan; sesudah itu merah hanya kebisingan.
             const telat =
               t.sla_deadline !== null &&
               t.status !== 'handed_over' &&

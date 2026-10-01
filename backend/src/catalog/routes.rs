@@ -53,8 +53,7 @@ struct ListQuery {
     category_id: Option<Uuid>,
     /// Varian dari satu induk saja.
     parent_id: Option<Uuid>,
-    /// `induk` = hanya produk induk, `terjual` = hanya yang benar-benar bisa
-    /// dijual. Kosong berarti semua baris.
+    /// `induk` = hanya produk induk, `terjual` = hanya yang bisa dijual, kosong = semua baris.
     scope: Option<String>,
     #[serde(default)]
     include_inactive: bool,
@@ -70,8 +69,7 @@ struct PaginatedProducts {
     total: i64,
 }
 
-/// Batas atas supaya satu request tidak bisa menarik seluruh tabel dan
-/// menghabiskan memori server.
+/// Batas atas agar satu request tak menarik seluruh tabel dan menghabiskan memori.
 const LIMIT_MAKS: i64 = 200;
 
 async fn list_products(
@@ -113,9 +111,7 @@ async fn list_products(
     }))
 }
 
-/// Produk beserta segala yang dibutuhkan halaman detailnya. Dikirim sekali
-/// jalan karena ketiganya selalu dibaca bersama -- memecahnya jadi tiga
-/// endpoint hanya menambah perjalanan bolak-balik tanpa menambah kegunaan.
+/// Produk beserta kebutuhan halaman detailnya dikirim sekali karena ketiganya selalu dibaca bersama.
 #[derive(Debug, Serialize)]
 struct ProductDetail {
     #[serde(flatten)]
@@ -148,8 +144,7 @@ struct ProductCreateRequest {
     name: String,
     /// Judul yang dipakai di marketplace. Boleh kosong.
     seo_name: Option<String>,
-    /// Bahan SKU. SKU sendiri tidak diterima dari client -- selalu dirakit
-    /// di sini, supaya bentuknya sama untuk semua produk.
+    /// Bahan SKU; SKU tak diterima dari client dan selalu dirakit di sini agar bentuknya seragam.
     brand_name: Option<String>,
     product_type: Option<String>,
     variant_grade: Option<String>,
@@ -172,8 +167,7 @@ struct ProductCreateRequest {
     expiry_date: Option<NaiveDate>,
     low_stock_threshold: Option<i32>,
     image_url: Option<String>,
-    /// Rak tempat batch pertama ditaruh. Milik batch, bukan produk -- lihat
-    /// migrasi 0016. Ikut terbuang bersama batch-nya kalau stok awalnya nol.
+    /// Rak batch pertama (milik batch, bukan produk, lihat migrasi 0016); ikut terbuang bersama batch bila stok awal nol.
     storage_location: Option<String>,
 }
 
@@ -200,8 +194,7 @@ async fn create_product(
             price_shopee: body.price_shopee,
             price_tiktok: body.price_tiktok,
             cost_price: None,
-            // Endpoint HTTP manual selalu menerbitkan produk langsung --
-            // toggle terbit/tidak hanya ada di jalur impor massal.
+            // Endpoint manual selalu menerbitkan produk langsung; toggle terbit hanya ada di jalur impor massal.
             is_active: true,
             low_stock_threshold: body.low_stock_threshold,
             image_url: body.image_url,
@@ -220,14 +213,11 @@ async fn create_product(
 
 // --- Menyunting dan menghapus produk ---
 
-/// Field bertipe `Option<Option<T>>`: tidak disebut berarti "biarkan", `null`
-/// berarti "kosongkan". Lihat `repo::Ubah`.
+/// `Option<Option<T>>`: tak disebut = biarkan, `null` = kosongkan (lihat `repo::Ubah`).
 #[derive(Debug, Deserialize)]
 struct ProductUpdateRequest {
     name: Option<String>,
-    /// Koreksi SKU. Bukan jalur biasa -- SKU dirakit otomatis saat produk
-    /// dibuat dan dibekukan di situ; ini hanya untuk membetulkan salah ketik
-    /// selama produknya belum bergerak. Tidak disebut berarti biarkan.
+    /// Koreksi SKU hanya untuk membetulkan salah ketik selama produk belum bergerak (SKU dirakit otomatis dan dibeku); tak disebut = biarkan.
     sku: Option<String>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     seo_name: Ubah<String>,
@@ -262,9 +252,7 @@ async fn update_product(
 ) -> AppResult<Json<Product>> {
     user.require(&[Role::Owner])?;
 
-    // Cuma dibutuhkan `koreksi_sku` di bawah (butuh tahu SKU & status
-    // sekarang) -- validasi harga/kategori sudah jadi tanggung jawab
-    // `service::update_product`, tidak diulang di sini.
+    // Hanya dibutuhkan `koreksi_sku` di bawah (SKU dan status sekarang); validasi harga/kategori tanggung jawab `service::update_product`.
     let sekarang = service::ambil_produk(&state, id).await?;
 
     let name = body
@@ -277,14 +265,7 @@ async fn update_product(
     let variant_grade = ubah_teks(body.variant_grade);
     let variant_size = ubah_teks(body.variant_size);
 
-    // SKU TIDAK dirakit ulang di sini, sekalipun atribut pembentuknya
-    // berubah. SKU yang ikut berubah memutus label yang sudah dicetak dan
-    // ditempel di pack, pemetaan listing marketplace, dan hafalan pegawai
-    // yang mencari dengan kode lama. Yang berubah cuma keterangan barangnya,
-    // dan barang tidak berganti nama tiap keterangannya diperbaiki.
-    //
-    // Yang tersisa adalah koreksi eksplisit, dan itu punya syarat sendiri di
-    // bawah.
+    // SKU tak dirakit ulang meski atribut berubah, karena memutus label cetak, pemetaan listing marketplace, dan hafalan pegawai; yang tersisa koreksi eksplisit dengan syarat di bawah.
     let sku = match body.sku {
         None => None,
         Some(diminta) => Some(Some(koreksi_sku(&state, &sekarang, &diminta).await?)),
@@ -315,10 +296,7 @@ async fn update_product(
     Ok(Json(service::ambil_produk(&state, id).await?))
 }
 
-/// Menghapus produk sungguhan, bukan menonaktifkannya. Hanya mungkin selama
-/// produk itu belum tersangkut di mana-mana: begitu pernah terjual atau
-/// dipetik pengepak, menghapusnya akan melubangi riwayat yang dipakai
-/// menghitung omzet, jadi yang tersisa adalah menonaktifkan.
+/// Menghapus produk sungguhan hanya bila belum tersangkut di mana pun; yang pernah terjual atau dipetik pengepak hanya bisa dinonaktifkan agar riwayat omzet tak berlubang.
 async fn delete_product(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -344,11 +322,7 @@ async fn delete_product(
 
 // --- Batch barang masuk ---
 
-/// Batch yang masih bersisa untuk seluruh produk yang bisa dijual.
-///
-/// Terbuka untuk semua peran yang sudah login: kasir membacanya untuk
-/// memilih batch saat checkout, dan isinya tidak menyebut harga pokok
-/// maupun angka apa pun yang tidak boleh dilihat kasir.
+/// Batch bersisa seluruh produk jual, terbuka untuk semua peran login karena kasir memilih batch saat checkout dan isinya tak memuat harga pokok.
 async fn list_batches_tersedia(
     State(state): State<AppState>,
     _user: CurrentUser,
@@ -375,8 +349,7 @@ struct BatchCreateRequest {
     storage_location: Option<String>,
 }
 
-/// Mencatat barang masuk. Stoknya bertambah lewat ledger di transaksi yang
-/// sama, jadi jumlah batch dan stok berjalan tidak pernah bisa berselisih.
+/// Mencatat barang masuk; stok bertambah lewat ledger di transaksi yang sama sehingga jumlah batch dan stok tak pernah berselisih.
 async fn create_batch(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -436,11 +409,7 @@ async fn create_batch(
 
 #[derive(Debug, Deserialize)]
 struct BatchPatchRequest {
-    /// Ketiganya `Ubah`: tidak disebut berarti biarkan, `null` berarti
-    /// kosongkan. Owner harus bisa membatalkan angka maupun tanggal yang
-    /// salah ketik, dan "kosong" di sini punya arti sendiri -- harga beli
-    /// yang belum diketahui, barang tanpa kedaluwarsa, rak yang belum
-    /// ditentukan.
+    /// Ketiganya `Ubah`: owner harus bisa membatalkan angka/tanggal salah ketik, dan "kosong" bermakna (harga beli belum diketahui, tanpa kedaluwarsa, rak belum ditentukan).
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     purchase_price: Ubah<Decimal>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
@@ -449,14 +418,7 @@ struct BatchPatchRequest {
     storage_location: Ubah<String>,
 }
 
-/// Mengoreksi catatan sebuah batch: harga beli, tanggal kedaluwarsa, dan rak
-/// penyimpanannya. Ketiganya keterangan tentang kiriman, dan keterangan yang
-/// salah harus bisa dibetulkan tanpa membongkar stok.
-///
-/// JUMLAHNYA tidak ikut bisa diubah. Jumlah menentukan stok, dan mengubahnya
-/// lewat jalan ini akan melewati ledger -- stok bergerak tanpa satu baris pun
-/// yang menjelaskan mengapa. Batch yang salah jumlahnya dibatalkan lalu
-/// dicatat ulang.
+/// Mengoreksi catatan batch (harga beli, kedaluwarsa, rak) tanpa membongkar stok; jumlah tak bisa diubah karena melewati ledger, batch salah jumlah dibatalkan lalu dicatat ulang.
 async fn update_batch(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -486,10 +448,7 @@ async fn update_batch(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// Membatalkan pencatatan batch: barisnya dihapus dan stok yang dulu
-/// ditambahkannya ditarik kembali lewat ledger. Ditolak kalau stok yang ada
-/// sudah tidak cukup -- artinya sebagian barang batch itu sudah terjual, dan
-/// yang terjual tidak bisa dianggap tidak pernah masuk.
+/// Membatalkan batch: baris dihapus dan stoknya ditarik lewat ledger; ditolak bila stok tak cukup karena sebagian sudah terjual.
 async fn delete_batch(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -503,11 +462,7 @@ async fn delete_batch(
         .await?
         .ok_or_else(|| AppError::not_found("Batch tidak ditemukan."))?;
 
-    // Ditarik dari batch ITU SENDIRI, dan dilakukan SEBELUM barisnya
-    // dihapus -- `kurangi` perlu membaca sisanya. Karena batch yang dipilih
-    // disebut tegas, pembatalan yang sebagian barangnya sudah terjual
-    // ditolak dengan menyebut batch-nya, bukan diam-diam mengambil dari
-    // kiriman lain seperti sebelum migrasi 0011.
+    // Ditarik dari batch itu sendiri sebelum baris dihapus (`kurangi` perlu sisanya), jadi pembatalan yang sebagian terjual ditolak dengan menyebut batchnya.
     stock::kurangi(
         &mut tx,
         &[StockLine {
@@ -546,9 +501,7 @@ struct StockAdjustmentRequest {
     change_qty: i32,
 }
 
-/// Koreksi stok manual oleh Owner -- selisih hasil opname, barang rusak, dan
-/// sejenisnya. Barang MASUK tidak lewat sini melainkan lewat batch, supaya
-/// tanggal kedaluwarsanya ikut tercatat.
+/// Koreksi stok manual owner (selisih opname, barang rusak); barang masuk lewat batch agar kedaluwarsanya tercatat.
 async fn adjust_stock(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -561,9 +514,7 @@ async fn adjust_stock(
         return Err(AppError::bad_request("Perubahan stok tidak boleh nol."));
     }
 
-    // Tanpa `batch_id`: koreksi ke bawah mengambil FEFO, koreksi ke atas
-    // dibuatkan batch tanpa asal oleh `stock::tambah`. Keduanya sengaja --
-    // opname tidak tahu kiriman mana yang selisih.
+    // Tanpa `batch_id`: koreksi turun memakai FEFO, koreksi naik dibuatkan batch tanpa asal oleh `stock::tambah`, karena opname tak tahu kiriman mana yang selisih.
     let line = StockLine {
         product_id: id,
         qty: body.change_qty.abs(),
@@ -572,9 +523,7 @@ async fn adjust_stock(
 
     let mut tx = state.pool.begin().await?;
 
-    // `reference_id` menunjuk produk itu sendiri: koreksi manual tidak
-    // berasal dari transaksi atau order mana pun, tapi kolomnya tetap diisi
-    // agar baris ledger selalu punya rujukan yang bisa ditelusuri.
+    // `reference_id` menunjuk produk itu sendiri (koreksi manual tak berasal dari transaksi/order) agar baris ledger selalu punya rujukan.
     if body.change_qty > 0 {
         stock::tambah(
             &mut tx,
@@ -637,27 +586,9 @@ async fn create_category(
     Ok((axum::http::StatusCode::CREATED, Json(category)))
 }
 
-// --- Perkakas bersama ---
-//
-// `ambil_produk`, `periksa_harga`, `rakit_sku`, `catat_batch`, dan
-// `bersihkan` pindah ke `service.rs` supaya proses commit impor massal
-// memakai persis aturan yang sama dengan handler di sini -- lihat modul itu.
+// Perkakas bersama (`ambil_produk`, `periksa_harga`, `rakit_sku`, `catat_batch`, `bersihkan`) ada di `service.rs` agar commit impor memakai aturan yang sama dengan handler.
 
-/// SKU hasil koreksi manual, setelah dipastikan produknya memang masih boleh
-/// dikoreksi.
-///
-/// Lebih longgar dari syarat hapus produk (`repo::penahan_hapus`): sudah
-/// pernah terjual di kasir, masuk tiket packing, atau tercatat di pesanan
-/// marketplace tidak lagi mengunci SKU -- itu catatan historis di dalam
-/// sistem ini sendiri, koreksi salah ketik tidak merusaknya. Yang masih
-/// mengunci hanya `repo::penahan_ubah_sku`: varian (kode induk jadi awalan
-/// SKU seluruh variannya) dan listing marketplace yang sudah memetakan SKU
-/// ini secara aktif.
-///
-/// Pengecualiannya produk yang SKU-nya masih kosong. Mengisi lubang bukan
-/// mengubah apa pun -- tidak ada kode lama yang beredar -- dan tanpa
-/// pengecualian ini produk lama yang terlanjur tanpa SKU tidak akan pernah
-/// bisa diberi SKU lagi.
+/// SKU hasil koreksi manual selama produk masih boleh dikoreksi (`repo::penahan_ubah_sku`); SKU kosong dikecualikan agar produk lama bisa diberi SKU.
 async fn koreksi_sku(state: &AppState, sekarang: &Product, diminta: &str) -> AppResult<String> {
     if sekarang.sku.is_some() {
         if let Some(penahan) = repo::penahan_ubah_sku(&state.pool, sekarang.id).await? {
@@ -667,11 +598,7 @@ async fn koreksi_sku(state: &AppState, sekarang: &Product, diminta: &str) -> App
         }
     }
 
-    // Dinormalkan lebih dulu: koreksi yang masuk apa adanya justru melahirkan
-    // penyimpangan bentuk yang dihindari dengan merakit SKU otomatis.
-    // `normalkan` sekaligus menegakkan panjang 6-12 dan daftar karakter yang
-    // boleh dipakai, jadi koreksi manual tunduk pada aturan yang sama persis
-    // dengan hasil rakitan.
+    // Dinormalkan dulu agar koreksi tak melahirkan penyimpangan bentuk; `normalkan` juga menegakkan panjang 6-12 dan karakter yang boleh, sama dengan hasil rakitan.
     let kode = sku::normalkan(diminta).map_err(|err| AppError::bad_request(err.to_string()))?;
 
     repo::sku_harus_bebas(&state.pool, &kode, Some(sekarang.id)).await?;
@@ -680,9 +607,7 @@ async fn koreksi_sku(state: &AppState, sekarang: &Product, diminta: &str) -> App
 
 // --- Kamus kode SKU ---
 
-/// Kamus dibaca siapa pun yang sudah login -- halaman produk memakainya
-/// untuk menjelaskan kenapa sebuah SKU ditolak. Yang mengubahnya hanya
-/// Owner, sama seperti seluruh penataan katalog.
+/// Kamus dibaca siapa pun yang login (halaman produk memakainya menjelaskan SKU ditolak), hanya Owner yang mengubah.
 async fn list_sku_codes(
     State(state): State<AppState>,
     _user: CurrentUser,
@@ -714,20 +639,14 @@ async fn create_sku_code(
     if source.is_empty() {
         return Err(AppError::bad_request("Nilai atributnya wajib diisi."));
     }
-    // Nilai yang tidak menyisakan satu pun huruf atau angka tidak punya kunci
-    // pencarian, jadi entrinya tidak akan pernah ditemukan saat merakit.
+    // Nilai tanpa satu pun huruf/angka tak punya kunci pencarian sehingga tak akan pernah ditemukan saat merakit.
     if sku::kunci(source).is_empty() {
         return Err(AppError::bad_request(
             "Nilai atribut harus berisi huruf atau angka.",
         ));
     }
 
-    // HANYA huruf besar-kecil yang dinormalkan, bukan tanda bacanya.
-    // "s08" yang diketik pemiliknya jelas maksudnya dan tidak pantas ditolak
-    // -- huruf besar memang aturan sistem ini, bukan ujian mengetik. Tapi
-    // "S-08" bukan salah ketik huruf: pemisah di dalam kode satu bagian akan
-    // melahirkan SKU berbagian lebih dari tiga, dan membuangnya diam-diam
-    // menyimpan kode yang BERBEDA dari yang diketik tanpa memberi tahu.
+    // Hanya huruf besar-kecil yang dinormalkan, bukan tanda baca: "s08" jelas maksudnya, tetapi "S-08" akan melahirkan SKU berbagian lebih dari tiga dan membuangnya diam-diam menyimpan kode yang berbeda.
     let code = body.code.trim().to_uppercase();
     sku::periksa_kode_kamus(&code).map_err(|err| AppError::bad_request(err.to_string()))?;
 
@@ -735,9 +654,7 @@ async fn create_sku_code(
     Ok((axum::http::StatusCode::CREATED, Json(entri)))
 }
 
-/// Menghapus entri kamus TIDAK mengubah SKU produk yang sudah terlanjur
-/// dirakit dengannya -- SKU beku sejak dibuat. Yang berubah cuma produk yang
-/// dibuat sesudah ini.
+/// Menghapus entri kamus tak mengubah SKU yang sudah dirakit (beku sejak dibuat), hanya produk yang dibuat sesudahnya.
 async fn delete_sku_code(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -752,9 +669,7 @@ async fn delete_sku_code(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// `bersihkan` untuk kolom yang boleh dikosongkan: "" dari form dibaca
-/// sebagai permintaan mengosongkan, bukan sebagai nilai kosong yang
-/// tersimpan apa adanya.
+/// `bersihkan` untuk kolom yang boleh dikosongkan: "" dari form dibaca sebagai permintaan mengosongkan.
 fn ubah_teks(nilai: Ubah<String>) -> Ubah<String> {
     nilai.map(service::bersihkan)
 }

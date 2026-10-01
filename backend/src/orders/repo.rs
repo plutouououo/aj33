@@ -1,5 +1,4 @@
-//! Akses tabel `external_orders`, `external_order_items`, `channel_listings`,
-//! dan `platforms`.
+//! Akses tabel `external_orders`, `external_order_items`, `channel_listings`, dan `platforms`.
 
 use crate::error::AppResult;
 use crate::marketplace::NormalizedOrder;
@@ -33,8 +32,7 @@ pub struct Order {
     pub total_amount: Option<Decimal>,
     pub shipping_carrier: Option<String>,
     pub received_at: DateTime<Utc>,
-    /// Id tiket packing kalau sudah dibuat. Dipakai UI untuk tahu apakah
-    /// order ini masih menunggu tiket.
+    /// Id tiket packing bila sudah dibuat, dipakai UI untuk tahu apakah order masih menunggu tiket.
     pub ticket_id: Option<Uuid>,
     pub items: Vec<OrderItem>,
 }
@@ -194,23 +192,13 @@ pub async fn disconnect_platform(pool: &PgPool, platform_name: &str) -> AppResul
     Ok(())
 }
 
-/// Hasil upsert: `dibuat` menandai order yang benar-benar baru, bukan
-/// kiriman ulang webhook untuk order yang sudah ada.
+/// Hasil upsert: `dibuat` menandai order benar-benar baru, bukan kiriman ulang webhook.
 pub struct HasilUpsert {
     pub id: Uuid,
     pub dibuat: bool,
 }
 
-/// Menyimpan satu order dari platform.
-///
-/// Kunci idempotensinya `(platform_id, external_order_id)` -- indeks unik
-/// `idx_external_orders_platform_extid` yang menegakkannya. TikTok boleh
-/// mengirim webhook yang sama berkali-kali (dan memang begitu kalau jawaban
-/// kita terlambat); yang terjadi hanyalah baris yang sama diperbarui.
-///
-/// `received_at`, `sla_type`, dan `sla_deadline` sengaja TIDAK ditimpa saat
-/// order sudah ada: tenggat packing dihitung dari saat order pertama kali
-/// diterima, dan kiriman ulang tidak boleh memundurkan tenggat itu.
+/// Upsert order dengan kunci idempotensi `(platform_id, external_order_id)` karena webhook bisa berulang; `received_at`/`sla_*` tak ditimpa agar tenggat tak mundur.
 pub async fn upsert_order(
     pool: &PgPool,
     platform_id: Uuid,
@@ -247,11 +235,7 @@ pub async fn upsert_order(
     .fetch_one(&mut *tx)
     .await?;
 
-    // Item ditulis ulang seluruhnya: order yang diperbarui bisa saja
-    // kehilangan baris (pembeli membatalkan sebagian), dan menyisakan baris
-    // lama akan membuat tiket packing meminta barang yang tidak jadi dibeli.
-    // Aman dilakukan karena pemetaan produk disimpan di `channel_listings`,
-    // bukan di baris item ini.
+    // Item ditulis ulang seluruhnya agar baris yang dibatalkan sebagian tak membuat tiket meminta barang tak jadi dibeli; aman karena pemetaan ada di `channel_listings`.
     sqlx::query!(
         "DELETE FROM external_order_items WHERE external_order_id = $1",
         baris.id
@@ -329,11 +313,7 @@ pub async fn list_mappings(pool: &PgPool, product_id: Uuid) -> AppResult<Vec<Map
     Ok(rows)
 }
 
-/// Memetakan satu listing marketplace ke produk internal.
-///
-/// Setelah dipetakan, baris item order yang sudah terlanjur masuk tanpa
-/// `product_id` ikut diperbaiki. Tanpa itu, order yang datang sebelum
-/// pemetaan dibuat akan selamanya tidak bisa dibuatkan tiket packing.
+/// Memetakan satu listing marketplace ke produk internal; baris item yang terlanjur tanpa `product_id` ikut diperbaiki, kalau tidak order sebelum pemetaan tak bisa dibuatkan tiket.
 pub async fn upsert_mapping(
     pool: &PgPool,
     platform_id: Uuid,

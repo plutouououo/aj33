@@ -27,39 +27,23 @@ pub struct Transaction {
     pub customer_id: Option<Uuid>,
     pub cashier_user_id: Uuid,
     pub payment_method: String,
-    /// `toko`, `shopee`, atau `tiktok` -- daftar harga yang dipakai saat
-    /// menjual. Lihat migrasi 0015.
+    /// `toko`, `shopee`, atau `tiktok`: daftar harga yang dipakai saat menjual (migrasi 0015).
     pub sales_channel: String,
     pub subtotal: Decimal,
-    /// Potongan atas seluruh belanja. Tidak dikurangkan dari `subtotal` --
-    /// baris struk tetap harus bisa dijumlahkan menjadi subtotal. Lihat
-    /// migrasi 0015.
+    /// Potongan atas seluruh belanja, tak dikurangkan dari `subtotal` agar baris struk tetap menjumlah ke subtotal (migrasi 0015).
     pub discount_amount: Decimal,
-    /// Ongkos kirim. Tidak termasuk di `subtotal` -- hanya menambah
-    /// `total_amount`. Lihat migrasi 0007.
+    /// Ongkos kirim, tak masuk `subtotal` dan hanya menambah `total_amount` (migrasi 0007).
     pub shipping_cost: Decimal,
     pub total_amount: Decimal,
-    /// Nama kolom di bawah ini SENGAJA mengikuti field asli
-    /// `v2.payment.get_escrow_detail` milik Shopee (lihat migrasi 0018),
-    /// bukan istilah rakitan sendiri -- supaya kalau toko ini suatu saat
-    /// tersambung sungguhan, angka di sini bisa dibandingkan field-demi-
-    /// field dengan struk asli Shopee.
-    ///
-    /// Persentase komisi Shopee yang benar-benar dipakai transaksi ini
-    /// (pecahan, 0,1725 = 17,25%). Nol untuk kanal selain Shopee. Kasir bisa
-    /// mengedit ini per transaksi -- lihat `pos::service::checkout`.
+    /// Kolom biaya Shopee mengikuti field asli `get_escrow_detail` (migrasi 0018); ini persentase komisi (pecahan, 0,1725 = 17,25%), nol selain Shopee, bisa diedit kasir.
     pub platform_commission_fee_percent: Decimal,
     pub platform_commission_fee: Decimal,
-    /// Persentase biaya layanan Shopee (program opsional seperti Gratis
-    /// Ongkir Xtra/Star+). Nol kalau toko tidak ikut program itu -- lihat
-    /// `service_fee` di API Shopee.
+    /// Persentase biaya layanan Shopee (program opsional seperti Gratis Ongkir Xtra/Star+), nol bila tak ikut (`service_fee` di API Shopee).
     pub platform_service_fee_percent: Decimal,
     pub platform_service_fee: Decimal,
-    /// PPh final UMKM, mengikuti `withholding_tax` di API Shopee: 0,5% dari
-    /// omzet Shopee setelah diskon. Tetap, tidak bisa diedit kasir.
+    /// PPh final UMKM (`withholding_tax` Shopee): 0,5% omzet setelah diskon, tetap dan tak bisa diedit kasir.
     pub platform_withholding_tax: Decimal,
-    /// Rp1.250 tetap, SEKALI per transaksi Shopee -- mengikuti
-    /// `seller_order_processing_fee` di API Shopee.
+    /// Rp1.250 tetap sekali per transaksi Shopee (`seller_order_processing_fee`).
     pub platform_order_processing_fee: Decimal,
     pub amount_paid: Option<Decimal>,
     pub change_amount: Option<Decimal>,
@@ -68,8 +52,7 @@ pub struct Transaction {
     pub items: Vec<TransactionItem>,
 }
 
-/// Baris `transactions` tanpa itemnya. Dipakai sebagai perantara sebelum
-/// item-nya ikut dibaca.
+/// Baris `transactions` tanpa itemnya, perantara sebelum item dibaca.
 struct TransactionHead {
     id: Uuid,
     idempotency_key: String,
@@ -216,13 +199,10 @@ pub struct NewTransaction {
     pub sales_channel: String,
     pub subtotal: Decimal,
     pub discount_amount: Decimal,
-    /// Ongkos kirim. Tidak termasuk di `subtotal` -- hanya menambah
-    /// `total_amount`. Lihat migrasi 0007.
+    /// Ongkos kirim, tak masuk `subtotal` dan hanya menambah `total_amount` (migrasi 0007).
     pub shipping_cost: Decimal,
     pub total_amount: Decimal,
-    /// Nol untuk kanal selain Shopee -- lihat migrasi 0018. Nama field
-    /// mengikuti `v2.payment.get_escrow_detail` Shopee, bukan istilah
-    /// sendiri.
+    /// Nol selain kanal Shopee (migrasi 0018); nama field mengikuti `v2.payment.get_escrow_detail`.
     pub platform_commission_fee_percent: Decimal,
     pub platform_commission_fee: Decimal,
     pub platform_service_fee_percent: Decimal,
@@ -326,10 +306,7 @@ pub struct TransaksiTerkunci {
     pub status: String,
 }
 
-/// Membaca status transaksi sambil menguncinya sampai transaksi pemanggil
-/// selesai -- sama pola dengan `tickets::repo::kunci`. Tanpa kunci ini, dua
-/// permintaan "batalkan" yang datang bersamaan sama-sama membaca status
-/// `completed`, sama-sama lolos pemeriksaan, dan stok dikembalikan dua kali.
+/// Membaca status transaksi sambil menguncinya (pola `tickets::repo::kunci`); tanpa kunci dua "batalkan" bersamaan sama-sama lolos dan stok dikembalikan dua kali.
 pub async fn kunci_transaksi(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     id: Uuid,
@@ -345,11 +322,7 @@ pub async fn kunci_transaksi(
     Ok(row)
 }
 
-/// Baris `stock_adjustments` yang ditulis penjualan aslinya -- satu per
-/// (produk, batch) yang tersentuh. Void memutar ulang baris-baris ini lewat
-/// `stock::tambah`, bukan menghitung ulang dari `transaction_items`, supaya
-/// stok kembali persis ke batch asalnya walau FEFO batch lain sudah berubah
-/// sejak penjualan terjadi.
+/// Baris `stock_adjustments` penjualan asli per (produk, batch); void memutarnya ulang lewat `stock::tambah` agar stok kembali ke batch asal walau FEFO sudah berubah.
 struct PenyesuaianPenjualan {
     product_id: Uuid,
     batch_id: Option<Uuid>,
@@ -372,8 +345,7 @@ pub async fn penyesuaian_penjualan(
     .fetch_all(&mut **tx)
     .await?;
 
-    // `change_qty` penjualan selalu negatif (lihat stock::kurangi) --
-    // `StockLine::qty` selalu positif, jadi dibalik di sini.
+    // `change_qty` penjualan selalu negatif (`stock::kurangi`) sedangkan `StockLine::qty` positif, jadi dibalik di sini.
     Ok(baris
         .into_iter()
         .map(|b| StockLine {

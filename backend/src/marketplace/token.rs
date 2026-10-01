@@ -1,17 +1,4 @@
-//! Penyimpanan token marketplace di tabel `platforms`.
-//!
-//! Dipakai bersama semua adapter. Bentuk penyimpanannya memang sama untuk
-//! tiap platform -- satu baris per platform, token terenkripsi dengan
-//! `crypto`, plus satu identitas toko di `shop_id_external` -- jadi logika
-//! ini tinggal di satu tempat. Yang berbeda antar platform hanyalah ARTI
-//! `shop_ref`: TikTok mengisinya dengan `shop_cipher`, Shopee dengan
-//! `shop_id` berupa angka.
-//!
-//! Alasan ini bukan sekadar menghemat baris: enkripsi token adalah batas
-//! keamanan. Kalau tiap adapter menyalin sendiri jalur simpan/bukanya, cukup
-//! satu salinan lupa mengenkripsi untuk menaruh token mentah di basis data,
-//! dan tidak ada satu tempat pun yang bisa diperiksa untuk memastikan itu
-//! tidak terjadi.
+//! Penyimpanan token di `platforms` dipakai semua adapter, satu tempat karena enkripsi adalah batas keamanan (salinan yang lupa mengenkripsi menaruh token mentah di DB).
 
 use super::crypto;
 use crate::error::{AppError, AppResult};
@@ -19,9 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Token diperbarui kalau sisa masa berlakunya kurang dari ini. Menunggu
-/// sampai benar-benar kedaluwarsa berarti request pertama setelah itu
-/// gagal, padahal bisa dicegah.
+/// Token diperbarui bila sisa masa berlakunya kurang dari ini, karena menunggu kedaluwarsa membuat request pertama setelahnya gagal.
 pub const AMBANG_PERPANJANG: Duration = Duration::minutes(5);
 
 /// Token satu toko, sudah didekripsi.
@@ -40,10 +25,7 @@ impl TokenTersimpan {
     }
 }
 
-/// Membaca token platform yang sedang terhubung.
-///
-/// `nama_tampilan` hanya dipakai untuk pesan yang dibaca Owner ("Shopee",
-/// "TikTok"), sementara `platform` adalah nilai di kolom `platform_name`.
+/// Membaca token platform yang terhubung; `nama_tampilan` hanya untuk pesan ke Owner, `platform` nilai kolom `platform_name`.
 pub async fn muat(
     pool: &PgPool,
     kunci: &[u8; 32],
@@ -89,15 +71,7 @@ pub async fn muat(
     })
 }
 
-/// Menyimpan token hasil otorisasi atau perpanjangan.
-///
-/// Satu pernyataan, bukan insert-lalu-update. Versi sebelumnya memakai
-/// `ON CONFLICT (id) DO NOTHING` tanpa menyebut `id`, sehingga
-/// `gen_random_uuid()` selalu memberi id yang belum ada: konflik yang
-/// ditunggu tidak pernah terjadi, dan tiap penyimpanan token menambah baris
-/// `platforms` baru alih-alih memperbarui yang lama. Kuncinya memang
-/// `platform_name` -- satu baris per platform -- dan sejak migrasi 0010
-/// database yang menegakkannya.
+/// Upsert satu pernyataan dengan kunci `platform_name`; versi lama `ON CONFLICT (id) DO NOTHING` tak pernah konflik dan menambah baris tiap simpan.
 pub async fn simpan(
     pool: &PgPool,
     kunci: &[u8; 32],
@@ -136,9 +110,7 @@ pub async fn simpan(
 
 fn buka(kunci: &[u8; 32], terenkripsi: &str, nama_tampilan: &str) -> AppResult<String> {
     crypto::decrypt(kunci, terenkripsi).map_err(|err| {
-        // Ini hampir selalu berarti TOKEN_ENCRYPTION_KEY berubah sejak
-        // token disimpan. Menghubungkan ulang toko akan menulis token baru
-        // dengan kunci yang sekarang.
+        // Hampir selalu berarti TOKEN_ENCRYPTION_KEY berubah sejak token disimpan; menghubungkan ulang menulis token baru dengan kunci sekarang.
         tracing::error!(error = %err, platform = nama_tampilan, "token marketplace tidak bisa didekripsi");
         AppError::bad_request(format!(
             "Token toko tidak bisa dibuka. Hubungkan ulang toko {nama_tampilan} di Pengaturan."
@@ -166,8 +138,7 @@ mod tests {
 
     #[test]
     fn token_yang_mendekati_tenggat_diperbarui_sebelum_gagal() {
-        // Inti ambang ini: token yang tinggal semenit lagi masih "berlaku",
-        // tapi request berikutnya bisa jatuh setelah tenggat.
+        // Inti ambang: token yang tinggal semenit masih "berlaku" tapi request berikutnya bisa jatuh setelah tenggat.
         assert!(token(Utc::now() + Duration::minutes(1)).hampir_kedaluwarsa());
     }
 

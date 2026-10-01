@@ -46,10 +46,7 @@ struct UploadResponse {
     batch_id: Uuid,
 }
 
-/// `?filename=` lewat query, bukan header -- menghindari batasan
-/// ASCII-only nilai header untuk nama berkas berspasi/beraksen. Astro yang
-/// membangunnya lewat `URLSearchParams`, jadi persen-encoding sudah beres
-/// di sisi pengirim.
+/// `?filename=` lewat query, bukan header, menghindari batasan ASCII nilai header untuk nama berspasi/beraksen; Astro membangunnya lewat `URLSearchParams`.
 async fn upload(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -122,8 +119,7 @@ async fn get_batch(
     }))
 }
 
-/// Ringan sengaja -- dipanggil halaman review tiap kali auto-refresh saat
-/// `status=committing`, tanpa perlu memuat seluruh baris.
+/// Ringan sengaja karena dipanggil halaman review tiap auto-refresh saat `status=committing`, tanpa memuat seluruh baris.
 #[derive(Debug, Serialize)]
 struct StatusResponse {
     status: String,

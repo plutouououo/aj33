@@ -1,6 +1,4 @@
-//! Konfigurasi dibaca sekali saat start dan gagal cepat kalau ada yang
-//! kurang. Lebih baik proses menolak hidup dengan pesan jelas daripada mati
-//! di tengah request pertama yang kebetulan menyentuh setelan yang kosong.
+//! Konfigurasi dibaca sekali saat start dan gagal cepat bila ada yang kurang, lebih baik menolak hidup berpesan jelas daripada mati di request pertama.
 
 use std::env;
 
@@ -17,10 +15,7 @@ pub struct Config {
     pub shopee: ShopeeConfig,
 }
 
-/// Kredensial TikTok Shop kosong selama toko belum dihubungkan, jadi
-/// setelan ini opsional -- backend tetap boleh hidup tanpanya. Yang menolak
-/// bekerja adalah adapter-nya saat dipanggil, dengan pesan yang menyebut
-/// variabel mana yang perlu diisi.
+/// Kredensial TikTok Shop kosong selama toko belum dihubungkan sehingga opsional; yang menolak adalah adapter saat dipanggil, dengan pesan menyebut variabel yang perlu diisi.
 #[derive(Debug, Clone, Default)]
 pub struct TiktokConfig {
     pub app_key: String,
@@ -34,25 +29,19 @@ pub struct TiktokConfig {
 }
 
 impl TiktokConfig {
-    /// Dipakai `/api/platforms` untuk menandai platform yang kredensialnya
-    /// belum diisi, sama seperti `isPlatformConfigured()` di proyek lama.
+    /// Dipakai `/api/platforms` menandai platform yang kredensialnya belum diisi, seperti `isPlatformConfigured()` proyek lama.
     pub fn is_configured(&self) -> bool {
         !self.app_key.is_empty() && !self.app_secret.is_empty() && !self.host.is_empty()
     }
 }
 
-/// Kredensial Shopee Open API v2. Sama seperti TikTok, boleh kosong sampai
-/// tokonya benar-benar dihubungkan.
+/// Kredensial Shopee Open API v2; seperti TikTok boleh kosong sampai toko dihubungkan.
 #[derive(Debug, Clone, Default)]
 pub struct ShopeeConfig {
-    /// Partner ID dari Shopee Open Platform. Ikut ditandatangani sebagai
-    /// angka, jadi disimpan sebagai angka -- bukan string yang harus
-    /// di-parse ulang tiap kali menyusun tanda tangan.
+    /// Partner ID Shopee ikut ditandatangani sebagai angka, jadi disimpan angka agar tak di-parse ulang tiap kali.
     pub partner_id: i64,
     pub partner_key: String,
-    /// Host API tanpa path, misalnya `https://partner.shopeemobile.com`.
-    /// Path lengkap (`/api/v2/...`) ditulis di pemanggil, karena persis
-    /// path itulah yang ikut ditandatangani.
+    /// Host API tanpa path (mis. `https://partner.shopeemobile.com`); path lengkap ditulis di pemanggil karena persis path itu yang ditandatangani.
     pub host: String,
     /// Halaman otorisasi seller, misalnya `https://open.shopee.com/auth`.
     pub auth_url: String,
@@ -128,10 +117,7 @@ fn required(name: &'static str) -> Result<String, ConfigError> {
     }
 }
 
-/// Partner ID kosong berarti Shopee memang belum dipakai, dan itu sah.
-/// Yang tidak sah adalah partner id yang diisi tapi bukan angka: itu salah
-/// ketik yang kalau dibiarkan baru ketahuan sebagai tanda tangan ditolak,
-/// jauh dari sumber masalahnya.
+/// Partner ID kosong berarti Shopee belum dipakai (sah), tapi yang diisi bukan angka adalah salah ketik yang kalau dibiarkan baru ketahuan sebagai tanda tangan ditolak.
 fn parse_partner_id(raw: &str) -> Result<i64, ConfigError> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -148,8 +134,7 @@ fn optional(name: &str) -> String {
     env::var(name).unwrap_or_default()
 }
 
-/// Kunci ditulis sebagai 64 karakter hex supaya aman disimpan di file `.env`
-/// dan di secret CI, tanpa karakter yang perlu di-escape.
+/// Kunci ditulis 64 karakter hex agar aman di `.env` dan secret CI tanpa karakter yang perlu di-escape.
 fn parse_encryption_key(raw: &str) -> Result<[u8; 32], ConfigError> {
     let bytes = hex::decode(raw.trim()).map_err(|_| ConfigError::Invalid {
         name: "TOKEN_ENCRYPTION_KEY",

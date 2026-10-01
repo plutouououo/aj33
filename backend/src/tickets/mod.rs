@@ -1,15 +1,4 @@
-//! Tiket packing: perintah kerja untuk menyiapkan satu pesanan marketplace.
-//!
-//! Alurnya satu arah, dan tiap langkah punya syaratnya sendiri:
-//!
-//! ```text
-//! unassigned --assign--> assigned --mulai--> packing --selesai--> packed --serahkan--> handed_over
-//! ```
-//!
-//! Yang membuat urutan ini penting bukan rapinya, melainkan apa yang
-//! menempel di langkah terakhir: stok baru berkurang saat `handed_over`,
-//! yaitu saat barang benar-benar keluar ke kurir. Kalau status boleh
-//! melompat atau mundur, stok bisa berkurang dua kali untuk satu pesanan.
+//! Tiket packing satu arah (`unassigned` → `assigned` → `packing` → `packed` → `handed_over`); stok baru berkurang saat `handed_over`, jadi status tak boleh melompat atau mundur.
 
 mod repo;
 mod routes;
@@ -40,9 +29,7 @@ impl TicketStatus {
         }
     }
 
-    /// Status yang tersimpan di database dibaca kembali lewat sini. Nilai
-    /// asing berarti baris itu ditulis oleh versi lain atau diubah manual --
-    /// lebih baik ditolak daripada diperlakukan sebagai status yang salah.
+    /// Status dari database dibaca lewat sini; nilai asing berarti ditulis versi lain atau diubah manual dan lebih baik ditolak.
     pub fn parse(raw: &str) -> AppResult<Self> {
         match raw {
             "unassigned" => Ok(Self::Unassigned),
@@ -60,17 +47,12 @@ impl TicketStatus {
             Self::Assigned => Some(Self::Packing),
             Self::Packing => Some(Self::Packed),
             Self::Packed => Some(Self::HandedOver),
-            // `unassigned` hanya bergerak lewat penugasan, dan
-            // `handed_over` adalah akhir.
+            // `unassigned` hanya bergerak lewat penugasan dan `handed_over` adalah akhir.
             Self::Unassigned | Self::HandedOver => None,
         }
     }
 
-    /// Memeriksa perpindahan status yang diminta.
-    ///
-    /// Menolak lompatan (`assigned` langsung ke `handed_over`, yang akan
-    /// melewati pemeriksaan "semua barang sudah dikemas") maupun pengulangan
-    /// (`handed_over` ke `handed_over`, yang akan mengurangi stok dua kali).
+    /// Memeriksa perpindahan status; menolak lompatan (`assigned` ke `handed_over` melewati cek "semua dikemas") dan pengulangan (`handed_over` ke `handed_over` mengurangi stok dua kali).
     pub fn pindah_ke(self, tujuan: Self) -> AppResult<()> {
         if self.lanjutan() == Some(tujuan) {
             return Ok(());
@@ -83,8 +65,7 @@ impl TicketStatus {
         )))
     }
 
-    /// Tiket yang sudah selesai dikemas tidak boleh berpindah tangan lagi:
-    /// yang memeriksa isinya harus orang yang sama dengan yang menyerahkan.
+    /// Tiket selesai dikemas tak boleh berpindah tangan: yang memeriksa isinya harus orang yang menyerahkan.
     fn masih_bisa_ditugaskan(self) -> bool {
         matches!(self, Self::Unassigned | Self::Assigned | Self::Packing)
     }
@@ -109,8 +90,7 @@ mod tests {
 
     #[test]
     fn status_tidak_boleh_melompat() {
-        // Melompat ke serah-terima berarti melewati pemeriksaan "semua
-        // barang sudah dikemas".
+        // Melompat ke serah-terima melewati pemeriksaan "semua barang sudah dikemas".
         assert!(TicketStatus::Assigned
             .pindah_ke(TicketStatus::HandedOver)
             .is_err());
@@ -121,8 +101,7 @@ mod tests {
 
     #[test]
     fn status_tidak_boleh_mundur_atau_diulang() {
-        // Pengulangan serah-terima adalah yang paling mahal: stok akan
-        // berkurang dua kali untuk satu pesanan.
+        // Pengulangan serah-terima paling mahal: stok berkurang dua kali untuk satu pesanan.
         assert!(TicketStatus::HandedOver
             .pindah_ke(TicketStatus::HandedOver)
             .is_err());

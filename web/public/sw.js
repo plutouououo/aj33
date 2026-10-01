@@ -1,16 +1,4 @@
-/*
-  Service worker.
-
-  Cakupannya sengaja sempit: membuat aplikasi bisa dipasang, memuat aset
-  statis dari cache supaya kunjungan berikutnya terasa seketika, dan
-  menampilkan halaman "tidak ada koneksi" yang rapi saat jaringan mati.
-
-  Halaman TIDAK di-cache. Semuanya dirender di server dan menampilkan stok
-  serta pesanan yang berubah terus -- menyajikan salinan lama justru
-  berbahaya: kasir bisa menjual barang yang stoknya sudah habis. Transaksi
-  juga tidak diantre offline; itu keputusan arsitektur yang tercatat di
-  rencana refactor.
-*/
+/* Service worker sempit: aplikasi bisa dipasang, aset statis dari cache, halaman offline; halaman TIDAK di-cache (stok berubah, salinan lama bisa membuat kasir menjual barang habis). */
 
 const VERSI = 'aj33-v1';
 const HALAMAN_OFFLINE = '/offline';
@@ -55,8 +43,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Aset statis Astro sudah bernama unik per build, jadi aman disajikan
-  // dari cache lebih dulu dan diisi saat pertama diminta.
+  // Aset statis Astro bernama unik per build, jadi aman disajikan dari cache lebih dulu dan diisi saat pertama diminta.
   const asetStatis = url.pathname.startsWith('/_astro/') || ASET_AWAL.includes(url.pathname);
   if (!asetStatis) return;
 

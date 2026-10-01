@@ -13,25 +13,11 @@ pub struct TicketItem {
     pub product_name_snapshot: String,
     pub qty: i32,
     pub is_packed: bool,
-    /// Rak tempat barang diambil, dibaca LANGSUNG dari batch yang masih
-    /// bersisa -- bukan disalin ke `ticket_items` seperti namanya.
-    ///
-    /// Nama disalin karena nota lama harus tetap menyebut barang sebagaimana
-    /// saat dipesan. Lokasi kebalikannya: pengepak butuh rak tempat barang
-    /// berada SEKARANG. Salinan lama justru menyuruhnya ke rak yang salah
-    /// begitu barang dipindah.
-    ///
-    /// Sejak migrasi 0016 lokasi milik batch, jadi satu produk bisa tersebar
-    /// di beberapa rak. Semuanya disebut, dalam urutan FEFO -- rak paling
-    /// depan adalah rak yang barangnya memang harus keluar lebih dulu.
+    /// Rak dibaca langsung dari batch bersisa (bukan salinan di `ticket_items`) karena lokasi harus yang SEKARANG; sejak migrasi 0016 bisa banyak rak, urut FEFO.
     pub storage_location: Option<String>,
 }
 
-/// Tiket beserta secuil data pesanannya.
-///
-/// Nomor pesanan, platform, dan tenggat SLA ikut dibawa karena antrean
-/// packing dibaca dan diurutkan berdasarkan itu -- tanpanya frontend harus
-/// memanggil `/orders/{id}` untuk tiap baris hanya demi menampilkan daftar.
+/// Tiket beserta secuil data pesanan (nomor, platform, tenggat SLA) karena antrean diurutkan berdasarkan itu, tanpa memanggil `/orders/{id}` per baris.
 #[derive(Debug, Serialize)]
 pub struct Ticket {
     pub id: Uuid,
@@ -71,14 +57,7 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
         SELECT ti.id, ti.product_id, ti.product_name_snapshot, ti.qty,
                ti.is_packed,
                (
-                   -- Rak-rak tempat barang ini masih ada, tanpa pengulangan
-                   -- dan urut FEFO. Batch yang sudah habis tidak ikut: rak
-                   -- yang kosong bukan petunjuk, ia perjalanan sia-sia.
-                   --
-                   -- Dikelompokkan per rak lebih dulu, bukan `string_agg
-                   -- DISTINCT`: dengan DISTINCT, urutan yang dipilih agregat
-                   -- tidak dijamin mengikuti ORDER BY subkueri, dan urutan
-                   -- itulah satu-satunya alasan daftar ini berguna.
+                   -- Rak yang masih berisi, tanpa pengulangan dan urut FEFO (batch habis tak ikut); dikelompokkan per rak dulu karena `string_agg DISTINCT` tak menjamin urutan ORDER BY subkueri.
                    SELECT string_agg(rak.storage_location, ', '
                                      ORDER BY rak.exp NULLS LAST, rak.masuk)
                    FROM (
@@ -94,9 +73,7 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
                ) AS storage_location
         FROM ticket_items ti
         WHERE ti.ticket_id = $1
-        -- Diurutkan per rak, bukan per nama: pengepak menyusuri gudang
-        -- sekali jalan alih-alih bolak-balik. Barang tanpa lokasi jatuh ke
-        -- bawah, supaya yang bisa dipandu tetap berurutan.
+        -- Diurutkan per rak, bukan per nama, agar pengepak menyusuri gudang sekali jalan; barang tanpa lokasi jatuh ke bawah.
         ORDER BY 6 ASC NULLS LAST, ti.product_name_snapshot, ti.id
         "#,
         head.id
@@ -121,11 +98,7 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
     })
 }
 
-/// Daftar tiket.
-///
-/// Urutannya `sla_deadline` menaik -- yang paling mendesak di atas, karena
-/// itulah pertanyaan yang dijawab layar pengepak: mana yang harus dikerjakan
-/// sekarang. Tiket tanpa tenggat jatuh ke bawah.
+/// Daftar tiket urut `sla_deadline` menaik (paling mendesak di atas, pertanyaan layar pengepak: mana dikerjakan sekarang); tanpa tenggat jatuh ke bawah.
 pub async fn list(
     pool: &PgPool,
     status: Option<&str>,
@@ -186,8 +159,7 @@ pub async fn find(pool: &PgPool, id: Uuid) -> AppResult<Option<Ticket>> {
     }
 }
 
-/// Baris pesanan yang akan menjadi isi tiket. `product_id` kosong berarti
-/// listing marketplace-nya belum dipetakan ke produk internal.
+/// Baris pesanan yang menjadi isi tiket; `product_id` kosong berarti listing marketplace belum dipetakan ke produk.
 pub struct BarisPesanan {
     pub product_id: Option<Uuid>,
     pub product_name: Option<String>,
@@ -230,9 +202,7 @@ pub async fn ada_pesanan(
     Ok(ada.unwrap_or(false))
 }
 
-/// Membuat tiket. Mengembalikan `None` kalau pesanan ini sudah punya tiket
-/// -- dijaga indeks unik `idx_tickets_external_order`, jadi dua permintaan
-/// yang datang bersamaan tetap hanya menghasilkan satu tiket.
+/// Membuat tiket; `None` bila pesanan sudah punya tiket (dijaga indeks unik `idx_tickets_external_order`) sehingga dua permintaan bersamaan hanya menghasilkan satu.
 pub async fn insert_ticket(
     tx: &mut Transaction<'_, Postgres>,
     external_order_id: Uuid,
@@ -277,10 +247,7 @@ pub async fn insert_item(
     Ok(())
 }
 
-/// Apakah user ini pantas memegang tiket packing: masih aktif, dan
-/// perannya pengepak (atau owner, yang di toko kecil ikut mengepak).
-/// Foreign key hanya menjamin user-nya ada -- bukan bahwa dia bekerja di
-/// bagian packing.
+/// Apakah user pantas memegang tiket: aktif dan berperan pengepak (atau owner yang ikut mengepak); foreign key hanya menjamin user ada.
 pub async fn bisa_mengepak(tx: &mut Transaction<'_, Postgres>, user_id: Uuid) -> AppResult<bool> {
     let bisa = sqlx::query_scalar!(
         r#"
@@ -303,11 +270,7 @@ pub struct TiketTerkunci {
     pub assigned_to_user_id: Option<Uuid>,
 }
 
-/// Membaca tiket sambil menguncinya sampai transaksi pemanggil selesai.
-///
-/// Semua perubahan status lewat sini lebih dulu. Tanpa kunci, dua permintaan
-/// "serahkan" yang datang bersamaan sama-sama membaca status `packed`,
-/// sama-sama lolos pemeriksaan, dan stok berkurang dua kali.
+/// Membaca tiket sambil menguncinya sampai transaksi pemanggil selesai; semua perubahan status lewat sini, kalau tidak dua "serahkan" bersamaan sama-sama lolos dan stok berkurang dua kali.
 pub async fn kunci(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,
@@ -354,8 +317,7 @@ pub async fn set_penugasan(
     Ok(())
 }
 
-/// Menulis status baru. `completed_at` diisi hanya saat serah-terima --
-/// itulah saat pekerjaan tiket benar-benar selesai.
+/// Menulis status baru; `completed_at` hanya saat serah-terima karena itulah pekerjaan tiket selesai.
 pub async fn set_status(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,

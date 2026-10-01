@@ -25,22 +25,13 @@ use tower_http::trace::TraceLayer;
 pub struct AppState {
     pub pool: PgPool,
     pub config: std::sync::Arc<config::Config>,
-    /// Pembatas percobaan login, dibagikan seluruh permintaan. Isinya di
-    /// memori proses ini, jadi hitungannya ikut hilang saat restart -- dan
-    /// itu tidak apa-apa: penyerang tidak bisa memaksa backend restart.
+    /// Pembatas login dibagikan ke semua permintaan, isinya di memori sehingga hilang saat restart dan itu tak apa karena penyerang tak bisa memaksa restart.
     pub throttle: std::sync::Arc<auth::Throttle>,
 }
 
 #[tokio::main]
 async fn main() {
-    // Memuat `backend/.env` kalau ada. Dipanggil paling awal supaya RUST_LOG
-    // di berkas itu ikut terbaca penyetelan tracing di bawah.
-    //
-    // Berkasnya tidak wajib ada, jadi galatnya dibuang: di produksi setelan
-    // datang dari `EnvironmentFile=` systemd dan `.env` memang tidak pernah
-    // ikut terkirim (masuk .gitignore). Kalaupun suatu saat ada, `dotenvy`
-    // TIDAK menimpa variabel yang sudah diset, jadi systemd tetap menang --
-    // dan begitu pula override di baris perintah saat development.
+    // Memuat `backend/.env` bila ada, paling awal agar RUST_LOG terbaca; galat dibuang karena di produksi setelan dari systemd dan `dotenvy` tak menimpa variabel yang sudah diset.
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
@@ -53,9 +44,7 @@ async fn main() {
     let config = match config::Config::from_env() {
         Ok(config) => config,
         Err(err) => {
-            // Sengaja tidak pakai tracing::error! -- ini terjadi sebelum
-            // aplikasi benar-benar hidup, dan pesannya harus terlihat
-            // walaupun filter log disetel diam.
+            // Sengaja tak memakai tracing::error! karena terjadi sebelum aplikasi hidup dan pesannya harus terlihat walau filter log diam.
             eprintln!("Konfigurasi tidak lengkap: {err}");
             std::process::exit(1);
         }
@@ -69,9 +58,7 @@ async fn main() {
         }
     };
 
-    // Migrasi dijalankan sebelum port dibuka, jadi versi baru tidak pernah
-    // menerima trafik di atas skema lama. sqlx mencatat migrasi yang sudah
-    // jalan di tabel `_sqlx_migrations`, sehingga aman dipanggil tiap start.
+    // Migrasi sebelum port dibuka agar versi baru tak menerima trafik di atas skema lama; aman tiap start karena sqlx mencatat di `_sqlx_migrations`.
     if let Err(err) = sqlx::migrate!("../db/migrations").run(&pool).await {
         eprintln!("Migrasi database gagal: {err}");
         std::process::exit(1);
@@ -86,10 +73,7 @@ async fn main() {
         throttle: std::sync::Arc::new(auth::Throttle::baru()),
     };
 
-    // Worker impor massal berjalan di sampingan, bukan di dalam request --
-    // lihat catatan desain di `import::worker`. `state` masih dipakai
-    // `.with_state(state)` di bawah, jadi ini menyalin (AppState `Clone`),
-    // bukan memindahkan.
+    // Worker impor berjalan di samping request (lihat `import::worker`); `state` masih dipakai `.with_state(state)`, jadi disalin (`Clone`), bukan dipindah.
     tokio::spawn(import::jalankan_worker(state.clone()));
 
     let app = Router::new()
@@ -134,9 +118,7 @@ fn build_cors(origins: &[String]) -> CorsLayer {
     CorsLayer::new()
         .allow_origin(parsed)
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        // `allow_credentials(true)` tidak boleh dipasangkan dengan wildcard
-        // -- spesifikasi CORS melarangnya, dan tower-http akan panic saat
-        // start. Jadi header yang diizinkan disebut satu per satu.
+        // `allow_credentials(true)` tak boleh dipasangkan wildcard (spesifikasi CORS, tower-http panic saat start), jadi header disebut satu per satu.
         .allow_credentials(true)
         .allow_headers([
             axum::http::header::CONTENT_TYPE,
@@ -145,9 +127,7 @@ fn build_cors(origins: &[String]) -> CorsLayer {
         ])
 }
 
-/// Dipakai healthcheck Docker dan CD untuk tahu kapan versi baru siap
-/// menerima trafik. Ikut memeriksa database, karena backend yang hidup
-/// tapi tidak bisa query sama saja dengan mati bagi pemanggilnya.
+/// Dipakai healthcheck Docker dan CD; ikut memeriksa database karena backend yang hidup tapi tak bisa query sama dengan mati.
 async fn health(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Result<&'static str, error::AppError> {

@@ -1,5 +1,4 @@
-//! Logika murni pengurai & validasi baris impor: tanpa SQL, tanpa I/O.
-//! Dites langsung tanpa database -- lihat modul `tests` di bawah.
+//! Logika murni parser dan validasi baris impor tanpa SQL dan I/O, dites tanpa database (modul `tests`).
 
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -8,8 +7,7 @@ pub const BATAS_BARIS: usize = 5000;
 pub const BATAS_BYTE: usize = 10 * 1024 * 1024;
 pub const EKSTENSI_DIIZINKAN: [&str; 2] = ["xlsx", "csv"];
 
-/// Toleransi selisih harga berkas vs hasil rumus modal/margin sebelum WARN
-/// -- sekadar pembulatan, bukan penyimpangan sungguhan.
+/// Toleransi selisih harga berkas vs rumus modal/margin sebelum WARN: sekadar pembulatan, bukan penyimpangan.
 const TOLERANSI_HARGA: Decimal = Decimal::from_parts(1, 0, 0, false, 0);
 
 /// Field kanonik yang dikenali dari header spreadsheet.
@@ -29,9 +27,7 @@ pub enum Field {
     Published,
 }
 
-/// Header (Indonesia/Inggris) -> field kanonik. Kolom yang tidak dikenal
-/// dikembalikan `None` dan DIABAIKAN oleh pemanggil, bukan ditolak -- berkas
-/// boleh punya kolom tambahan yang tidak relevan bagi impor ini.
+/// Header (Indonesia/Inggris) ke field kanonik; kolom tak dikenal `None` dan diabaikan pemanggil, bukan ditolak, karena berkas boleh punya kolom tambahan.
 pub fn map_header(header: &str) -> Option<Field> {
     match header.trim().to_lowercase().as_str() {
         "nama" | "name" => Some(Field::Name),
@@ -50,22 +46,14 @@ pub fn map_header(header: &str) -> Option<Field> {
     }
 }
 
-/// Menerima "Rp 1.234.567", "1.234.567,89", "1,234,567.00", atau "204795".
-///
-/// Kalau `,` dan `.` sama-sama muncul, yang PALING KANAN adalah pemisah
-/// desimal dan sisanya pemisah ribuan (dibuang). Kalau cuma satu jenis yang
-/// muncul: muncul lebih dari sekali, ATAU grup setelahnya tepat 3 digit --
-/// keduanya berarti pemisah ribuan (dibuang, bukan desimal). Selain itu,
-/// pemisah tunggal itu desimal.
+/// Menerima "Rp 1.234.567", "1.234.567,89", "1,234,567.00", "204795": pemisah paling kanan jadi desimal bila keduanya ada; satu jenis berulang atau grup 3 digit berarti ribuan.
 pub fn parse_money(raw: &str) -> Option<Decimal> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
     }
 
-    // "Rp" di depan (case-insensitive) dibuang lebih dulu -- posisinya
-    // dicari di teks asli (bukan versi lowercase) supaya potongan yang
-    // tersisa tetap memuat karakter aslinya.
+    // "Rp" di depan (tak peka huruf) dibuang dulu, posisinya dicari di teks asli agar sisanya memuat karakter aslinya.
     let tanpa_rp = {
         let lower = trimmed.to_lowercase();
         if let Some(sisa) = lower.strip_prefix("rp") {
@@ -135,15 +123,12 @@ pub fn parse_money(raw: &str) -> Option<Decimal> {
     Some(nilai)
 }
 
-/// Buang "%" lalu `parse_money`. Hasilnya angka persen apa adanya (mis.
-/// "17,25%" -> 17.25), BUKAN pecahan -- pemanggil yang membaginya 100 saat
-/// dipakai menghitung harga (lihat `harga_efektif`).
+/// Buang "%" lalu `parse_money`; hasil angka persen apa adanya ("17,25%" → 17.25), bukan pecahan (pemanggil membagi 100, lihat `harga_efektif`).
 pub fn parse_percent(raw: &str) -> Option<Decimal> {
     parse_money(&raw.replace('%', ""))
 }
 
-/// Kolom bilangan bulat (stok): lewat `parse_money` dulu supaya format
-/// dengan pemisah ribuan tetap terbaca, lalu dibulatkan ke bilangan bulat.
+/// Kolom bilangan bulat (stok) lewat `parse_money` dulu agar pemisah ribuan terbaca, lalu dibulatkan.
 pub fn parse_int(raw: &str) -> Option<i32> {
     let nilai = parse_money(raw)?.round();
     nilai.to_string().split('.').next()?.parse().ok()
@@ -203,10 +188,7 @@ pub struct ParsedRow {
     pub published: Option<bool>,
 }
 
-/// Harga yang dipakai request create/update: eksplisit menang; kalau kosong
-/// dihitung dari modal/(1 - margin/100). WARN kalau harga berkas menyimpang
-/// dari hasil rumus melebihi `TOLERANSI_HARGA` -- murni informatif, tidak
-/// ada "kunci harga" untuk dibuka (skema ERP ini tidak punya konsep itu).
+/// Harga create/update: eksplisit menang, kosong dihitung modal/(1 - margin/100); WARN bila menyimpang melebihi `TOLERANSI_HARGA`, murni informatif.
 pub fn harga_efektif(
     harga: Option<Decimal>,
     modal: Option<Decimal>,
@@ -237,10 +219,7 @@ pub fn harga_efektif(
     }
 }
 
-/// Seluruh pemeriksaan yang tidak butuh database. Resolusi kategori (yang
-/// butuh query) sudah dilakukan pemanggil sebelum memanggil ini --
-/// `kategori_dikenal` cuma mengabarkan hasilnya, `true` juga kalau memang
-/// tidak ada `category_text` sama sekali.
+/// Semua pemeriksaan tanpa database; resolusi kategori (butuh query) sudah dilakukan pemanggil, `kategori_dikenal` hanya mengabarkan hasilnya (`true` juga bila tak ada `category_text`).
 pub fn validate_row(row: &ParsedRow, sku_duplikat: bool, kategori_dikenal: bool) -> Vec<Issue> {
     let mut isu = Vec::new();
 

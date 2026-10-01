@@ -1,13 +1,10 @@
-//! Akses tabel `users`. Tidak memuat aturan bisnis -- hanya membaca dan
-//! menulis baris.
+//! Akses tabel `users`, hanya membaca dan menulis baris tanpa aturan bisnis.
 
 use crate::error::AppResult;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Cerminan baris `users` seperlunya modul ini. `password_hash` ikut karena
-/// login membutuhkannya, dan justru karena itu tipe ini tidak pernah
-/// di-serialize ke JSON -- `PublicUser` yang dikirim ke frontend.
+/// Cerminan baris `users`; `password_hash` ikut karena login butuh, makanya tipe ini tak pernah di-serialize (yang dikirim `PublicUser`).
 #[derive(Debug)]
 pub struct UserRow {
     pub id: Uuid,
@@ -17,8 +14,7 @@ pub struct UserRow {
     pub role: String,
     pub phone: Option<String>,
     pub is_active: bool,
-    /// Password yang dipasang orang lain (migrasi pemasangan akun) dan harus
-    /// diganti pemiliknya sebelum akun ini dipakai bekerja.
+    /// Password dipasang orang lain (migrasi pemasangan akun) dan harus diganti pemiliknya sebelum akun dipakai.
     pub must_change_password: bool,
 }
 
@@ -56,11 +52,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<UserRow>> {
     Ok(row)
 }
 
-/// Menyimpan password baru sekaligus mematikan penanda "harus ganti".
-///
-/// Keduanya dalam satu UPDATE, bukan dua: password yang sudah terganti tapi
-/// penandanya masih menyala akan mengunci pemiliknya di halaman ganti
-/// password selamanya.
+/// Menyimpan password baru sekaligus mematikan penanda "harus ganti" dalam satu UPDATE, agar password terganti dengan penanda menyala tak mengunci pemiliknya.
 pub async fn update_password(pool: &PgPool, id: Uuid, password_hash: &str) -> AppResult<()> {
     sqlx::query!(
         r#"

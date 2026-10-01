@@ -1,9 +1,4 @@
-//! Adapter TikTok Shop Open API.
-//!
-//! Sejak Tokopedia Open API dihentikan (migrasi wajib ke TikTok Shop
-//! Partner Center per 30 September 2025), penjual Tokopedia dan TikTok Shop
-//! memakai API yang sama. Jadi satu adapter ini melayani keduanya -- tidak
-//! ada adapter Tokopedia terpisah.
+//! Adapter TikTok Shop Open API: sejak Tokopedia Open API dihentikan (migrasi wajib per 30 September 2025) penjual Tokopedia dan TikTok Shop memakai API sama, jadi satu adapter melayani keduanya.
 
 pub mod auth;
 pub mod client;
@@ -14,12 +9,10 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
 
-/// Nama platform di tabel `platforms`. Dibatasi CHECK constraint
-/// `platforms_platform_name_check`.
+/// Nama platform di tabel `platforms`, dibatasi CHECK `platforms_platform_name_check`.
 pub const NAMA_PLATFORM: &str = "tiktok";
 
-/// Bentuk order dari TikTok. Hanya field yang benar-benar dipakai yang
-/// didaftarkan; sisanya tetap tersimpan utuh di `raw_payload`.
+/// Bentuk order TikTok; hanya field yang dipakai didaftarkan, sisanya utuh di `raw_payload`.
 #[derive(Debug, Deserialize)]
 pub struct TiktokOrder {
     pub id: String,
@@ -47,11 +40,7 @@ pub struct TiktokLineItem {
     pub sale_price: Option<String>,
 }
 
-/// Memetakan status TikTok ke status internal.
-///
-/// Status yang tidak dikenal jatuh ke `New`, bukan diabaikan: order yang
-/// statusnya asing tetap harus terlihat oleh Owner supaya bisa ditangani
-/// manual, bukan hilang diam-diam.
+/// Memetakan status TikTok ke internal; status tak dikenal jatuh ke `New` agar tetap terlihat Owner, tak hilang diam-diam.
 pub fn petakan_status(status: &str) -> OrderStatus {
     match status {
         "UNPAID" | "ON_HOLD" => OrderStatus::New,
@@ -67,13 +56,7 @@ fn uang(raw: Option<&String>) -> Option<Decimal> {
     raw.and_then(|s| Decimal::from_str(s).ok())
 }
 
-/// Menerjemahkan order TikTok menjadi bentuk internal.
-///
-/// CATATAN: tiap elemen `line_items` di TikTok mewakili SATU unit -- dua
-/// barang yang sama muncul sebagai dua elemen dengan id berbeda. Karena itu
-/// qty tiap baris selalu 1, dan jumlah sesungguhnya adalah banyaknya elemen.
-/// Proyek lama menuliskan `qty: 1` dengan catatan "cek ulang di payload
-/// asli"; di sini baris yang produknya sama digabung supaya jumlahnya benar.
+/// Menerjemahkan order TikTok ke bentuk internal; tiap elemen `line_items` mewakili satu unit sehingga baris produk sama digabung agar jumlahnya benar (proyek lama menulis `qty: 1`).
 pub fn normalisasi(order: &TiktokOrder, raw: serde_json::Value) -> NormalizedOrder {
     let mut items: Vec<NormalizedOrderItem> = Vec::new();
 
@@ -140,9 +123,7 @@ mod tests {
 
     #[test]
     fn line_item_per_unit_digabung_jadi_qty() {
-        // Tiga elemen untuk barang yang sama harus menjadi satu baris qty 3.
-        // Kalau tidak, tiket packing meminta 1 barang padahal pembeli
-        // memesan 3, dan stok berkurang kurang dari yang sebenarnya keluar.
+        // Tiga elemen barang sama harus jadi satu baris qty 3, kalau tidak tiket packing meminta 1 dan stok berkurang kurang dari yang keluar.
         let raw = order_json(serde_json::json!([
             { "id": "a1", "product_name": "Totebag Kanvas", "sale_price": "70000.00" },
             { "id": "a2", "product_name": "Totebag Kanvas", "sale_price": "70000.00" },
@@ -171,8 +152,7 @@ mod tests {
 
     #[test]
     fn barang_sama_dengan_harga_berbeda_tidak_digabung() {
-        // Harga berbeda berarti baris yang berbeda secara komersial
-        // (misalnya satu kena promo), jadi tidak boleh dilebur.
+        // Harga berbeda berarti baris berbeda secara komersial (mis. satu kena promo), tak boleh dilebur.
         let raw = order_json(serde_json::json!([
             { "id": "a1", "product_name": "Mug Custom", "sale_price": "95000.00" },
             { "id": "a2", "product_name": "Mug Custom", "sale_price": "80000.00" }

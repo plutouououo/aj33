@@ -1,22 +1,4 @@
-//! Tanda tangan permintaan Shopee Open API v2.
-//!
-//! Jauh lebih sederhana daripada TikTok: HMAC-SHA256 dengan kunci
-//! `partner_key` atas beberapa bagian yang disambung tanpa pemisah, hasilnya
-//! hex huruf kecil. Body TIDAK ikut ditandatangani, dan parameter query
-//! selain yang disebut di bawah juga tidak.
-//!
-//! Ada dua bentuk, dan memilih yang salah adalah kesalahan yang paling
-//! sering terjadi:
-//!
-//! - Endpoint publik (`/api/v2/auth/...`) menandatangani
-//!   `partner_id + path + timestamp`. Belum ada toko, jadi belum ada yang
-//!   bisa ditambahkan.
-//! - Endpoint level toko (order, logistics, dan seterusnya) menandatangani
-//!   `partner_id + path + timestamp + access_token + shop_id`.
-//!
-//! `path` adalah path URL lengkap termasuk `/api/v2`, persis seperti yang
-//! dikirim. Menandatangani `/order/get_order_list` padahal yang diminta
-//! `/api/v2/order/get_order_list` menghasilkan `error_sign`.
+//! Tanda tangan Shopee v2: HMAC-SHA256 `partner_key` atas `partner_id + path + timestamp` (+ `access_token + shop_id` level toko), `path` lengkap termasuk `/api/v2`, body tak ikut.
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -72,9 +54,7 @@ pub fn tanda_tangan_toko(
 mod tests {
     use super::*;
 
-    /// Vektor dari dokumentasi Shopee: contoh `sign` di halaman
-    /// "Signature generation". Kalau tes ini berubah, yang berubah adalah
-    /// algoritmanya -- bukan sesuatu yang boleh disesuaikan diam-diam.
+    /// Vektor dari dokumentasi Shopee ("Signature generation"); bila tes ini berubah, algoritmanya yang berubah dan tak boleh disesuaikan diam-diam.
     #[test]
     fn cocok_dengan_perhitungan_manual() {
         // HMAC-SHA256("rahasia", "1001141/api/v2/auth/token/get1610000000")
@@ -129,8 +109,7 @@ mod tests {
 
     #[test]
     fn tanda_tangan_toko_berbeda_dari_tanda_tangan_publik() {
-        // Bentuk yang tertukar adalah penyebab `error_sign` yang paling
-        // sering, dan pesannya tidak menyebut bagian mana yang keliru.
+        // Bentuk yang tertukar adalah penyebab `error_sign` paling sering dan pesannya tak menyebut bagian yang keliru.
         let publik = tanda_tangan_publik(
             "rahasia",
             1001141,
@@ -184,8 +163,7 @@ mod tests {
         );
     }
 
-    /// Bagian disambung tanpa pemisah, jadi pergeseran batas antar bagian
-    /// tidak boleh menghasilkan tanda tangan yang sama.
+    /// Bagian disambung tanpa pemisah, jadi pergeseran batas antar bagian tak boleh menghasilkan tanda tangan sama.
     #[test]
     fn batas_antar_bagian_tidak_ambigu() {
         let a = tanda_tangan_toko("k", 1, "/api/v2/x", 2, "ab", 3);

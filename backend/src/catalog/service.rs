@@ -1,10 +1,4 @@
-//! Logika pembuatan/penyuntingan produk, dipakai bersama HTTP handler
-//! (`routes.rs`) dan proses commit impor massal (`crate::import`).
-//!
-//! Dipisah dari `routes.rs` supaya jalur commit impor menulis produk lewat
-//! aturan yang SAMA PERSIS dengan form manual -- rakitan SKU, validasi
-//! harga/kategori, dan pencatatan batch awal lewat ledger stok -- bukan
-//! INSERT langsung yang mudah lupa satu dari semua itu.
+//! Logika buat/sunting produk dipakai bersama handler HTTP dan commit impor massal, agar impor memakai aturan SAMA (SKU, validasi harga/kategori, batch awal via ledger), bukan INSERT langsung.
 
 use super::repo::{self, NewBatch, NewProduct, Product};
 use super::sku;
@@ -14,10 +8,7 @@ use crate::AppState;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
-// `ProductPatch` didefinisikan di `repo` (privat ke modul `catalog`), tapi
-// pemanggil di luar `catalog` (proses commit impor massal) perlu
-// menyusunnya sendiri untuk memanggil `update_product` di bawah -- jadi
-// diekspor ulang lewat sini, satu-satunya pintu keluar `catalog::service`.
+// `ProductPatch` didefinisikan di `repo` (privat ke `catalog`) dan diekspor ulang di sini untuk impor massal, satu-satunya pintu keluar `catalog::service`.
 pub(crate) use super::repo::ProductPatch;
 use uuid::Uuid;
 
@@ -44,9 +35,7 @@ pub struct CreateProductInput {
     pub storage_location: Option<String>,
 }
 
-/// Membuat produk baru: rakit SKU, simpan produk, dan -- kalau ada stok
-/// awal -- catat batch pertamanya, semua dalam satu transaksi. Dipakai
-/// `routes::create_product` (form manual) dan proses commit impor massal.
+/// Membuat produk: rakit SKU, simpan, dan catat batch awal bila ada stok, semua satu transaksi (dipakai `routes::create_product` dan commit impor).
 pub(crate) async fn create_product(
     state: &AppState,
     created_by: Uuid,
@@ -61,9 +50,7 @@ pub(crate) async fn create_product(
         return Err(AppError::bad_request("Stok awal tidak boleh negatif."));
     }
 
-    // Varian menempel pada induk yang harus benar-benar ada, dan induk itu
-    // tidak boleh varian: katalog bertingkat-tingkat tidak punya wujud yang
-    // masuk akal di layar kasir maupun di marketplace.
+    // Varian menempel pada induk yang harus ada dan bukan varian, karena katalog bertingkat tak masuk akal di kasir maupun marketplace.
     if let Some(parent_id) = input.parent_id {
         let induk = ambil_produk(state, parent_id).await?;
         if induk.parent_id.is_some() {
@@ -95,9 +82,7 @@ pub(crate) async fn create_product(
 
     let batch_number = bersihkan(input.batch_number);
 
-    // Produk, batch pertamanya, dan baris ledger stok ditulis dalam satu
-    // transaksi: produk yang tersimpan tanpa stok awalnya akan tampil habis
-    // padahal barangnya ada di rak.
+    // Produk, batch pertama, dan baris ledger satu transaksi: produk tanpa stok awal akan tampil habis padahal barangnya ada.
     let mut tx = state.pool.begin().await?;
 
     let id = repo::insert_product(
@@ -144,10 +129,7 @@ pub(crate) async fn create_product(
     Ok(id)
 }
 
-/// Menyunting produk yang sudah ada. `patch` sudah harus lengkap (termasuk
-/// koreksi SKU eksplisit kalau ada -- lihat `routes::koreksi_sku`, yang
-/// TIDAK dipanggil dari sini karena impor massal tidak pernah menyentuh SKU
-/// produk yang sudah ada).
+/// Menyunting produk; `patch` harus lengkap, dan `routes::koreksi_sku` tak dipanggil dari sini karena impor tak pernah menyentuh SKU produk yang ada.
 pub(crate) async fn update_product(
     state: &AppState,
     id: Uuid,
@@ -176,9 +158,7 @@ pub(crate) async fn ambil_produk(state: &AppState, id: Uuid) -> AppResult<Produc
         .ok_or_else(|| AppError::not_found("Produk tidak ditemukan."))
 }
 
-/// Harga diperiksa di sini supaya pesannya menyebut marketplace mana yang
-/// salah. CHECK constraint di database tetap ada sebagai jaring terakhir,
-/// tapi galatnya tidak bisa menyebutkan itu.
+/// Harga diperiksa di sini agar pesannya menyebut marketplace mana yang salah; CHECK di database tetap jaring terakhir.
 pub(crate) fn periksa_harga(
     price: Decimal,
     price_shopee: Option<Decimal>,
@@ -198,9 +178,7 @@ pub(crate) fn periksa_harga(
     Ok(())
 }
 
-/// SKU untuk produk yang baru dibuat, dipastikan belum dipakai produk lain.
-/// Dipanggil sekali seumur produk: menyunting atribut tidak merakit ulang
-/// SKU-nya (lihat dokumentasi modul `sku`).
+/// SKU produk baru dipastikan belum dipakai, dipanggil sekali seumur produk (atribut yang disunting tak merakit ulang SKU, lihat modul `sku`).
 pub(crate) async fn rakit_sku(
     state: &AppState,
     brand_name: &Option<String>,
@@ -223,16 +201,12 @@ pub(crate) async fn rakit_sku(
     Ok(kode)
 }
 
-/// Menulis satu batch sekaligus menambah stoknya lewat ledger. Keduanya
-/// selalu terjadi bersama, jadi disatukan di sini supaya tidak ada pemanggil
-/// yang lupa salah satunya.
+/// Menulis batch sekaligus menambah stok lewat ledger, disatukan agar tak ada pemanggil yang lupa salah satunya.
 pub(crate) async fn catat_batch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     input: &NewBatch,
 ) -> AppResult<Uuid> {
-    // Batch lahir dengan sisa nol; `stock::tambah` yang menaikkannya ke
-    // `quantity`. Dengan begitu `remaining_qty` hanya punya satu penulis,
-    // dan baris ledger barang masuk menyebut batch mana yang datang.
+    // Batch lahir dengan sisa nol dan `stock::tambah` menaikkannya ke `quantity`, sehingga `remaining_qty` punya satu penulis dan ledger menyebut batch yang datang.
     let id = repo::insert_batch(tx, input).await?;
 
     stock::tambah(
@@ -251,10 +225,7 @@ pub(crate) async fn catat_batch(
     Ok(id)
 }
 
-/// Teks opsional dari form: spasi di tepi dibuang, dan yang tersisa kosong
-/// diperlakukan sebagai tidak diisi. Tanpa ini, field yang dikosongkan
-/// pengguna tersimpan sebagai string kosong dan tampil sebagai nilai yang
-/// "ada" tapi tidak menunjukkan apa pun.
+/// Teks opsional form: spasi tepi dibuang dan yang kosong dianggap tak diisi, agar tak tersimpan sebagai string kosong yang tampak "ada".
 pub(crate) fn bersihkan(nilai: Option<String>) -> Option<String> {
     nilai
         .map(|s| s.trim().to_string())

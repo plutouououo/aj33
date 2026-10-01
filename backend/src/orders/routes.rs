@@ -45,8 +45,7 @@ pub fn router() -> Router<AppState> {
 struct PlatformDto {
     #[serde(flatten)]
     status: PlatformStatus,
-    /// Kredensial aplikasi sudah diisi di server atau belum. Dipakai UI
-    /// untuk membedakan "belum dihubungkan" dari "belum bisa dihubungkan".
+    /// Apakah kredensial aplikasi sudah diisi di server, untuk membedakan "belum dihubungkan" dari "belum bisa dihubungkan".
     is_configured: bool,
 }
 
@@ -68,11 +67,7 @@ async fn list_platforms(
     ))
 }
 
-/// Apakah kredensial aplikasi untuk satu platform sudah diisi di server.
-///
-/// Platform yang belum punya adapter menjawab `false`, bukan panik: baris
-/// `platforms` untuk `tokopedia` dan `fakestore` memang boleh ada di
-/// database (CHECK constraint mengizinkannya) walaupun belum ada kodenya.
+/// Kredensial aplikasi satu platform sudah diisi; platform tanpa adapter menjawab `false`, bukan panik, karena baris `platforms` untuk `tokopedia` dan `fakestore` boleh ada (CHECK mengizinkan).
 fn kredensial_terisi(state: &AppState, platform_name: &str) -> bool {
     match platform_name {
         NAMA_PLATFORM => state.config.tiktok.is_configured(),
@@ -92,9 +87,7 @@ async fn connect_tiktok(State(state): State<AppState>, user: CurrentUser) -> App
         ));
     }
 
-    // `state` mengikat permintaan otorisasi ini dengan callback-nya. TikTok
-    // mengembalikannya apa adanya, jadi callback yang datang tanpa state
-    // yang kita kenali bisa ditolak.
+    // `state` mengikat permintaan otorisasi dengan callback-nya; TikTok mengembalikannya apa adanya sehingga callback tanpa state yang dikenal bisa ditolak.
     let state_token = Uuid::new_v4().to_string();
     let url = tiktok::auth::url_otorisasi(&state.config.tiktok, &state_token)?;
 
@@ -108,12 +101,7 @@ struct CallbackQuery {
     app_key: Option<String>,
 }
 
-/// Dipanggil browser Owner setelah menyetujui izin di Partner Center.
-///
-/// Tidak memakai extractor `CurrentUser`: yang mengarahkan ke sini adalah
-/// TikTok, dan cookie sesi aplikasi tidak ikut terbawa. Yang membuktikan
-/// permintaan ini sah adalah `auth_code` -- kode sekali pakai yang hanya
-/// bisa ditukar menjadi token oleh pemegang app secret.
+/// Dipanggil browser Owner setelah menyetujui di Partner Center; tak memakai `CurrentUser` karena yang mengarahkan TikTok (cookie sesi tak ikut), yang membuktikan sah adalah `auth_code` sekali pakai.
 async fn callback_tiktok(
     State(state): State<AppState>,
     Query(q): Query<CallbackQuery>,
@@ -165,19 +153,11 @@ async fn connect_shopee(State(state): State<AppState>, user: CurrentUser) -> App
 #[derive(Debug, Deserialize)]
 struct ShopeeCallbackQuery {
     code: Option<String>,
-    /// Shopee menyebut toko mana yang memberi izin sejak di callback.
-    /// Berbeda dari TikTok, yang tokonya baru diketahui setelah token di
-    /// tangan -- dan di sini nilainya WAJIB, karena ikut dikirim saat
-    /// menukar kode.
+    /// Shopee menyebut toko sejak callback (beda dari TikTok yang tokonya diketahui setelah token) dan nilainya wajib karena dikirim saat menukar kode.
     shop_id: Option<i64>,
 }
 
-/// Dipanggil browser Owner setelah menyetujui izin di Shopee.
-///
-/// Sama seperti callback TikTok, tidak memakai `CurrentUser`: yang
-/// mengarahkan ke sini adalah Shopee, dan yang membuktikan permintaan ini
-/// sah adalah `code` -- sekali pakai, dan hanya bisa ditukar menjadi token
-/// oleh pemegang partner key.
+/// Callback Owner dari Shopee tanpa `CurrentUser`; yang membuktikan sah adalah `code` sekali pakai yang hanya bisa ditukar pemegang partner key.
 async fn callback_shopee(
     State(state): State<AppState>,
     Query(q): Query<ShopeeCallbackQuery>,
@@ -226,17 +206,10 @@ struct SyncResult {
     dilewati: usize,
 }
 
-/// Berapa jam ke belakang yang ditarik kalau Owner tidak menyebutkan.
-/// Cukup lebar untuk menutup semalam mati listrik, cukup sempit supaya
-/// penarikan rutin tidak menyeret ribuan order lama.
+/// Jam ke belakang yang ditarik bila Owner tak menyebutkan: cukup lebar menutup semalam mati listrik, cukup sempit agar penarikan rutin tak menyeret ribuan order lama.
 const SYNC_JAM_DEFAULT: i64 = 24;
 
-/// Menarik order Shopee ke database.
-///
-/// Shopee tidak mendorong order lewat webhook seperti TikTok, jadi inilah
-/// satu-satunya jalan masuknya. Alurnya dua langkah karena memang begitu
-/// bentuk API-nya: `get_order_list` memberi nomor order, `get_order_detail`
-/// memberi isinya -- dan yang kedua hanya menerima 50 nomor sekali panggil.
+/// Menarik order Shopee ke database; Shopee tak mendorong lewat webhook sehingga ini satu-satunya jalan masuk, dua langkah (`get_order_list` nomor, `get_order_detail` isi, maksimum 50 per panggilan).
 async fn sync_shopee(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -265,9 +238,7 @@ async fn sync_shopee(
         shopee::auth::token_yang_berlaku(&state.pool, cfg, &state.config.token_encryption_key)
             .await?;
 
-    // Batas 15 hari milik Shopee ditegakkan di dalam `daftar_order`, jadi
-    // rentang yang terlalu lebar ditolak di sini dengan pesan yang menyebut
-    // batasnya -- bukan muncul sebagai `error_param` dari Shopee.
+    // Batas 15 hari Shopee ditegakkan di `daftar_order`, jadi rentang terlalu lebar ditolak di sini berpesan menyebut batas, bukan `error_param`.
     let nomor = shopee::client::daftar_order(
         cfg,
         &kredensial,
@@ -289,9 +260,7 @@ async fn sync_shopee(
             let order: shopee::ShopeeOrder = match serde_json::from_value(isi.clone()) {
                 Ok(order) => order,
                 Err(err) => {
-                    // Satu order yang bentuknya tidak dikenali tidak boleh
-                    // menggagalkan seluruh penarikan -- sisanya tetap masuk,
-                    // dan yang ini tercatat untuk diperiksa.
+                    // Satu order berbentuk tak dikenali tak boleh menggagalkan seluruh penarikan; sisanya masuk dan yang ini dicatat untuk diperiksa.
                     tracing::warn!(error = %err, "order Shopee dilewati: bentuknya tidak dikenali");
                     dilewati += 1;
                     continue;
@@ -339,19 +308,7 @@ struct WebhookData {
     order_id: Option<String>,
 }
 
-/// Menerima dorongan order dari TikTok Shop.
-///
-/// Tiga hal yang menentukan bentuk handler ini:
-///
-/// 1. **Tanda tangan diperiksa atas body MENTAH**, sebelum di-parse. Body
-///    yang sudah melewati serde bukan lagi byte yang ditandatangani -- kunci
-///    yang berbeda urutannya saja sudah menghasilkan tanda tangan berbeda.
-/// 2. **Jawabannya harus cepat.** Kalau kita lambat, TikTok menganggap
-///    pengiriman gagal. Karena tidak ada polling sebagai jaring pengaman,
-///    order yang dianggap gagal terkirim bisa hilang selamanya.
-/// 3. **Isi webhook tidak dipercaya sebagai sumber data.** Yang dibaca
-///    hanyalah id ordernya; detail lengkapnya diambil sendiri dari API
-///    TikTok dengan token kita.
+/// Webhook TikTok: tanda tangan diperiksa atas body MENTAH, jawaban harus cepat (tanpa polling), dan hanya id order yang dipercaya (detail diambil dari API).
 async fn webhook(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -374,9 +331,7 @@ async fn webhook(
         .unwrap_or_default();
 
     if !tiktok::signature::webhook_sah(&cfg.app_key, &cfg.app_secret, raw, signature) {
-        // Sengaja tidak menjelaskan bagian mana yang salah: pengirim yang
-        // sah tidak pernah butuh penjelasan itu, dan yang tidak sah tidak
-        // perlu dibantu menebak.
+        // Sengaja tak menjelaskan bagian yang salah: pengirim sah tak butuh, yang tak sah tak perlu dibantu menebak.
         tracing::warn!("webhook TikTok ditolak: tanda tangan tidak cocok");
         return Err(AppError::unauthorized("Tanda tangan webhook tidak sah."));
     }
@@ -385,8 +340,7 @@ async fn webhook(
         .map_err(|_| AppError::bad_request("Body webhook bukan JSON yang dikenali."))?;
 
     let Some(order_id) = parsed.data.and_then(|d| d.order_id) else {
-        // Webhook yang tidak membawa order (mis. event lain) tetap dijawab
-        // 200 supaya TikTok tidak mengirimnya ulang terus-menerus.
+        // Webhook tanpa order (mis. event lain) tetap dijawab 200 agar TikTok tak mengirim ulang terus-menerus.
         return Ok("ok");
     };
 
@@ -407,12 +361,7 @@ async fn webhook(
     Ok("ok")
 }
 
-/// Menyimpan satu order yang sudah dinormalkan.
-///
-/// Menerima `NormalizedOrder`, bukan JSON mentah: penerjemahan dari bentuk
-/// asli platform adalah urusan adapter, dan fungsi ini tidak boleh perlu
-/// tahu platform mana yang sedang bicara. `platform_name` hanya dipakai
-/// untuk mencari baris `platforms` yang benar.
+/// Menyimpan satu order ternormalkan (`NormalizedOrder`, bukan JSON mentah) karena penerjemahan urusan adapter; `platform_name` hanya untuk mencari baris `platforms`.
 async fn simpan_order(
     state: &AppState,
     platform_name: &str,

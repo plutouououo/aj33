@@ -10,20 +10,11 @@ const token = Astro.locals.token!;
 
 const { id } = Astro.params;
 
-// Daftar produk menitipkan saringannya lewat `?dari=`. Semua jalan keluar
-// halaman ini -- remah roti, tombol Kembali, dan pengalihan sesudah menyimpan
-// atau menghapus -- dirakit dari `dari` yang sama, jadi tidak ada di antaranya
-// yang membuang saringan yang tadi dipakai pengguna.
+// Daftar produk menitipkan saringan lewat `?dari=`; semua jalan keluar halaman ini (remah roti, Kembali, redirect) dirakit dari `dari` yang sama agar saringan tak hilang.
 const dari = Astro.url.searchParams.get('dari');
 const kembali = kembaliKeDaftar(dari);
 
-/**
- * Kabar keberhasilan tiap aksi. Dibaca dari URL, bukan dari keadaan POST yang
- * barusan jalan: setiap aksi di halaman ini berakhir dengan pengalihan, jadi
- * riwayat browser tidak pernah menyimpan hasil POST. Tanpa itu, tombol kembali
- * menawarkan kirim ulang -- dan menerimanya akan mencatat batch atau varian
- * kembar yang tidak pernah diminta.
- */
+/** Kabar keberhasilan dibaca dari URL karena tiap aksi berakhir redirect, sehingga tombol kembali tak menawarkan kirim ulang yang akan membuat batch atau varian kembar. */
 const PESAN: Record<string, string> = {
   varian: 'Varian ditambahkan.',
   batch: 'Batch dicatat dan stok bertambah.',
@@ -34,8 +25,7 @@ const PESAN: Record<string, string> = {
 
 let galat: string | null = null;
 const kodePesan = Astro.url.searchParams.get('pesan') ?? '';
-// Kodenya datang dari URL, jadi hanya kunci milik `PESAN` sendiri yang
-// dianggap -- `constructor` dan kerabatnya bukan kabar.
+// Kode dari URL hanya dianggap bila kunci milik `PESAN` sendiri (`constructor` dan kerabatnya bukan kabar).
 let sukses: string | null = Object.hasOwn(PESAN, kodePesan) ? PESAN[kodePesan] : null;
 
 /** Nilai teks dari form. Kosong berarti "kosongkan kolomnya", bukan "abaikan". */
@@ -43,11 +33,7 @@ function teks(form: FormData, kolom: string): string | null {
   return String(form.get(kolom) ?? '').trim() || null;
 }
 
-/**
- * Angka dari form. Kosong dikirim sebagai `null` supaya backend benar-benar
- * mengosongkan kolomnya — harga marketplace yang salah isi harus bisa
- * dikembalikan ke "belum diatur", bukan menempel selamanya.
- */
+/** Angka dari form; kosong dikirim `null` agar backend mengosongkan kolom dan harga marketplace salah isi bisa dikembalikan ke "belum diatur". */
 function angka(form: FormData, kolom: string): number | null {
   const mentah = String(form.get(kolom) ?? '').trim();
   if (!mentah) return null;
@@ -63,18 +49,11 @@ if (Astro.request.method === 'POST') {
 
   try {
     if (aksi === 'simpan') {
-      // SKU dibekukan saat produk dibuat, dan backend hanya menolak
-      // mengubahnya kalau produknya masih punya varian atau sudah terhubung
-      // ke listing marketplace -- lihat `koreksi_sku` di catalog/routes.rs.
-      // Kolomnya tetap hanya ikut terkirim kalau memang diketik berbeda,
-      // supaya menyimpan perubahan lain (mis. harga) tidak ikut memicu
-      // pemeriksaan SKU yang tidak relevan.
+      // SKU dibeku saat dibuat; backend hanya menolak mengubahnya bila punya varian atau listing (`koreksi_sku`), dan kolom hanya terkirim bila diketik berbeda.
       const skuBaru = teks(form, 'sku');
       const skuLama = teks(form, 'sku_lama');
 
-      // Foto punya tiga keadaan, dan `image_url` di backend memang dibuat
-      // untuk membedakannya: tidak disebut berarti biarkan, `null` berarti
-      // kosongkan, teks berarti ganti. Lihat `Ubah` di catalog/repo.rs.
+      // Foto punya tiga keadaan di `image_url` backend: tak disebut = biarkan, `null` = kosongkan, teks = ganti (lihat `Ubah` di catalog/repo.rs).
       const berkas = form.get('foto');
       const fotoBaru = berkas instanceof File && berkas.size > 0 ? berkas : null;
       const dihapus = form.get('hapus_foto') === '1';
@@ -83,9 +62,7 @@ if (Astro.request.method === 'POST') {
       if (fotoBaru) image_url = await unggahFoto(fotoBaru);
       else if (dihapus) image_url = null;
 
-      // Foto lama dibaca sebelum PATCH, dibuang sesudahnya -- membuangnya
-      // lebih dulu berarti PATCH yang gagal meninggalkan produk yang
-      // menunjuk blob yang sudah tidak ada.
+      // Foto lama dibaca sebelum PATCH dan dibuang sesudahnya, karena membuang lebih dulu membuat PATCH gagal meninggalkan produk yang menunjuk blob hilang.
       const fotoLama = teks(form, 'foto_lama');
 
       await api(`/products/${id}`, {
@@ -112,10 +89,7 @@ if (Astro.request.method === 'POST') {
       if (image_url !== undefined && fotoLama && fotoLama !== image_url) {
         await hapusFoto(fotoLama);
       }
-      // Menyimpan data produk mengakhiri pekerjaan di halaman ini, jadi
-      // jalan keluarnya sama dengan tombol Kembali: daftar produk, saringan
-      // utuh. Aksi lain di halaman ini (varian, batch, koreksi stok) tetap
-      // tinggal di sini -- pengguna biasanya menjalankan beberapa berurutan.
+      // Menyimpan data produk mengakhiri pekerjaan di halaman ini sehingga keluar ke daftar dengan saringan utuh; aksi lain (varian, batch, koreksi stok) tetap di sini karena biasa berurutan.
       return Astro.redirect(kembaliKeDaftar(dari, 'simpan'), 303);
     } else if (aksi === 'hapus') {
       await api(`/products/${id}`, { method: 'DELETE', token });
@@ -165,10 +139,7 @@ if (Astro.request.method === 'POST') {
       });
       berhasil = 'batch';
     } else if (aksi === 'ubah-batch') {
-      // Ketiganya SELALU ikut terkirim, termasuk saat kosong: `null` di sini
-      // berarti "kosongkan", dan itu memang yang diminta pengguna yang
-      // menghapus isi kolomnya. Jumlah batch sengaja tidak ada di sini --
-      // ia menggerakkan stok, dan stok hanya berubah lewat ledger.
+      // Ketiganya selalu terkirim termasuk kosong (`null` = kosongkan); jumlah batch tak ada di sini karena menggerakkan stok yang hanya berubah lewat ledger.
       await api(`/products/${id}/batches/${form.get('batch_id')}`, {
         method: 'PATCH',
         token,
@@ -205,8 +176,7 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-// Dibaca setelah aksi selesai, jadi yang tampil selalu keadaan terakhir --
-// termasuk ketika aksinya gagal dan tidak ada yang berubah.
+// Dibaca setelah aksi selesai agar selalu keadaan terakhir, termasuk saat aksinya gagal.
 let produk: ProductDetail | null = null;
 try {
   produk = await api<ProductDetail>(`/products/${id}`, { token });
@@ -225,8 +195,7 @@ const induk = produk?.parent_id
   ? await api<ProductDetail>(`/products/${produk.parent_id}`, { token })
   : null;
 
-// Bagian yang benar-benar ada di halaman ini. Varian tidak punya sub-varian,
-// jadi tabnya ikut menyesuaikan.
+// Bagian yang ada di halaman ini; varian tak punya sub-varian sehingga tabnya menyesuaikan.
 const BAGIAN = [
   { id: 'data', judul: 'Data Produk' },
   ...(produk && !produk.parent_id ? [{ id: 'varian', judul: 'Varian' }] : []),
@@ -278,8 +247,7 @@ const DEKAT_KEDALUWARSA = 30;
             </div>
 
             {/* id dipakai tombol simpan di bilah lengket lewat atribut form=. */}
-            {/* `multipart/form-data` wajib begitu ada isian berkas: dengan
-                enctype bawaan, yang sampai ke server hanya nama berkasnya. */}
+            {/* `multipart/form-data` wajib untuk isian berkas; dengan enctype bawaan yang sampai ke server hanya nama berkasnya. */}
             <form
               method="POST"
               id="borang-produk"
@@ -371,9 +339,7 @@ const DEKAT_KEDALUWARSA = 30;
                   {MEREK.map((m) => (
                     <option value={m} selected={produk!.brand_name === m}>{m}</option>
                   ))}
-                  {/* Merek di luar daftar bisa datang dari impor marketplace.
-                      Tetap ditampilkan supaya menyimpan perubahan lain tidak
-                      diam-diam menghapusnya. */}
+                  {/* Merek di luar daftar bisa datang dari impor marketplace; tetap ditampilkan agar menyimpan perubahan lain tak menghapusnya diam-diam. */}
                   {produk.brand_name && !MEREK.includes(produk.brand_name as (typeof MEREK)[number]) && (
                     <option value={produk.brand_name} selected>
                       {produk.brand_name} (di luar daftar)
@@ -402,11 +368,7 @@ const DEKAT_KEDALUWARSA = 30;
                   value={produk.sku ?? ''}
                   placeholder="mis. CBSB-AFC-2KG"
                 />
-                {/*
-                  Nilai lama dibawa diam-diam supaya halaman bisa tahu SKU-nya
-                  benar-benar diketik berbeda, bukan sekadar ikut terkirim
-                  bersama isian lain.
-                */}
+                {/* Nilai lama dibawa diam-diam agar halaman tahu SKU benar-benar diketik berbeda, bukan sekadar ikut terkirim. */}
                 <input type="hidden" name="sku_lama" value={produk.sku ?? ''} />
               </div>
 
@@ -529,10 +491,7 @@ const DEKAT_KEDALUWARSA = 30;
 
                 <form method="POST" class="borang-tegak mt-4" enctype="multipart/form-data">
                   <input type="hidden" name="aksi" value="varian" />
-                  {/* Atribut yang sama untuk semua varian diwariskan dari induk
-                      lewat nilai tersembunyi ini, supaya tidak perlu diketik
-                      ulang tiap kali. SKU varian sendiri tidak dirakit dari
-                      sini melainkan dari SKU induknya -- lihat `catalog::sku`. */}
+                  {/* Atribut sama untuk semua varian diwarisi dari induk lewat nilai tersembunyi; SKU varian dirakit dari SKU induk (`catalog::sku`). */}
                   <input type="hidden" name="brand_name" value={produk.brand_name ?? ''} />
                   <input type="hidden" name="product_type" value={produk.product_type ?? ''} />
                   <input type="hidden" name="category_id" value={produk.category_id ?? ''} />
@@ -688,25 +647,12 @@ const DEKAT_KEDALUWARSA = 30;
                     </thead>
                     <tbody>
                       {produk.batches.map((b) => {
-                        // Batch yang sudah habis tidak disorot merah: tidak
-                        // ada barangnya lagi yang bisa kedaluwarsa.
+                        // Batch yang sudah habis tak disorot merah karena tak ada barang yang bisa kedaluwarsa.
                         const dekat =
                           b.remaining_qty > 0 &&
                           b.expiry_date !== null &&
                           DEKAT_KEDALUWARSA >= sisaHari(b.expiry_date);
-                        // Satu form untuk seluruh keterangan kiriman ini,
-                        // bukan satu form per kolom: ketiganya dibaca bersama
-                        // saat memeriksa barang di rak, dan tiga tombol
-                        // "Simpan" sebaris membuat orang menyimpan satu
-                        // koreksi lalu mengira dua lainnya ikut tersimpan.
-                        //
-                        // Formnya kosong dan diletakkan di sel pertama;
-                        // kolom-kolomnya menunjuk ke sana lewat atribut
-                        // form=. <form> tidak boleh jadi anak <tr>, jadi
-                        // membungkus barisnya bukan pilihan.
-                        //
-                        // Jumlah masuk sengaja tidak ikut -- ia menggerakkan
-                        // stok, dan stok hanya berubah lewat ledger.
+                        // Satu form untuk seluruh keterangan kiriman agar tak ada yang mengira koreksi lain ikut tersimpan; kolom menunjuk form lewat `form=` karena `<form>` tak boleh anak `<tr>`; jumlah masuk tak ikut.
                         const borang = `batch-${b.id}`;
                         return (
                           <tr>
@@ -718,9 +664,7 @@ const DEKAT_KEDALUWARSA = 30;
                               </form>
                             </td>
                             <td class="sel-angka text-[var(--color-teks-lembut)]">{b.quantity}</td>
-                            {/* Sisa nol berarti batch ini sudah habis keluar.
-                                Barisnya tetap ditampilkan -- ia riwayat
-                                kiriman, bukan hanya penampung stok. */}
+                            {/* Sisa nol berarti batch habis keluar; barisnya tetap tampil sebagai riwayat kiriman. */}
                             <td class="sel-angka">
                               {b.remaining_qty === 0 ? (
                                 <span class="text-[var(--color-teks-samar)]">habis</span>
@@ -728,10 +672,7 @@ const DEKAT_KEDALUWARSA = 30;
                                 <span class="font-semibold">{b.remaining_qty}</span>
                               )}
                             </td>
-                            {/* Batch yang sudah ada sebelum kolom harga beli
-                                lahir tidak punya harga sama sekali, dan tanpa
-                                jalan ini laporan laba akan selamanya
-                                menghitungnya nol. */}
+                            {/* Batch lama sebelum kolom harga beli ada tak punya harga, dan tanpa jalan ini laporan laba menghitungnya nol selamanya. */}
                             <td class="text-right">
                               <label class="sr-only" for={`hb_${b.id}`}>
                                 Harga beli batch {b.batch_number ?? ''}
@@ -748,11 +689,7 @@ const DEKAT_KEDALUWARSA = 30;
                                 placeholder="—"
                               />
                             </td>
-                            {/* Tanggal yang salah ketik bukan cuma angka yang
-                                jelek di layar: ia menentukan urutan FEFO dan
-                                menyalakan peringatan merah di daftar produk.
-                                Dikosongkan berarti barangnya memang tidak
-                                punya kedaluwarsa. */}
+                            {/* Tanggal kedaluwarsa menentukan urutan FEFO dan peringatan merah di daftar; dikosongkan berarti barangnya tak punya kedaluwarsa. */}
                             <td>
                               <label class="sr-only" for={`exp_${b.id}`}>
                                 Kedaluwarsa batch {b.batch_number ?? ''}
@@ -769,10 +706,7 @@ const DEKAT_KEDALUWARSA = 30;
                                 value={b.expiry_date ?? ''}
                               />
                             </td>
-                            {/* Barang memang dipindah antar rak. Lokasi yang
-                                tidak bisa dikoreksi jadi petunjuk yang salah
-                                dalam hitungan minggu, dan pengepak terlanjur
-                                percaya padanya. */}
+                            {/* Lokasi harus bisa dikoreksi karena barang dipindah antar rak, dan lokasi usang menyesatkan pengepak. */}
                             <td>
                               <label class="sr-only" for={`lok_${b.id}`}>
                                 Lokasi batch {b.batch_number ?? ''}
@@ -894,10 +828,7 @@ const DEKAT_KEDALUWARSA = 30;
           </section>
         </div>
 
-        {/* Di LUAR semua form: satu bilah tidak bisa mengirim lima form
-            sekaligus, jadi tombolnya menunjuk form "Data produk" lewat
-            atribut form=. Labelnya menyebut "produk" supaya orang yang sedang
-            di bagian Batch tidak mengira tombol ini menyimpan batch. */}
+        {/* Di luar semua form: satu bilah tak bisa mengirim lima form, jadi tombol menunjuk form "Data produk" lewat `form=`, dengan label "produk" agar tak disangka menyimpan batch. */}
         <div class="bilah-aksi">
           <a class="tombol-halus flex-1 text-center sm:flex-none" href={kembali}>Kembali</a>
           <button

@@ -53,8 +53,7 @@ async fn create_ticket(
 #[derive(Debug, Deserialize)]
 struct TicketListQuery {
     status: Option<String>,
-    /// `mine=true` menyaring ke tiket milik sendiri -- inilah tampilan
-    /// utama layar pengepak.
+    /// `mine=true` menyaring ke tiket sendiri, tampilan utama layar pengepak.
     #[serde(default)]
     mine: bool,
 }
@@ -67,8 +66,7 @@ async fn list_tickets(
     user.require(&[Role::Owner, Role::Pengepak])?;
 
     let status = match q.status.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        // Divalidasi lebih dulu supaya status yang salah tulis menghasilkan
-        // pesan jelas, bukan daftar kosong yang membingungkan.
+        // Divalidasi dulu agar status salah tulis menghasilkan pesan jelas, bukan daftar kosong membingungkan.
         Some(raw) => Some(TicketStatus::parse(raw)?.as_str()),
         None => None,
     };
@@ -83,9 +81,7 @@ async fn list_tickets(
     Ok(Json(rows))
 }
 
-/// Pengepak boleh membaca tiket mana pun, termasuk yang belum ditugaskan --
-/// dari situlah dia memutuskan mau mengambil yang mana. Yang dibatasi
-/// pemiliknya adalah mengubah tiket, bukan melihatnya.
+/// Pengepak boleh membaca tiket mana pun (termasuk belum ditugaskan, untuk memilih yang diambil); yang dibatasi pemiliknya adalah mengubah, bukan melihat.
 async fn get_ticket(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -155,12 +151,7 @@ async fn set_item(
     Ok(Json(muat(&state, id).await?))
 }
 
-/// Tiap perubahan menjawab dengan tiket utuh yang baru.
-///
-/// Layar packing dipakai sambil memegang barang: satu jawaban yang sudah
-/// berisi keadaan terbaru menghemat satu bolak-balik jaringan, dan yang
-/// lebih penting, menghilangkan kemungkinan layar menampilkan keadaan lama
-/// karena permintaan kedua gagal.
+/// Tiap perubahan menjawab tiket utuh baru: layar packing dipakai sambil memegang barang, jadi satu jawaban menghemat bolak-balik jaringan dan mencegah layar menampilkan keadaan lama.
 async fn muat(state: &AppState, id: Uuid) -> AppResult<Ticket> {
     repo::find(&state.pool, id)
         .await?

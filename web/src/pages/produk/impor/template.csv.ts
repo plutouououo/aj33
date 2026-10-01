@@ -1,10 +1,4 @@
-/**
- * Template CSV untuk impor produk massal -- header + beberapa baris contoh.
- *
- * Statis (tidak memanggil backend), tapi tetap dijaga sesi seperti
- * `laporan/ekspor.csv.ts`: path mengandung titik jadi middleware
- * melewatkannya, `Astro.locals.user` tidak terisi di sini.
- */
+/** Template CSV impor statis (tanpa backend) tapi dijaga sesi seperti `ekspor.csv.ts`. */
 import type { APIRoute } from 'astro';
 import { ambilToken } from '../../../lib/session';
 

@@ -1,16 +1,4 @@
-//! Impor produk massal: upload -> staging -> review -> submit -> approve ->
-//! commit di background -> retry.
-//!
-//! ```text
-//! draft --submit--> pending_review --approve--> committing --selesai(worker)--> committed
-//!   \-- cancel (dari draft/pending_review/approved) --> cancelled
-//! committed --retry (fail_count>0)--> committing
-//! ```
-//!
-//! `approved` divalidasi sebagai langkah antara (submit lompat status
-//! ditolak persis di situ), tapi TIDAK pernah tertulis sebagai status yang
-//! bertahan -- `approve` langsung menuliskan `committing` karena worker
-//! langsung mengambilnya begitu disetujui. Lihat `service::approve`.
+//! Impor massal: upload → review → submit → approve → commit di background → retry; `approve` langsung menulis `committing` karena worker mengambilnya (lihat `service::approve`).
 
 pub mod parse;
 mod reader;
@@ -60,9 +48,7 @@ impl ImportStatus {
         }
     }
 
-    /// Langkah MAJU yang sah dari status ini. Retry (`committed` ->
-    /// `committing`) BUKAN "maju" linear -- lihat `boleh_diulang`, dipisah
-    /// karena syaratnya (`fail_count > 0`) bukan urusan enum ini.
+    /// Langkah maju sah dari status ini; retry (`committed` → `committing`) bukan maju linear dan dipisah di `boleh_diulang` karena syaratnya (`fail_count > 0`) bukan urusan enum.
     fn lanjutan(self) -> Option<Self> {
         match self {
             Self::Draft => Some(Self::PendingReview),
@@ -73,8 +59,7 @@ impl ImportStatus {
         }
     }
 
-    /// Memeriksa perpindahan status yang diminta -- pola sama dengan
-    /// `tickets::TicketStatus::pindah_ke`.
+    /// Memeriksa perpindahan status, pola sama dengan `tickets::TicketStatus::pindah_ke`.
     pub fn pindah_ke(self, tujuan: Self) -> AppResult<()> {
         if self.lanjutan() == Some(tujuan) {
             return Ok(());

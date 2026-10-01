@@ -7,8 +7,7 @@ import { GagalUnggah, unggahFoto } from '../../lib/blob';
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
 
-// Saringan daftar yang dititipkan lewat `?dari=`, diteruskan sampai halaman
-// rincian supaya tombol Kembali di sana tetap mendarat di daftar yang sama.
+// Saringan daftar dititipkan lewat `?dari=` dan diteruskan ke halaman rincian agar Kembali mendarat di daftar yang sama.
 const dari = Astro.url.searchParams.get('dari');
 const kembali = kembaliKeDaftar(dari);
 
@@ -27,9 +26,7 @@ if (Astro.request.method === 'POST') {
   const harga = Number(form.get('price'));
   const stok = Number(form.get('stock_qty') ?? 0);
 
-  // Harga marketplace boleh dikosongkan: kosong berarti "belum diatur, pakai
-  // harga dasar". Dikirim sebagai undefined, bukan 0 -- 0 berarti gratis, dan
-  // produk gratis di marketplace adalah kerugian langsung.
+  // Harga marketplace boleh kosong (= belum diatur, pakai harga dasar) dan dikirim `undefined`, bukan 0 karena 0 berarti gratis dan merugikan.
   const angkaOpsional = (kolom: string): number | undefined => {
     const mentah = teks(kolom);
     if (!mentah) return undefined;
@@ -40,8 +37,7 @@ if (Astro.request.method === 'POST') {
   const hargaTiktok = angkaOpsional('price_tiktok');
   const hargaBeliBatch = angkaOpsional('purchase_price');
 
-  // Kosong kalau tidak ada foto yang dipilih; peramban tetap mengirim bagian
-  // file-nya, hanya dengan nol byte.
+  // Kosong bila tak ada foto dipilih; peramban tetap mengirim bagian file dengan nol byte.
   const foto = form.get('foto');
   const adaFoto = foto instanceof File && foto.size > 0;
 
@@ -53,11 +49,7 @@ if (Astro.request.method === 'POST') {
     galat = 'Harga marketplace tidak boleh negatif.';
   } else {
     try {
-      // Foto diunggah sesudah seluruh isian lolos, bukan sebelumnya: isian
-      // <input type="file"> tidak bisa diisi ulang dari server, jadi satu
-      // galat validasi selalu berarti pengguna memilih fotonya lagi -- dan
-      // yang terlanjur naik ke Azure akan jadi blob yatim yang tidak pernah
-      // dirujuk baris mana pun.
+      // Foto diunggah setelah semua isian lolos karena `<input type="file">` tak bisa diisi ulang server dan yang terlanjur naik ke Azure jadi blob yatim.
       const image_url = adaFoto ? await unggahFoto(foto) : undefined;
 
       await api<Product>('/products', {
@@ -84,10 +76,7 @@ if (Astro.request.method === 'POST') {
         },
       });
 
-      // POST/redirect/GET ke daftar produk. Dua sebabnya: me-refresh halaman
-      // hasil tidak bisa membuat produk kedua, dan pengguna mendarat kembali
-      // di daftar -- dengan saringan yang sama seperti saat ia berangkat --
-      // tempat produk barunya langsung terlihat di antara yang lain.
+      // POST/redirect/GET ke daftar produk agar refresh tak membuat produk kedua dan pengguna mendarat di daftar dengan saringan yang sama.
       return Astro.redirect(kembaliKeDaftar(dari, 'dibuat'), 303);
     } catch (err) {
       galat =
@@ -98,18 +87,13 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-/**
- * Nilai satu isian. Setelah POST gagal diambil dari yang barusan dikirim,
- * supaya satu galat validasi tidak menghapus belasan isian yang sudah
- * diketik.
- */
+/** Nilai satu isian diambil dari yang barusan dikirim setelah POST gagal, agar satu galat validasi tak menghapus isian lain. */
 const isi = (kolom: string, baku = ''): string =>
   terkirim ? String(terkirim.get(kolom) ?? '') : baku;
 
 const kategori = await api<Category[]>('/categories', { token });
 
-// Satu larik menyetir bilah tab DAN judul tiap bagian, jadi keduanya tidak
-// bisa lepas sinkron.
+// Satu larik menyetir bilah tab dan judul bagian agar tak lepas sinkron.
 const BAGIAN = [
   { id: 'informasi', judul: 'Informasi Produk' },
   { id: 'atribut', judul: 'Atribut & SKU' },
@@ -127,18 +111,14 @@ const BAGIAN = [
 
   {galat && <p class="galat mb-4" role="alert">{galat}</p>}
 
-  {/* Tautan lompat, bukan panel yang saling menyembunyikan: seluruh bagian
-      tetap terlihat saat digulir. Sengaja tanpa penanda "tab aktif" -- CSS
-      tidak pernah tahu posisi gulir, dan penanda yang mengikuti klik terakhir
-      akan menunjuk bagian yang salah begitu pengguna menggulir sendiri. */}
+  {/* Tautan lompat, bukan panel yang saling menyembunyikan; sengaja tanpa penanda "tab aktif" karena CSS tak tahu posisi gulir dan penanda akan menunjuk bagian yang salah. */}
   <nav class="bilah-tab" aria-label="Bagian formulir">
     {BAGIAN.map((b) => (
       <a class="tab-bagian" href={`#${b.id}`}>{b.judul}</a>
     ))}
   </nav>
 
-  {/* `multipart/form-data` wajib begitu ada isian berkas: dengan enctype
-      bawaan, yang sampai ke server hanya nama berkasnya, bukan isinya. */}
+  {/* `multipart/form-data` wajib untuk isian berkas; dengan enctype bawaan yang sampai ke server hanya nama berkasnya. */}
   <form method="POST" enctype="multipart/form-data" class="flex flex-col gap-5">
     <section id="informasi" class="kartu sasaran-bagian" aria-labelledby="j-informasi">
       <h2 id="j-informasi" class="mb-4 font-semibold">Informasi Produk</h2>

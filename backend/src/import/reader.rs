@@ -1,6 +1,4 @@
-//! Membaca .xlsx (`calamine`) atau .csv (`csv`) jadi header + baris teks
-//! mentah. Hanya SHEET PERTAMA untuk xlsx -- tidak ada dukungan multi-sheet
-//! (lihat "Yang sengaja tidak dibuat" di rencana fitur ini).
+//! Membaca .xlsx (`calamine`) atau .csv (`csv`) jadi header dan baris teks mentah; hanya sheet pertama xlsx (tak ada multi-sheet).
 
 use crate::error::{AppError, AppResult};
 use calamine::{Data, Reader, Xlsx};
@@ -34,10 +32,7 @@ pub fn baca_xlsx(bytes: &[u8]) -> AppResult<(Vec<String>, Vec<Vec<String>>)> {
     Ok((header, baris))
 }
 
-/// Sel angka bulat (mis. harga 204795) diformat TANPA ".0" -- kalau tidak,
-/// setiap harga yang kebetulan bulat akan tersimpan sebagai "204795.0" dan
-/// `parse_money` harus menebak-nebak. Selain float bulat, dipakai apa adanya
-/// lewat `Display` bawaan `calamine::Data`.
+/// Sel angka bulat (mis. 204795) diformat tanpa ".0" agar tak tersimpan "204795.0" dan `parse_money` tak menebak; selain itu `Display` bawaan `calamine::Data`.
 fn sel_ke_teks(sel: &Data) -> String {
     match sel {
         Data::Empty => String::new(),

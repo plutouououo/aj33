@@ -1,17 +1,4 @@
-//! Otorisasi toko Shopee dan penyimpanan tokennya.
-//!
-//! Alurnya: Owner membuka halaman otorisasi Shopee, menyetujui, lalu Shopee
-//! mengarahkan balik ke `redirect_uri` dengan `code` DAN `shop_id`. Berbeda
-//! dari TikTok yang tokonya baru diketahui setelah token di tangan, di sini
-//! Shopee sudah menyebut toko mana sejak di callback -- `shop_id` itu wajib
-//! ikut dikirim saat menukar kode, jadi callback tanpa `shop_id` tidak bisa
-//! diselamatkan.
-//!
-//! Satu hal yang menentukan bentuk kode di sini: refresh token Shopee HANYA
-//! BISA DIPAKAI SEKALI. Tiap perpanjangan mengembalikan refresh token baru,
-//! dan yang lama langsung mati. Karena itu hasil perpanjangan harus selalu
-//! disimpan -- kalau gagal disimpan, koneksi toko putus dan Owner harus
-//! menghubungkan ulang secara manual.
+//! Otorisasi toko Shopee: callback membawa `code` dan `shop_id` (wajib); refresh token sekali pakai, jadi hasil perpanjangan harus selalu disimpan.
 
 use super::client;
 use super::NAMA_PLATFORM;
@@ -54,10 +41,7 @@ struct TokenBaru {
     kedaluwarsa: DateTime<Utc>,
 }
 
-/// URL yang dibuka Owner untuk mengizinkan aplikasi mengakses tokonya.
-///
-/// Tidak perlu ditandatangani: halaman ini hanya form persetujuan, dan yang
-/// membuktikan persetujuan itu sah adalah `code` yang kembali sesudahnya.
+/// URL otorisasi untuk Owner tak perlu ditandatangani karena hanya form persetujuan; yang membuktikan sahnya adalah `code` yang kembali.
 pub fn url_otorisasi(cfg: &ShopeeConfig, state: &str) -> AppResult<String> {
     if cfg.auth_url.is_empty() || cfg.redirect_uri.is_empty() {
         return Err(AppError::bad_request(
@@ -107,8 +91,7 @@ pub async fn tukar_kode_dengan_token(
     Ok(baru.kedaluwarsa)
 }
 
-/// Mengambil kredensial siap pakai, memperbaruinya lebih dulu kalau sudah
-/// mendekati kedaluwarsa.
+/// Mengambil kredensial siap pakai, memperbaruinya dulu bila mendekati kedaluwarsa.
 pub async fn token_yang_berlaku(
     pool: &PgPool,
     cfg: &ShopeeConfig,
@@ -149,8 +132,7 @@ async fn perbarui_token(
     )
     .await?;
 
-    // Refresh token Shopee sekali pakai: begitu permintaan di atas berhasil,
-    // yang lama sudah mati. Menyimpan hasilnya bukan langkah opsional.
+    // Refresh token Shopee sekali pakai: setelah permintaan berhasil yang lama mati, jadi menyimpan hasilnya wajib.
     token::simpan(
         pool,
         kunci_enkripsi,
@@ -168,8 +150,7 @@ async fn perbarui_token(
     })
 }
 
-/// Memanggil endpoint token. Keduanya publik: ditandatangani tanpa access
-/// token dan tanpa shop id, karena memang belum ada keduanya.
+/// Endpoint token publik: ditandatangani tanpa access token dan shop id karena belum ada keduanya.
 async fn minta_token(
     cfg: &ShopeeConfig,
     path: &str,
@@ -192,8 +173,7 @@ async fn minta_token(
         AppError::bad_request("Jawaban dari Shopee tidak dikenali.")
     })?;
 
-    // Shopee menandai sukses dengan `error` yang kosong, bukan dengan kode
-    // angka seperti TikTok.
+    // Shopee menandai sukses dengan `error` kosong, bukan kode angka seperti TikTok.
     if !body.error.is_empty() {
         return Err(AppError::bad_request(format!(
             "Shopee menolak permintaan token: {} ({})",
@@ -216,19 +196,7 @@ async fn minta_token(
     })
 }
 
-/// Menerjemahkan `expire_in` menjadi waktu kedaluwarsa.
-///
-/// PERHATIAN: dokumentasi Shopee tidak konsisten di sini. Contoh jawaban
-/// `refresh_access_token` memberi `14400` -- jelas lama dalam detik (4 jam,
-/// masa berlaku access token Shopee). Contoh `get_access_token` memberi
-/// `1767001812` -- itu epoch, bukan durasi.
-///
-/// Karena itu nilainya dibedakan lewat besarannya, bukan ditebak: apa pun
-/// yang di atas ambang ini tidak mungkin sebuah durasi (satu miliar detik
-/// lebih dari 30 tahun), jadi pasti epoch. Menebak salah arah berakibat
-/// nyata -- menganggap epoch sebagai durasi menaruh kedaluwarsa puluhan
-/// tahun ke depan, dan token tidak pernah diperbarui sampai request mulai
-/// ditolak tanpa sebab yang jelas.
+/// `expire_in` dibedakan lewat besarannya (dokumentasi Shopee tak konsisten: durasi 14400 vs epoch); di atas ambang berarti epoch, kalau salah token tak pernah diperbarui.
 fn kedaluwarsa_dari(expire_in: i64, sekarang: DateTime<Utc>) -> DateTime<Utc> {
     const AMBANG_EPOCH: i64 = 1_000_000_000;
 
@@ -239,8 +207,7 @@ fn kedaluwarsa_dari(expire_in: i64, sekarang: DateTime<Utc>) -> DateTime<Utc> {
     }
 }
 
-/// `shop_id_external` disimpan sebagai teks karena kolomnya dipakai bersama
-/// platform lain yang identitas tokonya bukan angka.
+/// `shop_id_external` disimpan sebagai teks karena kolomnya dipakai platform lain yang identitas tokonya bukan angka.
 fn parse_shop_id(raw: &str) -> AppResult<i64> {
     raw.trim().parse().map_err(|_| {
         tracing::error!(shop_ref = raw, "shop_id Shopee tersimpan bukan angka");
@@ -275,8 +242,7 @@ mod tests {
 
     #[test]
     fn redirect_uri_di_escape() {
-        // Kalau tidak di-escape, `:` dan `/` memotong query string dan
-        // Shopee mengembalikan Owner ke alamat yang salah.
+        // Tanpa di-escape, `:` dan `/` memotong query string dan Shopee mengembalikan Owner ke alamat yang salah.
         let url = url_otorisasi(&cfg(), "s").unwrap();
         assert!(
             url.contains("redirect_uri=https%3A%2F%2Faj33.test%2Fplatforms%2Fshopee%2Fcallback")

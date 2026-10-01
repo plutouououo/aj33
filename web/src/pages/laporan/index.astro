@@ -33,9 +33,7 @@ const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.c
 const { summary, previous_summary, trend, expense_breakdown, top_products, sales, stock_value } =
   laporan;
 
-// Skala grafik. Satu skala untuk omzet dan beban sekaligus supaya tinggi
-// batang keduanya bisa dibandingkan langsung; kalau masing-masing punya
-// skalanya sendiri, beban kecil terlihat setinggi omzet besar.
+// Satu skala grafik untuk omzet dan beban agar tinggi batang keduanya bisa dibandingkan langsung.
 const puncak = Math.max(1, ...trend.map((t) => Math.max(t.revenue, t.expenses)));
 
 const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
@@ -59,10 +57,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
 ---
 
 <AppShell judul="Laporan Penjualan" user={user}>
-  {/* Saringan dikirim sebagai GET biasa, jadi keadaan laporan selalu ada di
-      URL -- bisa di-bookmark, dibagikan, dan tombol kembali bekerja. Tombol
-      ekspor membaca saringan dari URL yang sama, jadi berkas yang diunduh
-      tidak pernah berisi periode lain dari yang terlihat di layar. */}
+  {/* Saringan dikirim sebagai GET agar keadaan laporan ada di URL (bisa di-bookmark, dibagikan) dan tombol ekspor membaca periode yang sama. */}
   <form
     method="GET"
     id="saringan"
@@ -110,12 +105,8 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     </div>
   </form>
 
-  {/* Ikon dan pil naik/turun di atas hanya perbandingan arah, bukan
-      penilaian baik/buruk -- "Harga Pokok naik" bukan berarti buruk kalau
-      omzetnya ikut naik lebih banyak. Pil disembunyikan sama sekali kalau
-      saringan "Seluruh Waktu" (tidak ada periode sebelumnya untuk
-      dibandingkan) -- lihat `previous_summary` di backend. */}
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+  {/* Pil naik/turun hanya perbandingan arah, bukan penilaian baik/buruk; disembunyikan untuk "Seluruh Waktu" karena tak ada periode sebelumnya (lihat `previous_summary` di backend). */}
+  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
     <div class="kartu-angka bg-merah-600 text-white">
       <div class="flex items-start justify-between gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15">
@@ -177,11 +168,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <span class="kartu-angka-bantu">Marjin kotor {marjin.toFixed(1)}%</span>
     </div>
 
-    {/* Omzet Shopee di atas masih angka KOTOR -- sama seperti di struk.
-        Potongan ini (komisi + layanan + PPh 0,5% + Rp1.250 per TRANSAKSI
-        Shopee, bukan per barang) adalah bagian yang tidak pernah cair ke
-        toko, dan sudah dikurangkan dari kartu Laba di atas. Kartu ini hanya
-        menjelaskan dari mana selisihnya berasal. */}
+    {/* Omzet Shopee di atas masih kotor seperti di struk; potongannya sudah dikurangkan dari kartu Laba, kartu ini hanya menjelaskan asal selisihnya. */}
     <div class="kartu-angka">
       <div class="flex items-start justify-between gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
@@ -220,8 +207,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <span class="kartu-angka-bantu">Beban tercatat {rupiah(summary.expenses)}</span>
     </div>
 
-    {/* Potret stok hari ini, bukan angka periode -- makanya tanpa pil
-        naik/turun dan tidak berubah oleh saringan di atas. */}
+    {/* Potret stok hari ini, bukan angka periode, jadi tanpa pil naik/turun dan tak berubah oleh saringan. */}
     <div class="kartu-angka">
       <div class="flex items-start justify-between gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
@@ -238,10 +224,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
   </div>
 
   {
-    /* Harga pokok yang belum diisi membuat laba terlihat lebih besar dari
-       yang sebenarnya. Dikatakan terang-terangan, bukan disembunyikan:
-       angka laba yang salah diam-diam lebih berbahaya daripada tidak ada
-       angka sama sekali. */
+    /* Harga pokok yang belum diisi membuat laba tampak lebih besar; dikatakan terang-terangan karena laba yang salah diam-diam lebih berbahaya daripada tanpa angka. */
     summary.items_without_cost > 0 && (
       <p class="mb-6 rounded-lg border border-kuning-500/40 bg-kuning-50 px-4 py-3 text-sm text-kuning-700">
         {summary.items_without_cost} baris penjualan keluar dari batch yang harga belinya
@@ -268,8 +251,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         Enam bulan terakhir
       </p>
 
-      {/* Grafik batang tanpa JavaScript: tingginya dihitung saat render dan
-          ditulis sebagai persen, jadi ikut melar mengikuti lebar kartu. */}
+      {/* Grafik batang tanpa JavaScript: tinggi dihitung saat render sebagai persen sehingga melar mengikuti lebar kartu. */}
       <div class="flex h-48 items-end gap-3">
         {trend.map((t) => (
           <div class="flex h-full min-w-0 flex-1 flex-col justify-end gap-1.5">
@@ -344,12 +326,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-garis)] px-5 py-4">
       <h2 class="text-base font-bold">Produk Terlaris</h2>
 
-      {/* Periode kartu ini terpisah dari saringan utama di atas, supaya
-          bisa lihat "1 Minggu Ini" tanpa mengubah seluruh laporan. Metode
-          bayar & jenis pembeli tetap ikut saringan utama lewat input
-          tersembunyi -- submit form ini tidak boleh mereset keduanya.
-          `action="#produk-terlaris"` supaya setelah submit browser kembali
-          scroll ke kartu ini, bukan ke paling atas halaman. */}
+      {/* Periode kartu ini terpisah dari saringan utama (metode bayar dan jenis pembeli ikut lewat input tersembunyi), dan `action="#produk-terlaris"` mengembalikan scroll ke kartu ini. */}
       <form method="GET" class="flex items-center gap-2" action="#produk-terlaris">
         {saringan.metode && <input type="hidden" name="metode" value={saringan.metode} />}
         {saringan.jenis && <input type="hidden" name="jenis" value={saringan.jenis} />}

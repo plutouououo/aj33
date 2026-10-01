@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Mengisi database lokal dengan akun dan produk contoh. Development saja --
-# lihat peringatan di db/seed/dev.sql.
+# Mengisi database lokal dengan akun dan produk contoh, development saja (lihat peringatan di db/seed/dev.sql).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

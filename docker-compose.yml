@@ -9,8 +9,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: aj33
     ports:
-      # Host 5433, bukan 5432 -- mengikuti proyek lama, supaya tidak
-      # bentrok dengan Postgres lain yang mungkin sudah jalan di 5432.
+      # Host 5433, bukan 5432, mengikuti proyek lama agar tak bentrok dengan Postgres lain di 5432.
       - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d aj33"]

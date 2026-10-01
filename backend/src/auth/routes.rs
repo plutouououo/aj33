@@ -1,9 +1,4 @@
-//! Endpoint auth + extractor yang dipakai seluruh modul lain.
-//!
-//! Backend hanya mengenal `Authorization: Bearer <token>`. Urusan cookie
-//! sepenuhnya milik frontend Astro: ia membaca cookie httpOnly saat merender
-//! di server, lalu meneruskannya ke sini sebagai Bearer. Dengan begitu hanya
-//! ada satu cara autentikasi yang perlu dijaga di backend.
+//! Endpoint auth dan extractor untuk semua modul; backend hanya mengenal `Authorization: Bearer`, urusan cookie milik Astro, sehingga hanya ada satu cara autentikasi yang dijaga.
 
 use super::service::{self, PublicUser};
 use super::{CurrentUser, Role};
@@ -24,11 +19,7 @@ pub fn router() -> Router<AppState> {
 }
 
 impl CurrentUser {
-    /// Menegakkan batas peran. Dipanggil di awal handler yang terbatas:
-    ///
-    /// ```ignore
-    /// user.require(&[Role::Owner])?;
-    /// ```
+    /// Menegakkan batas peran di awal handler terbatas: `user.require(&[Role::Owner])?;`.
     pub fn require(&self, allowed: &[Role]) -> AppResult<()> {
         if allowed.contains(&self.role) {
             Ok(())
@@ -40,10 +31,7 @@ impl CurrentUser {
     }
 }
 
-/// Handler yang menuliskan `CurrentUser` di parameternya otomatis terlindungi:
-/// request tanpa token valid tidak akan pernah sampai ke badan fungsinya.
-/// Ini membuat "lupa memasang middleware auth" menjadi mustahil, berbeda
-/// dengan `requireAuth` yang harus diingat pada tiap route di proyek lama.
+/// Handler yang menuliskan `CurrentUser` otomatis terlindungi (tanpa token valid tak sampai ke badan fungsi), sehingga "lupa memasang middleware auth" mustahil.
 impl FromRequestParts<AppState> for CurrentUser {
     type Rejection = AppError;
 
@@ -93,11 +81,7 @@ async fn login(
     Ok(Json(LoginResponse { token, user }))
 }
 
-/// Token JWT tidak bisa dicabut dari sisi server tanpa menyimpan daftar token
-/// yang dibatalkan, dan proyek lama pun tidak melakukannya. Yang benar-benar
-/// mengakhiri sesi adalah frontend yang menghapus cookie-nya. Endpoint ini
-/// tetap ada supaya frontend punya satu tempat memanggil saat logout dan
-/// kontrak API tidak berubah.
+/// JWT tak bisa dicabut dari server tanpa daftar token batal (proyek lama pun tidak), jadi yang mengakhiri sesi adalah frontend menghapus cookie; endpoint ini ada agar kontrak API tak berubah.
 async fn logout(_user: CurrentUser) -> AppResult<axum::http::StatusCode> {
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -113,9 +97,7 @@ struct ChangePasswordRequest {
     new_password: String,
 }
 
-/// Ganti password sendiri. Tidak ada peran yang dikecualikan: akun dengan
-/// password sementara justru TIDAK BISA mengerjakan apa pun sebelum lewat
-/// sini, jadi membatasinya per peran hanya akan mengunci orang keluar.
+/// Ganti password sendiri tanpa pengecualian peran, karena akun berpassword sementara tak bisa mengerjakan apa pun sebelum lewat sini.
 async fn change_password(
     State(state): State<AppState>,
     user: CurrentUser,

@@ -1,13 +1,4 @@
-//! Enkripsi token marketplace sebelum disimpan.
-//!
-//! Token akses toko sama berharganya dengan password: siapa pun yang
-//! memegangnya bisa membaca dan mengubah pesanan di toko itu. Karena itu
-//! kolom `platforms.access_token_encrypted` tidak pernah berisi token
-//! mentah, bahkan di database development.
-//!
-//! Format ciphertext-nya sama persis dengan `crypto.util.ts` di proyek lama
-//! (`iv:tag:data`, masing-masing base64, AES-256-GCM), supaya baris yang
-//! sudah ada di database lama tetap bisa dibaca setelah refactor.
+//! Token marketplace dienkripsi (AES-256-GCM, `iv:tag:data` base64) sebelum disimpan, format sama dengan `crypto.util.ts` proyek lama agar baris lama terbaca.
 
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -34,9 +25,7 @@ pub fn encrypt(key: &[u8; 32], plaintext: &str) -> String {
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    // `aes-gcm` menempelkan tag di akhir ciphertext, sementara format lama
-    // menyimpannya sebagai bagian terpisah. Dipisah di sini supaya bentuk
-    // yang tersimpan tetap sama.
+    // `aes-gcm` menempelkan tag di akhir ciphertext sedangkan format lama menyimpannya terpisah; dipisah di sini agar bentuk tersimpan sama.
     let gabungan = cipher
         .encrypt(
             nonce,
@@ -107,8 +96,7 @@ mod tests {
 
     #[test]
     fn bentuknya_tiga_bagian_dipisah_titik_dua() {
-        // Kompatibilitas dengan baris yang ditulis proyek lama bergantung
-        // pada bentuk ini.
+        // Kompatibilitas dengan baris proyek lama bergantung pada bentuk ini.
         let terenkripsi = encrypt(&KUNCI, "apa pun");
         assert_eq!(terenkripsi.split(':').count(), 3);
     }
@@ -125,8 +113,7 @@ mod tests {
 
     #[test]
     fn ciphertext_yang_diubah_ditolak() {
-        // Inilah gunanya GCM: data yang diutak-atik tidak diam-diam
-        // menghasilkan plaintext yang salah, tapi ditolak.
+        // Inilah gunanya GCM: data yang diutak-atik ditolak, bukan diam-diam menghasilkan plaintext salah.
         let terenkripsi = encrypt(&KUNCI, "token");
         let mut bagian: Vec<&str> = terenkripsi.split(':').collect();
         let rusak = B64.encode(b"data-yang-sudah-diubah");

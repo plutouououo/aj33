@@ -24,10 +24,7 @@ pub struct ImportBatch {
     pub fail_count: i32,
 }
 
-/// Hitungan per kategori baris -- ditampilkan di panel ringkasan halaman
-/// review, dan `error_count > 0` adalah gerbang submit/approve (lihat
-/// `ada_error_row`, query terpisah supaya bisa dipanggil tanpa memuat
-/// seluruh baris).
+/// Hitungan per kategori baris untuk panel ringkasan review; `error_count > 0` gerbang submit/approve (`ada_error_row` query terpisah agar tak memuat seluruh baris).
 #[derive(Debug, Serialize)]
 pub struct RingkasanBaris {
     pub create_count: i64,
@@ -107,10 +104,7 @@ pub async fn insert_batch(
     Ok(id)
 }
 
-/// Loop `INSERT` satu per baris di dalam SATU transaksi. Muat sampai 5000
-/// baris sekali jalan -- cukup untuk batas atas fitur ini (lihat
-/// `parse::BATAS_BARIS`); kalau nanti perlu lebih cepat, ganti jadi satu
-/// `INSERT ... SELECT * FROM UNNEST(...)`, bukan sebelum ada bukti perlu.
+/// Loop `INSERT` satu per baris dalam satu transaksi, muat sampai 5000 baris (`parse::BATAS_BARIS`); ganti ke `INSERT ... SELECT * FROM UNNEST(...)` hanya bila terbukti perlu.
 pub async fn insert_rows(
     tx: &mut Transaction<'_, Postgres>,
     batch_id: Uuid,
@@ -200,10 +194,7 @@ pub async fn list_batches(
     Ok((data, total))
 }
 
-/// Baris `action='skip'` DIKELUARKAN dari `error_count`/`warn_count` --
-/// baris yang sengaja dilewati tidak lagi "perlu perhatian", apa pun isu
-/// yang pernah tercatat sebelum dilewati (`issues`-nya tidak dihapus, cuma
-/// tidak lagi dihitung). Sama gerbang yang dipakai `ada_error_row` di bawah.
+/// Baris `action='skip'` dikeluarkan dari `error_count`/`warn_count` (sengaja dilewati tak lagi perlu perhatian, `issues` tak dihapus), gerbang sama dengan `ada_error_row`.
 pub async fn hitung_ringkasan(pool: &PgPool, batch_id: Uuid) -> AppResult<RingkasanBaris> {
     let baris = sqlx::query_as!(
         RingkasanBaris,
@@ -235,11 +226,7 @@ pub async fn hitung_ringkasan(pool: &PgPool, batch_id: Uuid) -> AppResult<Ringka
     Ok(baris)
 }
 
-/// Gerbang submit/approve SESUNGGUHNYA -- dipanggil di dalam transaksi yang
-/// sama dengan perubahan status, supaya tidak ada baris ERROR baru yang
-/// menyelinap masuk di antara pemeriksaan dan penguncian. Baris yang sudah
-/// `action='skip'` TIDAK dihitung -- itulah gunanya skip: melewati baris
-/// bermasalah tanpa memperbaiki berkasnya.
+/// Gerbang submit/approve sesungguhnya, di transaksi yang sama dengan perubahan status agar tak ada baris ERROR menyelinap; baris `skip` tak dihitung karena itulah gunanya skip.
 pub async fn ada_error_row(tx: &mut Transaction<'_, Postgres>, batch_id: Uuid) -> AppResult<bool> {
     let ada = sqlx::query_scalar!(
         r#"
@@ -298,10 +285,7 @@ pub struct ImportBatchTerkunci {
     pub fail_count: i32,
 }
 
-/// Membaca batch sambil menguncinya sampai transaksi pemanggil selesai --
-/// sama pola dengan `tickets::repo::kunci`. Tanpa kunci ini, dua klik
-/// "submit"/"approve" yang datang bersamaan sama-sama membaca status lama,
-/// sama-sama lolos pemeriksaan, dan berpindah status dua kali.
+/// Membaca batch sambil menguncinya (pola `tickets::repo::kunci`); tanpa kunci dua klik submit/approve bersamaan sama-sama lolos dan pindah status dua kali.
 pub async fn kunci_batch(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,
@@ -382,9 +366,7 @@ pub async fn set_publish_on_commit(
     Ok(())
 }
 
-/// `action` baris yang di-skip TETAP tersimpan (mis. `create`/`update`
-/// aslinya) -- hanya `commit_state` yang berubah, supaya `restore_row` bisa
-/// mengembalikannya tanpa perlu menghitung ulang match SKU.
+/// `action` baris yang di-skip tetap tersimpan (hanya `commit_state` berubah) agar `restore_row` mengembalikannya tanpa menghitung ulang match SKU.
 pub async fn skip_row(
     tx: &mut Transaction<'_, Postgres>,
     batch_id: Uuid,
@@ -424,9 +406,7 @@ pub async fn restore_row(
     Ok(hasil.rows_affected() > 0)
 }
 
-/// SATU query untuk seluruh SKU unik dalam berkas -- bukan satu per baris.
-/// Cocok case-insensitive & tanpa spasi tepi, sama seperti syarat dedup di
-/// `parse::validate_row`.
+/// Satu query untuk seluruh SKU unik berkas, cocok tak peka huruf dan tanpa spasi tepi seperti dedup di `parse::validate_row`.
 pub async fn cari_produk_by_sku(
     pool: &PgPool,
     sku_list: &[String],
@@ -455,10 +435,7 @@ pub async fn cari_produk_by_sku(
     Ok(rows.into_iter().map(|r| (r.sku_key, r.id)).collect())
 }
 
-/// Resolusi teks kategori -> `category_id`: cocok nama persis
-/// (case-insensitive) dulu, baru jatuh ke `import_aliases` yang pernah
-/// diajarkan. Dua tahap dalam satu fungsi karena keduanya dipakai bersama
-/// tiap kali sebuah batch diunggah.
+/// Resolusi teks kategori ke `category_id`: nama persis (tak peka huruf) dulu, lalu `import_aliases` yang pernah diajarkan; dua tahap satu fungsi karena dipakai bersama tiap unggahan.
 pub async fn resolusi_kategori_banyak(
     pool: &PgPool,
     teks_list: &[String],
@@ -515,8 +492,7 @@ pub async fn resolusi_kategori_banyak(
     Ok(hasil)
 }
 
-/// Mengajarkan pemetaan kategori baru: `alias_norm` -> `target_id`. Dipakai
-/// lagi otomatis oleh `resolusi_kategori_banyak` pada unggahan berikutnya.
+/// Mengajarkan pemetaan kategori baru `alias_norm` → `target_id`, dipakai otomatis `resolusi_kategori_banyak` pada unggahan berikutnya.
 pub async fn ajarkan_alias(
     pool: &PgPool,
     alias_norm: &str,
@@ -540,11 +516,7 @@ pub async fn ajarkan_alias(
     Ok(())
 }
 
-/// Menerapkan satu pemetaan kategori ke SELURUH baris batch ini yang
-/// `category_text`-nya cocok (case-insensitive) -- dipanggil setelah
-/// `ajarkan_alias`, supaya efeknya langsung terlihat di batch yang sedang
-/// ditinjau, bukan cuma di unggahan berikutnya. WARN "kategori tidak
-/// dikenal" pada baris yang kena juga dibuang dari `issues`.
+/// Menerapkan satu pemetaan kategori ke seluruh baris batch yang `category_text`-nya cocok setelah `ajarkan_alias`, dan membuang WARN "kategori tidak dikenal" dari `issues` baris itu.
 pub async fn terapkan_kategori_ke_baris(
     tx: &mut Transaction<'_, Postgres>,
     batch_id: Uuid,
@@ -589,10 +561,7 @@ pub struct ImportRowUntukCommit {
     pub match_product_id: Option<Uuid>,
 }
 
-/// Mengambil DAN mengunci satu baris yang masih perlu diproses --
-/// `FOR UPDATE SKIP LOCKED` supaya kalaupun ada dua worker berjalan
-/// bersamaan (lihat catatan desain di `worker.rs`), keduanya tidak pernah
-/// memproses baris yang sama.
+/// Mengambil dan mengunci satu baris pending dengan `FOR UPDATE SKIP LOCKED` agar dua worker tak memproses baris sama (lihat `worker.rs`).
 pub async fn next_pending_row(
     pool: &PgPool,
     batch_id: Uuid,
@@ -617,9 +586,7 @@ pub async fn next_pending_row(
     Ok(row)
 }
 
-/// Baris `action='skip'` tidak pernah diambil `next_pending_row`, tapi tetap
-/// perlu ditandai `ok` supaya `hitung_hasil`/paginasi review konsisten --
-/// dipanggil sekali di awal tiap putaran worker, lihat `worker.rs`.
+/// Baris `action='skip'` tak diambil `next_pending_row` tapi ditandai `ok` agar `hitung_hasil` dan paginasi review konsisten, sekali di awal tiap putaran worker.
 pub async fn tandai_baris_dilewati_selesai(pool: &PgPool, batch_id: Uuid) -> AppResult<()> {
     sqlx::query!(
         r#"
@@ -722,10 +689,7 @@ pub async fn selesaikan_batch(pool: &PgPool, batch_id: Uuid, ok: i32, fail: i32)
     Ok(())
 }
 
-/// Sama bentuknya dengan `ImportBatchTerkunci`, tapi TANPA `FOR UPDATE` --
-/// dipakai worker membaca `publish_on_commit`/`uploaded_by` di LUAR
-/// transaksi, karena pemrosesan tiap baris sengaja tidak menahan kunci
-/// batch (lihat catatan desain di `worker.rs`).
+/// Seperti `ImportBatchTerkunci` tanpa `FOR UPDATE`, dipakai worker di luar transaksi karena pemrosesan baris tak menahan kunci batch (lihat `worker.rs`).
 pub async fn baca_batch_ringkas(pool: &PgPool, id: Uuid) -> AppResult<Option<ImportBatchTerkunci>> {
     let row = sqlx::query_as!(
         ImportBatchTerkunci,
@@ -738,10 +702,7 @@ pub async fn baca_batch_ringkas(pool: &PgPool, id: Uuid) -> AppResult<Option<Imp
     Ok(row)
 }
 
-/// Mengambil SATU batch berstatus `committing` untuk diproses, terkunci
-/// `FOR UPDATE SKIP LOCKED` lalu segera dilepas (transaksi pendek) --
-/// pemrosesan baris sesungguhnya terjadi di LUAR kunci ini, lihat catatan
-/// desain di `worker.rs`.
+/// Mengambil satu batch `committing` dengan `FOR UPDATE SKIP LOCKED` lalu segera melepasnya (transaksi pendek); pemrosesan baris di luar kunci (lihat `worker.rs`).
 pub async fn klaim_batch_committing(pool: &PgPool) -> AppResult<Option<Uuid>> {
     let mut tx = pool.begin().await?;
 

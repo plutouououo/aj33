@@ -18,8 +18,7 @@ const KANAL_LABEL: Record<string, string> = {
 let galat: string | null = null;
 
 if (Astro.request.method === 'POST') {
-  // Endpoint backend sudah menolak non-owner juga -- pemeriksaan di sini
-  // cuma supaya galatnya jelas tanpa perlu menunggu balasan API.
+  // Backend sudah menolak non-owner; pemeriksaan di sini hanya agar galatnya jelas tanpa menunggu balasan API.
   if (user.role !== 'owner') {
     galat = 'Kamu tidak punya akses ke fitur ini.';
   } else {
@@ -307,9 +306,7 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
   }
 </AppShell>
 
-{/* Progressive enhancement murni, pola sama seperti konfirmasi hapus di
-    produk/index.astro: form tetap berfungsi tanpa skrip ini, cuma tanpa
-    dialog konfirmasi. */}
+{/* Progressive enhancement murni seperti konfirmasi hapus di produk/index.astro: form tetap berfungsi tanpa skrip, hanya tanpa dialog konfirmasi. */}
 <script is:inline>
   (function () {
     var borang = document.getElementById('borang-batalkan');

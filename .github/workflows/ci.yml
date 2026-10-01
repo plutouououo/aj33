@@ -5,8 +5,7 @@ on:
     branches: [main]
   pull_request:
 
-# Dorongan baru ke branch yang sama membatalkan run lama yang masih jalan --
-# hasilnya sudah tidak relevan begitu ada commit yang lebih baru.
+# Dorongan baru ke branch yang sama membatalkan run lama yang masih jalan karena hasilnya tak relevan lagi.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -50,8 +49,7 @@ jobs:
 
       - name: Format
         working-directory: backend
-        # Dijalankan sebelum yang lain: paling cepat, dan kegagalannya
-        # paling mudah diperbaiki.
+        # Dijalankan sebelum yang lain karena paling cepat dan kegagalannya paling mudah diperbaiki.
         run: cargo fmt --check
 
       - name: Siapkan database
@@ -69,9 +67,7 @@ jobs:
 
       - name: Cache query sqlx masih sesuai skema
         working-directory: backend
-        # `.sqlx/` yang basi membuat build produksi (SQLX_OFFLINE=true)
-        # memakai bentuk query lama. Diperiksa di sini supaya ketahuan di PR,
-        # bukan saat deploy.
+        # `.sqlx/` yang basi membuat build produksi (SQLX_OFFLINE=true) memakai bentuk query lama; diperiksa di sini agar ketahuan di PR, bukan saat deploy.
         run: cargo sqlx prepare --check -- --all-targets
 
   frontend:

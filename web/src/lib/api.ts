@@ -1,22 +1,6 @@
-/**
- * Klien HTTP ke backend Rust.
- *
- * Hanya dipakai saat Astro merender di server. Token sesi diambil dari
- * cookie httpOnly dan diteruskan sebagai `Authorization: Bearer`, jadi token
- * tidak pernah tersentuh JavaScript di browser.
- */
+/** Klien HTTP ke backend Rust, hanya saat render di server; token dari cookie httpOnly diteruskan sebagai Bearer sehingga tak tersentuh JavaScript browser. */
 
-/**
- * Alamat backend, dibaca saat request berjalan -- bukan saat build.
- *
- * `import.meta.env.X` diganti Vite dengan nilai literalnya ketika di-build,
- * jadi kalau dipakai sendirian, alamat yang ikut ke dist adalah alamat mesin
- * yang mem-build (biasanya `http://localhost:3000`) dan menyetel BACKEND_URL
- * di server produksi tidak berpengaruh apa-apa. Adapter Node menjalankan
- * halaman ini di Node sungguhan, jadi `process.env` tersedia dan itulah yang
- * dibaca lebih dulu; `import.meta.env` tetap dipakai sebagai cadangan supaya
- * `.env` saat `astro dev` tetap bekerja.
- */
+/** Alamat backend dibaca saat request (`process.env`), bukan saat build, karena `import.meta.env` dibakukan Vite ke alamat mesin build; `import.meta.env` tetap cadangan untuk `astro dev`. */
 const BACKEND_URL =
   (typeof process !== 'undefined' ? process.env.BACKEND_URL : undefined) ??
   import.meta.env.BACKEND_URL ??
@@ -30,11 +14,7 @@ export interface ApiError {
   message: string;
 }
 
-/**
- * Error dari backend dibawa apa adanya supaya halaman bisa menampilkan
- * pesan yang sudah ditulis untuk pengguna, bukan pesan generik buatan
- * frontend yang kehilangan konteksnya.
- */
+/** Error backend dibawa apa adanya agar halaman menampilkan pesan yang sudah ditulis untuk pengguna, bukan pesan generik. */
 export class ApiRequestError extends Error {
   constructor(
     readonly status: number,
@@ -54,8 +34,7 @@ export class ApiRequestError extends Error {
         message = body.error.message;
       }
     } catch {
-      // Response bukan JSON (mis. backend mati, proxy menyisipkan HTML).
-      // Pesan bawaan di atas sudah tepat.
+      // Response bukan JSON (mis. backend mati, proxy menyisipkan HTML); pesan bawaan di atas sudah tepat.
     }
 
     const err = new ApiRequestError(res.status, code);
@@ -71,11 +50,7 @@ interface ApiOptions {
   headers?: Record<string, string>;
 }
 
-/**
- * Byte mentah (unggahan impor produk) dikirim apa adanya -- tanpa
- * `JSON.stringify` dan tanpa `Content-Type: application/json` otomatis.
- * Pemanggil menyetel `Content-Type`-nya sendiri lewat `headers` kalau perlu.
- */
+/** Byte mentah (unggahan impor) dikirim apa adanya tanpa `JSON.stringify` dan tanpa `Content-Type` otomatis; pemanggil menyetelnya lewat `headers`. */
 function isBodyMentah(body: unknown): body is BodyInit {
   return (
     body instanceof ArrayBuffer || body instanceof Uint8Array || body instanceof Blob
@@ -118,11 +93,7 @@ export interface User {
   role: Role;
   phone: string | null;
   is_active: boolean;
-  /**
-   * Password akun ini dipasang orang lain dan belum pernah diganti
-   * pemiliknya. Selama true, middleware menahan pengguna di
-   * `/pengaturan/akun` -- lihat `bolehAkses` di `session.ts`.
-   */
+  /** Password dipasang orang lain dan belum diganti pemiliknya; selama true middleware menahan pengguna di `/pengaturan/akun` (lihat `bolehAkses`). */
   must_change_password: boolean;
 }
 
@@ -134,12 +105,7 @@ export interface Product {
   name: string;
   /** Judul untuk marketplace. `null` berarti belum diisi. */
   seo_name: string | null;
-  /**
-   * Dirakit otomatis sekali saat produk dibuat, lalu dibekukan: menyunting
-   * atribut tidak mengubahnya. Induk berbentuk `Jenis+Grade - Merek -
-   * Ukuran`; varian menambahkan sumbu variannya di belakang SKU induknya,
-   * jadi seluruh varian satu produk berbagi satu awalan.
-   */
+  /** SKU dirakit otomatis sekali saat produk dibuat lalu dibeku (`Jenis+Grade - Merek - Ukuran`); varian menambah sumbunya di belakang SKU induk sehingga satu produk berbagi satu awalan. */
   sku: string | null;
   brand_name: string | null;
   product_type: string | null;
@@ -168,14 +134,7 @@ export interface Product {
   updated_at: string;
 }
 
-/**
- * Satu kiriman barang masuk.
- *
- * `quantity` adalah isi kiriman saat datang dan tidak pernah berubah;
- * `remaining_qty` adalah sisa yang belum keluar, dan itulah stok sungguhan.
- * Sejak migrasi 0011, `Product.stock_qty` sama dengan jumlah `remaining_qty`
- * seluruh batch produk itu.
- */
+/** Satu kiriman masuk: `quantity` isi saat datang (tetap), `remaining_qty` sisa belum keluar adalah stok sungguhan (sejak migrasi 0011 = `Product.stock_qty`). */
 export interface ProductBatch {
   id: string;
   product_id: string;
@@ -187,11 +146,7 @@ export interface ProductBatch {
   /** Sisa yang belum keluar. Inilah yang dikurangi penjualan. */
   remaining_qty: number;
   expiry_date: string | null;
-  /**
-   * Rak tempat kiriman INI ditaruh, mis. "Rak A3". Milik batch, bukan
-   * produk: dua kiriman produk yang sama bisa tinggal di rak berbeda.
-   * Lihat migrasi 0016.
-   */
+  /** Rak tempat kiriman ini ditaruh; milik batch, bukan produk, karena dua kiriman produk yang sama bisa di rak berbeda (migrasi 0016). */
   storage_location: string | null;
   received_at: string;
 }
@@ -217,13 +172,7 @@ export interface Category {
 /** Bagian atribut yang punya kode sendiri di kamus SKU. */
 export type SkuKind = 'jenis' | 'grade' | 'merek' | 'ukuran';
 
-/**
- * Satu entri kamus kode SKU: pemetaan nilai atribut ke kode pendek.
- *
- * Kode dari kamus menang atas inisial bebas. Entri baru TIDAK mengubah SKU
- * produk yang sudah ada -- SKU beku sejak dirakit -- hanya produk yang dibuat
- * sesudahnya.
- */
+/** Entri kamus kode SKU memetakan atribut ke kode pendek dan menang atas inisial bebas; entri baru tak mengubah SKU produk yang sudah ada (beku sejak dirakit). */
 export interface SkuCode {
   id: string;
   kind: SkuKind;
@@ -241,13 +190,7 @@ export interface TransactionItem {
   subtotal: number;
 }
 
-/**
- * Daftar harga yang dipakai saat menjual.
- *
- * Shopee dan Tokopedia belum tersambung, jadi pesanannya dicatat manual di
- * kasir -- dan harus memakai harga kanalnya, bukan harga toko. `tiktok`
- * mencakup Tokopedia: keduanya satu kanal sejak akuisisi TikTok.
- */
+/** Daftar harga saat menjual; Shopee/Tokopedia dicatat manual di kasir dengan harga kanalnya, dan `tiktok` mencakup Tokopedia (satu kanal sejak akuisisi TikTok). */
 export type SalesChannel = 'toko' | 'shopee' | 'tiktok';
 
 export interface Transaction {
@@ -256,42 +199,22 @@ export interface Transaction {
   payment_method: string;
   sales_channel: SalesChannel;
   subtotal: number;
-  /**
-   * Potongan atas seluruh belanja. Tidak dikurangkan dari `subtotal` --
-   * baris struk tetap harus bisa dijumlahkan menjadi subtotal.
-   */
+  /** Potongan atas seluruh belanja, tidak dikurangkan dari `subtotal` agar baris struk tetap bisa dijumlahkan menjadi subtotal. */
   discount_amount: number;
   /** Ongkir tidak termasuk `subtotal`; hanya menambah `total_amount`. */
   shipping_cost: number;
-  /**
-   * Untuk kanal Shopee, ini BUKAN yang dibayar pembeli -- pembeli sudah
-   * membayar penuh lewat Shopee. Ini uang yang sungguh cair ke toko setelah
-   * `platform_commission_fee + platform_service_fee + platform_withholding_tax
-   * + platform_order_processing_fee` dipotong. Kanal lain tidak kena potongan
-   * ini, jadi nilainya tetap "yang dibayar pembeli" seperti sebelumnya.
-   */
+  /** Untuk Shopee ini bukan yang dibayar pembeli melainkan uang yang cair ke toko setelah empat biaya platform dipotong; kanal lain tetap "yang dibayar pembeli". */
   total_amount: number;
-  /**
-   * Nama field di bawah ini SENGAJA mengikuti field asli
-   * `v2.payment.get_escrow_detail` milik Shopee, bukan istilah rakitan
-   * sendiri -- lihat `backend/src/marketplace/shopee/client.rs` untuk
-   * pemanggilan API-nya (belum tersambung) dan `pos::service` untuk
-   * perhitungannya.
-   */
-  /** Persentase `commission_fee` yang dipakai transaksi ini (pecahan,
-   * 0,1725 = 17,25%). Nol untuk kanal selain Shopee. Bisa diedit kasir per
-   * transaksi -- lihat halaman kasir. */
+  /** Nama field mengikuti `v2.payment.get_escrow_detail` Shopee (lihat `marketplace/shopee/client.rs` dan `pos::service`). */
+  /** Persentase `commission_fee` transaksi ini (pecahan, 0,1725 = 17,25%), nol selain Shopee, bisa diedit kasir per transaksi. */
   platform_commission_fee_percent: number;
   platform_commission_fee: number;
-  /** Persentase `service_fee` (program opsional seperti Gratis Ongkir
-   * Xtra/Star+). Nol kalau toko tidak ikut program itu. Bisa diedit kasir. */
+  /** Persentase `service_fee` (program opsional seperti Gratis Ongkir Xtra/Star+), nol bila tak ikut, bisa diedit kasir. */
   platform_service_fee_percent: number;
   platform_service_fee: number;
-  /** `withholding_tax`: PPh final UMKM, 0,5% dari omzet Shopee setelah
-   * diskon. Tetap. */
+  /** `withholding_tax`: PPh final UMKM 0,5% dari omzet Shopee setelah diskon, tetap. */
   platform_withholding_tax: number;
-  /** `seller_order_processing_fee`: Rp1.250 tetap, sekali per transaksi
-   * Shopee. */
+  /** `seller_order_processing_fee`: Rp1.250 tetap sekali per transaksi Shopee. */
   platform_order_processing_fee: number;
   amount_paid: number | null;
   change_amount: number | null;
@@ -300,14 +223,7 @@ export interface Transaction {
   items: TransactionItem[];
 }
 
-/**
- * Pelanggan toko. `name` boleh null sejak skema awal — pelanggan hasil impor
- * pesanan marketplace kadang hanya membawa username.
- *
- * Angka belanja selalu ikut, termasuk saat kasir hanya butuh daftar nama:
- * satu bentuk untuk satu hal, supaya tidak ada dua daftar pelanggan yang
- * bisa saling menyimpang. `total_spent` adalah harga barang, tanpa ongkir.
- */
+/** Pelanggan toko; `name` boleh null (hasil impor marketplace kadang hanya username), angka belanja selalu ikut agar tak ada dua daftar yang menyimpang, `total_spent` tanpa ongkir. */
 export interface Customer {
   id: string;
   name: string | null;
@@ -374,10 +290,7 @@ export interface TicketItem {
   product_name_snapshot: string;
   qty: number;
   is_packed: boolean;
-  /**
-   * Rak-rak tempat barang ini masih ada, urut FEFO dan dipisah koma. Dibaca
-   * langsung dari batch yang bersisa, jadi selalu keadaan sekarang.
-   */
+  /** Rak tempat barang masih ada, urut FEFO dipisah koma, dibaca dari batch bersisa sehingga selalu keadaan sekarang. */
   storage_location: string | null;
 }
 
@@ -399,15 +312,7 @@ export interface Ticket {
 
 // --- Dasbor dan laporan ---
 
-/**
- * Satu baris penjualan pada dasbor maupun laporan.
- *
- * `revenue` adalah omzet barang sesudah diskon (`subtotal - discount_amount`
- * di backend) dan tidak termasuk `shipping`; `total_amount` adalah jumlah
- * yang benar-benar dibayar pembeli.
- * Memakai `total_amount` sebagai omzet membuat margin salah -- ongkir tidak
- * punya margin.
- */
+/** Satu baris penjualan: `revenue` = omzet barang setelah diskon tanpa `shipping`, sedangkan `total_amount` yang dibayar pembeli; memakai `total_amount` sebagai omzet membuat margin salah. */
 export interface SaleRow {
   id: string;
   created_at: string;
@@ -449,21 +354,12 @@ export interface SalesSummary {
   shipping: number;
   cogs: number;
   expenses: number;
-  /**
-   * Jumlah biaya administrasi (bisa diedit per transaksi) + PPh UMKM 0,5% +
-   * biaya proses pemesanan (Rp1.250/transaksi) Shopee pada periode ini,
-   * dibaca dari yang sungguh tersimpan tiap transaksi -- bukan tarif tetap.
-   * Nol kalau tidak ada penjualan Shopee pada periode ini. Kanal lain tidak
-   * tersentuh.
-   */
+  /** Jumlah biaya admin + PPh 0,5% + biaya proses Rp1.250 Shopee periode ini, dibaca dari yang tersimpan per transaksi (bukan tarif tetap); nol bila tak ada penjualan Shopee. */
   platform_fees: number;
   /** `revenue - cogs - expenses - platform_fees`. */
   profit: number;
   transaction_count: number;
-  /**
-   * Baris item yang harga pokoknya belum diisi. Selama bukan nol, `cogs`
-   * dan `profit` adalah batas atas -- dan halaman mengatakannya.
-   */
+  /** Baris item yang harga pokoknya belum diisi; selama bukan nol, `cogs` dan `profit` hanyalah batas atas dan halaman mengatakannya. */
   items_without_cost: number;
 }
 
@@ -496,11 +392,7 @@ export interface StockValue {
 
 export interface SalesReport {
   summary: SalesSummary;
-  /**
-   * Angka periode setara sebelumnya (mis. bulan lalu kalau saringan "Bulan
-   * Ini"), untuk kartu trend naik/turun. `null` kalau saringan "Seluruh
-   * Waktu" -- rentang itu tidak punya pembanding.
-   */
+  /** Angka periode setara sebelumnya untuk kartu trend; `null` bila saringan "Seluruh Waktu" karena tak punya pembanding. */
   previous_summary: SalesSummary | null;
   /** Selalu enam bulan terakhir, tidak ikut saringan periode. */
   trend: MonthlyPoint[];
@@ -554,10 +446,7 @@ export interface TransactionDetail {
   /** Batas atas kalau `items_without_cost > 0`. */
   cogs: number;
   items_without_cost: number;
-  /**
-   * `subtotal - discount_amount - cogs` dikurangi seluruh potongan Shopee.
-   * Beban toko tidak ikut -- itu milik periode, bukan transaksi tunggal.
-   */
+  /** `subtotal - discount_amount - cogs` dikurangi seluruh potongan Shopee; beban toko tak ikut karena milik periode, bukan transaksi. */
   net_profit: number;
   items: TransactionDetailItem[];
 }

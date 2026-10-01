@@ -1,11 +1,4 @@
-/**
- * Tampilan status tiket packing.
- *
- * Urutan dan langkahnya mencerminkan `TicketStatus` di backend. Yang di sini
- * hanya menentukan tombol mana yang pantas ditawarkan; yang memutuskan boleh
- * atau tidaknya tetap backend, karena status bisa berubah di layar pengepak
- * lain antara halaman ini dirender dan tombolnya ditekan.
- */
+/** Tampilan status tiket mencerminkan `TicketStatus` backend; di sini hanya menentukan tombol yang ditawarkan, backend yang memutuskan karena status bisa berubah di layar pengepak lain. */
 import type { TicketStatus } from './api';
 
 export const URUTAN_STATUS: TicketStatus[] = [
@@ -24,10 +17,7 @@ export const LABEL_STATUS: Record<TicketStatus, string> = {
   handed_over: 'Diserahkan ke kurir',
 };
 
-/**
- * Kuning menunggu tindakan orang, merah merek sedang berjalan, hijau selesai --
- * sama seperti pemakaian lencana di halaman lain.
- */
+/** Kuning menunggu tindakan, merah merek berjalan, hijau selesai, sama dengan lencana di halaman lain. */
 export function kelasLencana(status: TicketStatus): string {
   switch (status) {
     case 'packing':

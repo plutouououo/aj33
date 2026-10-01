@@ -44,12 +44,17 @@ Rust/library/framework tetap Inggris seperti biasa.
 - Tulis komentar hanya untuk MENGAPA yang tidak jelas dari kode: invariant
   tersembunyi, aturan bisnis, alasan menghindari pendekatan yang tampak lebih
   jelas, workaround untuk bug/batasan tertentu.
-- Komentar yang menjelaskan aturan bisnis non-obvious (mis. perhitungan fee
-  Shopee di `backend/src/pos/service.rs`, aturan locking di
-  `backend/src/tickets/service.rs`) boleh multi-baris kalau memang perlu.
-  Jangan dipangkas jadi satu baris kalau itu menghilangkan informasi penting.
-- Komentar basa-basi yang cuma mengulang nama field/fungsi: hapus atau
-  padatkan jadi satu baris pendek.
+- **Setiap komentar harus 1 baris.** Tidak ada komentar multi-baris: bukan
+  `//` atau `///` berturut-turut, bukan `/* ... */` atau `{/* ... */}` yang
+  membentang beberapa baris, bukan `#` berturut-turut. Satu komentar = satu
+  kalimat padat yang memuat alasannya.
+- Aturan bisnis yang butuh uraian panjang (mis. perhitungan fee Shopee di
+  `backend/src/pos/service.rs`, aturan locking di
+  `backend/src/tickets/service.rs`): taruh satu baris ringkasan di kode, dan
+  uraian lengkapnya di `docs/status-proyek.md` atau pesan commit.
+- Komentar basa-basi yang cuma mengulang nama field/fungsi: hapus.
+- Jangan menyunting komentar di `db/migrations/` yang sudah pernah
+  di-commit/deploy: sqlx memeriksa checksum berkasnya saat backend start.
 
 ## Menjalankan & menguji
 

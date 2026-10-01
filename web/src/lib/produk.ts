@@ -1,33 +1,12 @@
 /** Tetapan domain katalog produk, dipakai bersama halaman tambah dan sunting. */
 
-/**
- * Pemasok yang dipakai toko. Daftar tetap, bukan isian bebas: merek ikut
- * membentuk SKU (`afco` → `AFC`), jadi satu salah ketik melahirkan SKU yang
- * berbeda untuk barang yang sama.
- *
- * Backend tetap menerima teks bebas — pesanan marketplace bisa membawa merek
- * di luar daftar ini, dan menolaknya di sana akan menggagalkan impor.
- */
+/** Pemasok tetap, bukan isian bebas, karena merek membentuk SKU (`afco` → `AFC`) dan salah ketik melahirkan SKU berbeda; backend tetap menerima teks bebas agar impor marketplace tak gagal. */
 export const MEREK = ['AFCO', 'BEST CHICKEN', 'OK CHICK', 'ZAHRA'] as const;
 
-/**
- * Saringan daftar produk yang boleh dibawa pulang. Halaman rincian menerima
- * titipan query string lewat `?dari=`, dan hanya kunci di sini yang diterima
- * kembali -- titipan itu datang dari URL, jadi ia data, bukan perintah.
- */
+/** Saringan daftar produk yang boleh dibawa pulang lewat `?dari=`; hanya kunci di sini yang diterima kembali karena titipan itu data dari URL, bukan perintah. */
 const SARINGAN_DAFTAR = ['cari', 'kategori', 'tab', 'urut', 'hanya_menipis', 'per', 'halaman'] as const;
 
-/**
- * Tautan kembali ke daftar produk dengan saringan dan halaman yang sama
- * seperti saat pengguna berangkat. Tanpa ini tombol "Kembali" selalu
- * mendarat di halaman satu tanpa saringan, dan pekerjaan menyunting banyak
- * produk berarti menyetel ulang saringan setiap kali.
- *
- * `pesan` adalah kode kabar yang dititipkan ke daftar -- dipakai halaman
- * tambah dan sunting yang berakhir dengan pengalihan ke sini, supaya
- * kabar berhasilnya muncul di tempat pengguna mendarat, bukan di halaman
- * yang barusan ia tinggalkan.
- */
+/** Tautan kembali ke daftar dengan saringan dan halaman yang sama; `pesan` adalah kode kabar agar keberhasilan tampil di tempat pengguna mendarat. */
 export function kembaliKeDaftar(dari: string | null | undefined, pesan?: string): string {
   const asal = new URLSearchParams(dari ?? '');
   const p = new URLSearchParams();

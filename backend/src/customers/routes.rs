@@ -26,14 +26,10 @@ pub fn router() -> Router<AppState> {
 /// Batas atas supaya satu request tidak bisa menarik seluruh tabel.
 const LIMIT_MAKS: i64 = 200;
 
-/// Panjang kolom di skema awal. Diperiksa di sini supaya nama yang
-/// kepanjangan dijawab 400 dengan pesan yang bisa dibaca kasir, bukan 500
-/// dari Postgres.
+/// Panjang kolom skema awal diperiksa di sini agar nama kepanjangan dijawab 400 berpesan jelas, bukan 500 dari Postgres.
 const NAMA_MAKS: usize = 150;
 const TELEPON_MAKS: usize = 30;
-/// `address` bertipe TEXT dan tidak punya batas di database. Batas di sini
-/// bukan soal kolom, melainkan soal yang masuk akal diketik sebagai alamat:
-/// tanpa batas apa pun, kolom ini jadi tempat menempelkan apa saja.
+/// `address` TEXT tanpa batas di database; batas di sini soal yang masuk akal diketik sebagai alamat agar kolom tak jadi tempat menempel apa saja.
 const ALAMAT_MAKS: usize = 500;
 
 /// Riwayat dan produk favorit yang ikut pada halaman detail.
@@ -59,8 +55,7 @@ struct PaginatedCustomers {
     total: i64,
 }
 
-/// Terbuka untuk semua peran yang sudah login: kasir membacanya saat
-/// checkout, dan halaman pesanan membacanya juga.
+/// Terbuka untuk semua peran login karena kasir membacanya saat checkout dan halaman pesanan juga.
 async fn list_customers(
     State(state): State<AppState>,
     _user: CurrentUser,
@@ -100,8 +95,7 @@ async fn list_customers(
     }))
 }
 
-/// Pelanggan beserta apa yang hanya berguna saat membuka satu orang:
-/// riwayat belanjanya dan barang yang paling sering dia beli.
+/// Pelanggan beserta yang hanya berguna saat membuka satu orang: riwayat belanja dan barang yang paling sering dibeli.
 #[derive(Debug, Serialize)]
 struct CustomerDetail {
     #[serde(flatten)]
@@ -140,9 +134,7 @@ fn periksa_nama(nama: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// Membersihkan isian opsional: spasi dibuang, dan yang menjadi kosong
-/// diperlakukan sebagai "tidak diisi" -- bukan sebagai string kosong yang
-/// nanti tampil sebagai baris alamat hampa di layar.
+/// Membersihkan isian opsional: spasi dibuang dan yang jadi kosong dianggap "tidak diisi", bukan string kosong yang tampil sebagai baris alamat hampa.
 fn bersihkan(nilai: Option<String>, maks: usize, nama: &str) -> AppResult<Option<String>> {
     let Some(nilai) = nilai
         .map(|v| v.trim().to_string())
@@ -183,9 +175,7 @@ async fn create_customer(
     let address = bersihkan(body.address, ALAMAT_MAKS, "Alamat")?;
 
     if let Some(phone) = phone.as_deref() {
-        // Pelanggan langganan yang kembali tidak perlu jadi baris baru tiap
-        // kali kasir mengetikkan namanya lagi. Dijawab 200, bukan 201:
-        // tidak ada yang dibuat.
+        // Pelanggan langganan yang kembali tak jadi baris baru; dijawab 200, bukan 201, karena tak ada yang dibuat.
         if let Some(lama) = repo::find_by_phone(&state.pool, phone).await? {
             return Ok((axum::http::StatusCode::OK, Json(lama)));
         }
@@ -196,10 +186,7 @@ async fn create_customer(
     Ok((axum::http::StatusCode::CREATED, Json(customer)))
 }
 
-/// Bidang yang tidak disebut di body tidak diubah; yang disebut sebagai
-/// `null` dikosongkan. `Option<Option<T>>` dengan
-/// `skip_serializing_none`-nya serde: `None` = tidak disebut, `Some(None)` =
-/// disebut sebagai null.
+/// Bidang tak disebut tak diubah, yang disebut `null` dikosongkan: `Option<Option<T>>` (`None` = tak disebut, `Some(None)` = null).
 #[derive(Debug, Deserialize)]
 struct CustomerUpdateRequest {
     name: Option<String>,
@@ -209,8 +196,7 @@ struct CustomerUpdateRequest {
     address: Option<Option<String>>,
 }
 
-/// Membedakan "tidak disebut" dari "disebut sebagai null". Tanpa ini serde
-/// memetakan keduanya ke `None`, dan mengosongkan nomor telepon jadi mustahil.
+/// Membedakan "tak disebut" dari "disebut null"; tanpa ini serde memetakan keduanya ke `None` dan mengosongkan telepon mustahil.
 fn sebut<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -254,12 +240,7 @@ async fn update_customer(
     Ok(Json(customer))
 }
 
-/// Owner saja, dan hanya untuk pelanggan yang belum punya riwayat.
-///
-/// Pelanggan yang pernah bertransaksi TIDAK boleh hilang: laporan penjualan
-/// dan riwayat belanja merujuk barisnya, dan menghapusnya berarti angka lama
-/// berubah tanpa ada yang tahu. Foreign key di skema awal sudah menolaknya;
-/// yang ditambahkan di sini hanya penjelasan mengapa.
+/// Owner saja dan hanya untuk pelanggan tanpa riwayat: yang pernah bertransaksi tak boleh hilang karena laporan dan riwayat merujuknya (foreign key sudah menolak, di sini hanya penjelasan).
 async fn delete_customer(
     State(state): State<AppState>,
     user: CurrentUser,

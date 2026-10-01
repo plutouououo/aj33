@@ -28,9 +28,7 @@ struct CheckoutRequest {
     transaction_type: TransactionType,
     customer_id: Option<Uuid>,
     payment_method: PaymentMethod,
-    /// Daftar harga yang dipakai. Kosong berarti harga toko -- itulah yang
-    /// benar untuk pembeli yang berdiri di depan meja, dan itu pula satu-
-    /// satunya kanal yang ada sebelum migrasi 0015.
+    /// Daftar harga yang dipakai; kosong berarti harga toko (pembeli di depan meja, satu-satunya kanal sebelum migrasi 0015).
     #[serde(default = "default_channel")]
     sales_channel: SalesChannel,
     amount_paid: Option<Decimal>,
@@ -38,13 +36,9 @@ struct CheckoutRequest {
     shipping_cost: Option<Decimal>,
     /// Potongan atas seluruh belanja. Kosong berarti nol.
     discount_amount: Option<Decimal>,
-    /// Persentase `commission_fee` Shopee, sebagai pecahan (0,1725 =
-    /// 17,25%). Hanya berlaku untuk kanal Shopee; kosong jatuh ke tarif
-    /// bawaan -- lihat `pos::service::shopee_commission_persen_default`.
+    /// Persentase `commission_fee` Shopee sebagai pecahan (0,1725 = 17,25%), hanya untuk Shopee; kosong jatuh ke `shopee_commission_persen_default`.
     platform_commission_fee_percent: Option<Decimal>,
-    /// Persentase `service_fee` Shopee (program opsional seperti Gratis
-    /// Ongkir Xtra/Star+). Kosong berarti nol -- lihat
-    /// `pos::service::shopee_service_persen_default`.
+    /// Persentase `service_fee` Shopee (program opsional), kosong berarti nol (`shopee_service_persen_default`).
     platform_service_fee_percent: Option<Decimal>,
     items: Vec<CheckoutItem>,
 }
@@ -65,9 +59,7 @@ async fn checkout(
 ) -> AppResult<(axum::http::StatusCode, Json<Transaction>)> {
     user.require(&[Role::Kasir, Role::Owner])?;
 
-    // Tanpa kunci ini, request yang terkirim ulang karena jaringan putus
-    // akan menjadi transaksi kedua: stok berkurang dua kali dan pembeli
-    // tertagih dua kali. Karena itu header-nya wajib, bukan opsional.
+    // Header wajib karena tanpa kunci request yang terkirim ulang karena jaringan putus jadi transaksi kedua (stok dua kali, tagihan dua kali).
     let idempotency_key = headers
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())

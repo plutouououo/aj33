@@ -1,8 +1,6 @@
 name: Deploy
 
-# Dijalankan setelah CI selesai HIJAU, bukan langsung saat push. Tanpa ini,
-# commit yang gagal test tetap terpasang ke mesin kasir -- dan yang menemukan
-# masalahnya adalah pembeli yang sedang antre, bukan CI.
+# Dijalankan setelah CI HIJAU, bukan langsung saat push, agar commit yang gagal test tak terpasang ke mesin kasir.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -10,8 +8,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Dua deploy bersamaan akan berebut symlink `aktif`. Antre, jangan dibatalkan:
-# membatalkan di tengah bisa meninggalkan rilis setengah terpasang.
+# Dua deploy bersamaan berebut symlink `aktif`; diantre, jangan dibatalkan karena membatalkan di tengah bisa meninggalkan rilis setengah terpasang.
 concurrency:
   group: deploy
   cancel-in-progress: false
@@ -19,23 +16,18 @@ concurrency:
 jobs:
   deploy:
     name: Build lalu kirim ke VPS
-    # Hanya jalan kalau CI-nya sukses. `workflow_dispatch` tidak punya
-    # `workflow_run`, jadi kondisinya dilonggarkan untuk deploy manual.
+    # Hanya jalan bila CI sukses; `workflow_dispatch` tak punya `workflow_run`, jadi kondisinya dilonggarkan untuk deploy manual.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
 
-    # Dipatok, bukan `ubuntu-latest`. Binary Rust ditautkan ke glibc mesin
-    # pembangun; glibc lama berjalan di sistem yang lebih baru, tidak
-    # sebaliknya. Runner yang diam-diam naik versi bisa menghasilkan binary
-    # yang menolak jalan di Debian 13.
+    # Runner dipatok (bukan `ubuntu-latest`) karena binary Rust ditautkan ke glibc pembangun; runner yang naik versi bisa menghasilkan binary yang menolak jalan di Debian 13.
     runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
         with:
-          # workflow_run memakai berkas workflow dari branch default, tapi
-          # yang harus dibangun adalah commit yang memicu CI tadi.
+          # workflow_run memakai berkas workflow dari branch default, padahal yang harus dibangun adalah commit yang memicu CI.
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
@@ -79,9 +71,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$KUNCI" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          # Host key dipasang dari secret, bukan lewat ssh-keyscan saat jalan.
-          # keyscan akan mempercayai apa pun yang menjawab saat itu, yang
-          # membatalkan gunanya memverifikasi host sama sekali.
+          # Host key dipasang dari secret, bukan `ssh-keyscan` saat jalan, karena keyscan mempercayai apa pun yang menjawab dan membatalkan gunanya memverifikasi host.
           printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
@@ -96,9 +86,7 @@ jobs:
                   "$TUJUAN"
 
       - name: Pastikan situs melayani
-        # Penerima di VPS sudah memeriksa dari dalam dan mengembalikan rilis
-        # lama kalau gagal. Ini memeriksa dari luar: memastikan Caddy dan TLS
-        # ikut baik, bukan hanya prosesnya hidup.
+        # Penerima di VPS memeriksa dari dalam dan mengembalikan rilis lama bila gagal; ini memeriksa dari luar agar Caddy dan TLS ikut terbukti baik.
         run: |
           KODE=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
                  https://tokoayamaj33.my.id/login)

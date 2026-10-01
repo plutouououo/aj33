@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Menjalankan sqlx-cli di dalam container. Lihat scripts/cargo.sh untuk
-# alasan kenapa lewat Docker.
-#
-# Contoh:
-#   scripts/sqlx.sh migrate run --source db/migrations
+# Menjalankan sqlx-cli di container (alasan lihat scripts/cargo.sh); contoh: `scripts/sqlx.sh migrate run --source db/migrations`.
 set -euo pipefail
 
 export MSYS_NO_PATHCONV=1

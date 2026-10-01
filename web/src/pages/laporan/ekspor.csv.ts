@@ -1,18 +1,4 @@
-/**
- * Unduhan laporan penjualan sebagai CSV.
- *
- * Dibuat di server, bukan di browser: seluruh aplikasi ini bekerja tanpa
- * JavaScript, dan ekspor yang hanya jalan kalau JS hidup akan jadi satu-
- * satunya fitur yang diam-diam hilang. Sebagai tautan biasa, ekspor juga
- * ikut bekerja di tab baru, "simpan tautan sebagai", dan riwayat unduhan.
- *
- * SARINGANNYA DIBACA DARI URL YANG SAMA dengan halaman laporan (lihat
- * `lib/laporan.ts`), jadi berkas yang terunduh tidak pernah berisi periode
- * yang berbeda dari yang sedang dilihat.
- *
- * CSV, bukan XLSX. Keduanya sama-sama terbuka di Excel dan Google Sheets;
- * CSV tidak menuntut pustaka penulis berkas biner ikut terpasang di server.
- */
+/** CSV dibuat di server agar ekspor jalan tanpa JavaScript dan sebagai tautan biasa; saringan dari URL yang sama dengan laporan, CSV (bukan XLSX) agar tak butuh pustaka biner. */
 import type { APIRoute } from 'astro';
 import { api, ApiRequestError, type SalesReport } from '../../lib/api';
 import {
@@ -26,19 +12,10 @@ import {
 import { waktuEkspor } from '../../lib/format';
 import { ambilToken } from '../../lib/session';
 
-/**
- * Batas baris yang ikut terunduh. Sama dengan batas atas backend: lebih dari
- * ini akan dipotong diam-diam, dan berkas yang tidak lengkap tanpa ada yang
- * memberitahu lebih buruk daripada berkas yang besar.
- */
+/** Batas baris unduhan sama dengan batas atas backend; lebih dari itu terpotong diam-diam, dan berkas tak lengkap tanpa pemberitahuan lebih buruk daripada berkas besar. */
 const BARIS_MAKS = 1000;
 
-/**
- * Menyiapkan satu sel CSV.
- *
- * Tanda kutip, koma, dan baris baru harus dikutip -- nama pelanggan dan
- * kategori beban diketik bebas, jadi ketiganya benar-benar bisa muncul.
- */
+/** Menyiapkan satu sel CSV: tanda kutip, koma, dan baris baru harus dikutip karena nama pelanggan dan kategori beban diketik bebas. */
 function sel(nilai: string | number | null): string {
   const teks = nilai === null ? '' : String(nilai);
   return /[",\r\n]/.test(teks) ? `"${teks.replaceAll('"', '""')}"` : teks;
@@ -49,8 +26,7 @@ function baris(nilai: (string | number | null)[]): string {
 }
 
 export const GET: APIRoute = async ({ url, cookies, redirect }) => {
-  // Middleware melewatkan alamat yang mengandung titik (dianggap aset), jadi
-  // `locals.user` tidak terisi di sini dan sesi diperiksa sendiri.
+  // Middleware kini ikut memeriksa sesi untuk CSV; pemeriksaan token di sini tetap sebagai lapis kedua.
   const token = ambilToken(cookies);
   if (!token) return redirect('/login', 302);
 
@@ -60,8 +36,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
   try {
     laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, BARIS_MAKS)}`, { token });
   } catch (err) {
-    // 401 sesi habis, 403 bukan owner. Keduanya dijawab dengan mengembalikan
-    // pengguna ke aplikasi, bukan dengan berkas berisi pesan galat.
+    // 401 sesi habis, 403 bukan owner; keduanya dijawab dengan mengembalikan pengguna ke aplikasi, bukan berkas berisi pesan galat.
     if (err instanceof ApiRequestError && (err.status === 401 || err.status === 403)) {
       return redirect(err.status === 401 ? '/login' : '/', 302);
     }
@@ -121,15 +96,13 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
   const namaBerkas = `laporan-penjualan-${saringan.periode}-${waktuEkspor(new Date().toISOString()).slice(0, 10)}.csv`;
 
   return new Response(
-    // BOM di depan. Tanpa itu Excel di Windows membaca berkas sebagai
-    // encoding lokal dan nama pelanggan berhuruf non-ASCII jadi rusak.
+    // BOM di depan agar Excel di Windows tak membaca berkas sebagai encoding lokal dan merusak nama non-ASCII.
     `﻿${isi}`,
     {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="${namaBerkas}"`,
-        // Laporan berubah tiap ada transaksi baru; tidak ada yang boleh
-        // menyimpannya sebagai jawaban untuk permintaan berikutnya.
+        // Laporan berubah tiap ada transaksi baru, jadi tak boleh disimpan sebagai jawaban permintaan berikutnya.
         'Cache-Control': 'no-store',
       },
     },

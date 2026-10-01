@@ -1,9 +1,4 @@
-//! Endpoint dasbor dan laporan penjualan.
-//!
-//! Keduanya owner saja. Angka omzet, laba, dan harga pokok adalah isi buku
-//! toko; kasir dan pengepak tidak punya urusan dengannya, dan pembatasannya
-//! ada di sini -- bukan hanya di menu frontend, yang bisa dilewati siapa pun
-//! yang mengetikkan alamatnya sendiri.
+//! Endpoint dasbor dan laporan khusus owner (omzet, laba, harga pokok adalah isi buku toko), dibatasi di sini bukan hanya di menu frontend.
 
 use super::repo::{
     self, Counts, ExpenseSlice, LowStockProduct, MonthlyPoint, SaleRow, SalesFilter, SalesSummary,
@@ -29,9 +24,7 @@ pub fn router() -> Router<AppState> {
 const DASBOR_DAFTAR: i64 = 5;
 /// Produk terlaris yang ditampilkan laporan.
 const TERLARIS: i64 = 10;
-/// Batas atas daftar penjualan pada laporan. Cukup besar untuk ekspor satu
-/// periode, dan tetap berbatas supaya satu request tidak bisa menarik
-/// seluruh tabel.
+/// Batas atas daftar penjualan di laporan: cukup untuk ekspor satu periode tapi berbatas agar satu request tak menarik seluruh tabel.
 const PENJUALAN_MAKS: i64 = 1000;
 const PENJUALAN_BAKU: i64 = 15;
 
@@ -39,27 +32,18 @@ const PENJUALAN_BAKU: i64 = 15;
 
 #[derive(Debug, Deserialize)]
 struct ReportQuery {
-    /// `today`, `week`, `month`, `year`, atau `all`. Kosong berarti bulan
-    /// ini -- laporan yang terbuka dengan seluruh riwayat sekaligus jarang
-    /// menjawab pertanyaan siapa pun.
+    /// `today`, `week`, `month`, `year`, atau `all`; kosong = bulan ini karena riwayat seluruhnya jarang menjawab pertanyaan siapa pun.
     period: Option<String>,
     payment_method: Option<String>,
     #[serde(rename = "type")]
     transaction_type: Option<String>,
-    /// Banyaknya baris penjualan yang ikut dikembalikan. Halaman memakai
-    /// nilai baku; ekspor meminta lebih banyak.
+    /// Banyaknya baris penjualan yang dikembalikan; halaman memakai nilai baku, ekspor meminta lebih.
     sales_limit: Option<i64>,
-    /// Periode Produk Terlaris, terpisah dari `period`. Kosong berarti
-    /// ikut `period` di atas -- lihat kartu "Produk Terlaris" di halaman
-    /// laporan, yang bisa disaring waktunya sendiri tanpa mengubah
-    /// seluruh laporan.
+    /// Periode Produk Terlaris terpisah dari `period`; kosong = ikut `period`.
     top_period: Option<String>,
 }
 
-/// Menerjemahkan periode menjadi satuan `date_trunc` milik Postgres.
-///
-/// Hasilnya `&'static str`, jadi tidak ada teks dari pengguna yang pernah
-/// sampai ke query -- nilai yang tidak dikenal ditolak di sini.
+/// Menerjemahkan periode ke satuan `date_trunc` berupa `&'static str`, sehingga teks pengguna tak pernah sampai ke query dan nilai tak dikenal ditolak.
 fn satuan_periode(period: Option<&str>) -> AppResult<Option<&'static str>> {
     match period.unwrap_or("month") {
         "today" => Ok(Some("day")),
@@ -73,9 +57,7 @@ fn satuan_periode(period: Option<&str>) -> AppResult<Option<&'static str>> {
     }
 }
 
-/// Nilai kolom yang dikunci CHECK constraint di database. Diperiksa di sini
-/// supaya saringan yang salah ketik dijawab 400 dengan pesan yang bisa
-/// dibaca, bukan diam-diam menghasilkan laporan kosong.
+/// Nilai kolom yang dikunci CHECK di DB, diperiksa di sini agar saringan salah ketik dijawab 400 berpesan jelas, bukan laporan kosong diam-diam.
 fn pilihan(nilai: Option<String>, sah: &[&str], nama: &str) -> AppResult<Option<String>> {
     let Some(nilai) = nilai
         .map(|v| v.trim().to_string())
@@ -94,9 +76,7 @@ fn pilihan(nilai: Option<String>, sah: &[&str], nama: &str) -> AppResult<Option<
 }
 
 impl ReportQuery {
-    /// Mengembalikan saringan utama, batas baris penjualan, dan saringan
-    /// Produk Terlaris (periode boleh beda, metode bayar & jenis transaksi
-    /// selalu ikut saringan utama).
+    /// Mengembalikan saringan utama, batas baris, dan saringan Produk Terlaris (periode boleh beda, metode bayar dan jenis transaksi ikut saringan utama).
     fn menjadi_filter(self) -> AppResult<(SalesFilter, i64, SalesFilter)> {
         let period = satuan_periode(self.period.as_deref())?;
         let payment_method = pilihan(
@@ -141,9 +121,7 @@ impl ReportQuery {
 struct Dashboard {
     today_revenue: rust_decimal::Decimal,
     month_revenue: rust_decimal::Decimal,
-    /// Omzet kemarin, untuk pil naik/turun di kartu "Omzet Hari Ini".
-    /// Dihitung lewat `sales_summary_previous` yang sama dipakai Laporan --
-    /// tidak ada query baru, hanya jendela `day` digeser satu hari.
+    /// Omzet kemarin untuk pil di "Omzet Hari Ini", lewat `sales_summary_previous` yang sama dengan Laporan (jendela `day` digeser sehari).
     yesterday_revenue: rust_decimal::Decimal,
     /// Omzet bulan lalu, untuk pil naik/turun di kartu "Omzet Bulan Ini".
     last_month_revenue: rust_decimal::Decimal,
@@ -165,10 +143,7 @@ async fn dashboard(State(state): State<AppState>, user: CurrentUser) -> AppResul
         low_stock_count,
     } = repo::counts(&state.pool).await?;
 
-    // Dasbor tidak punya saringan metode bayar/jenis transaksi, jadi
-    // `SalesFilter::periode` (yang lain kosong) sudah pas -- persis yang
-    // dipakai `today_and_month` di atas, hanya jendelanya digeser satu
-    // hari/bulan ke belakang oleh `sales_summary_previous`.
+    // Dasbor tanpa saringan metode bayar/jenis transaksi, jadi `SalesFilter::periode` pas, sama dengan `today_and_month` dengan jendela digeser satu hari/bulan.
     let yesterday_revenue =
         repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Some("day")))
             .await?
@@ -180,9 +155,7 @@ async fn dashboard(State(state): State<AppState>, user: CurrentUser) -> AppResul
             .map(|s| s.revenue)
             .unwrap_or_default();
 
-    // Daftar penjualan terakhir sengaja tanpa batas periode: dasbor yang
-    // kosong sepanjang pagi karena belum ada transaksi hari ini tidak
-    // memberi tahu apa pun.
+    // Daftar penjualan terakhir tanpa batas periode karena dasbor kosong sepanjang pagi tak memberi tahu apa pun.
     let recent_sales =
         repo::recent_sales(&state.pool, &SalesFilter::periode(None), DASBOR_DAFTAR).await?;
     let low_stock_products = repo::low_stock(&state.pool, DASBOR_DAFTAR).await?;
@@ -206,9 +179,7 @@ async fn dashboard(State(state): State<AppState>, user: CurrentUser) -> AppResul
 #[derive(Debug, Serialize)]
 struct SalesReport {
     summary: SalesSummary,
-    /// Angka periode setara sebelumnya, untuk kartu trend naik/turun.
-    /// `null` kalau saringan "Seluruh Waktu" -- lihat
-    /// `repo::sales_summary_previous`.
+    /// Angka periode setara sebelumnya untuk kartu trend, `null` bila "Seluruh Waktu" (lihat `repo::sales_summary_previous`).
     previous_summary: Option<SalesSummary>,
     trend: Vec<MonthlyPoint>,
     expense_breakdown: Vec<ExpenseSlice>,
@@ -216,9 +187,7 @@ struct SalesReport {
     sales: Vec<SaleRow>,
     /// Nilai persediaan sekarang; tidak ikut saringan periode.
     stock_value: StockValue,
-    /// Banyaknya baris yang terbawa di `sales`, dibandingkan batas yang
-    /// diminta. Halaman memakainya untuk mengatakan bahwa daftarnya
-    /// dipotong, bukan bahwa hanya segitu penjualannya.
+    /// Jumlah baris di `sales` dibanding batas yang diminta, agar halaman bisa mengatakan daftar dipotong, bukan hanya segitu penjualannya.
     sales_limit: i64,
 }
 

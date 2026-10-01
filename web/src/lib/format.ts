@@ -10,15 +10,7 @@ export function rupiah(nilai: number): string {
   return RUPIAH.format(nilai);
 }
 
-/**
- * Zona waktu toko, sama dengan yang dipakai backend saat memotong laporan
- * per hari (lihat `backend/src/reports/mod.rs`).
- *
- * Disebut eksplisit karena halaman ini dirender di server, dan server
- * produksi berjalan pada UTC: tanpa ini setiap jam yang tampil meleset tujuh
- * jam, dan transaksi sore terlihat terjadi pada hari yang sama dengan
- * laporan "hari ini" yang sudah berpindah.
- */
+/** Zona waktu toko, sama dengan backend saat memotong laporan per hari (`reports/mod.rs`); disebut eksplisit karena server produksi UTC dan jam akan meleset tujuh jam. */
 const ZONA = 'Asia/Jakarta';
 
 const WAKTU = new Intl.DateTimeFormat('id-ID', {
@@ -31,13 +23,7 @@ export function waktu(iso: string): string {
   return WAKTU.format(new Date(iso));
 }
 
-/**
- * Waktu untuk berkas ekspor: `2026-09-16 14:05`, zona toko.
- *
- * Locale `sv-SE` dipilih bukan karena bahasanya, melainkan karena
- * formatnya -- ISO 8601 tanpa huruf, satu-satunya bentuk yang diurutkan
- * benar oleh spreadsheet apa pun dan tetap terbaca manusia.
- */
+/** Waktu untuk ekspor (`2026-09-16 14:05`, zona toko); locale `sv-SE` dipilih karena formatnya, ISO 8601 yang terurut benar di spreadsheet dan terbaca manusia. */
 const WAKTU_EKSPOR = new Intl.DateTimeFormat('sv-SE', {
   dateStyle: 'short',
   timeStyle: 'short',
@@ -52,9 +38,7 @@ const TANGGAL = new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' });
 
 /** Tanggal tanpa jam, untuk nilai `DATE` seperti kedaluwarsa batch. */
 export function tanggal(iso: string): string {
-  // Dibaca sebagai tanggal lokal, bukan UTC tengah malam: `new Date('2026-01-01')`
-  // di zona WIB menggeser tampilan jadi 1 Januari pukul 07.00, dan tanggal
-  // kedaluwarsa yang meleset sehari bukan kesalahan yang boleh dibiarkan.
+  // Dibaca sebagai tanggal lokal, bukan UTC tengah malam, karena `new Date('2026-01-01')` di WIB bergeser dan tanggal kedaluwarsa tak boleh meleset sehari.
   const [tahun, bulan, hari] = iso.slice(0, 10).split('-').map(Number);
   return TANGGAL.format(new Date(tahun, bulan - 1, hari));
 }
@@ -68,22 +52,14 @@ export function sisaHari(iso: string): number {
   return Math.round((target.getTime() - hariIni.getTime()) / 86_400_000);
 }
 
-/**
- * Perubahan satu angka dibanding waktu pembanding sebelumnya -- dipakai
- * kartu ringkasan di Dasbor dan Laporan, supaya keduanya menghitung dan
- * menampilkan tren dengan cara yang sama persis.
- */
+/** Perubahan satu angka dibanding pembanding, dipakai kartu Dasbor dan Laporan agar tren dihitung dan ditampilkan sama persis. */
 export interface Tren {
   arah: 'naik' | 'turun';
   /** `null` kalau angka pembanding nol -- persentase dari nol tidak berarti apa-apa. */
   persen: number | null;
 }
 
-/**
- * `null` kalau tidak ada pembanding (mis. saringan "Seluruh Waktu" di
- * Laporan) atau kalau keduanya persis sama -- tidak ada yang perlu
- * ditunjukkan.
- */
+/** `null` bila tak ada pembanding (mis. "Seluruh Waktu") atau keduanya persis sama. */
 export function hitungTren(sekarang: number, dulu: number | null | undefined): Tren | null {
   if (dulu === null || dulu === undefined || sekarang === dulu) return null;
   if (dulu === 0) return { arah: sekarang > 0 ? 'naik' : 'turun', persen: null };

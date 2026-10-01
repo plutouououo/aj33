@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
-# Mengisi katalog dengan produk buatan untuk menguji performa daftar produk.
-# Development saja.
-#
-# Semua baris yang dibuat di sini ber-SKU "PERF-xxxxxx", jadi bisa dibedakan
-# dari produk seed biasa dan dihapus kembali tanpa menyentuh yang lain.
-#
-#   scripts/seed-perf.sh [jumlah]   tambah produk (bawaan 5000)
-#   scripts/seed-perf.sh --bersihkan   hapus produk PERF- yang belum terpakai
+# Mengisi katalog produk buatan untuk uji performa (development saja), ber-SKU "PERF-xxxxxx" agar bisa dihapus lagi; `scripts/seed-perf.sh [jumlah]` (bawaan 5000) atau `--bersihkan`.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -16,9 +9,7 @@ psql() {
 }
 
 if [[ "${1:-}" == "--bersihkan" ]]; then
-  # Produk yang sudah pernah terjual atau masuk tiket tidak dihapus:
-  # foreign key-nya menahan, dan riwayat transaksi tidak boleh kehilangan
-  # produk yang diacunya. Sisanya dibuang.
+  # Produk yang pernah terjual atau masuk tiket tidak dihapus karena foreign key menahan dan riwayat transaksi tak boleh kehilangan produknya; sisanya dibuang.
   psql <<'SQL'
 DELETE FROM products p
 WHERE p.sku LIKE 'PERF-%'
@@ -39,9 +30,7 @@ if ! [[ "$JUMLAH" =~ ^[0-9]+$ ]] || [[ "$JUMLAH" -lt 1 ]]; then
   exit 1
 fi
 
-# Nama dirakit dari tiga daftar kata supaya pencarian ILIKE menemukan jumlah
-# hasil yang berbeda-beda per kata kunci -- daftar produk yang semuanya
-# bernama sama tidak menguji apa pun.
+# Nama dirakit dari tiga daftar kata agar pencarian ILIKE menemukan jumlah hasil berbeda per kata kunci; produk bernama sama tak menguji apa pun.
 psql -v jumlah="$JUMLAH" <<'SQL'
 WITH kat AS (
   SELECT array_agg(id ORDER BY name) AS ids FROM categories

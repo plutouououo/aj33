@@ -1,5 +1,4 @@
-//! Alur kerja impor: unggah, tinjau, setujui, batalkan, ulangi, dan commit
-//! satu baris (dipanggil worker).
+//! Alur kerja impor: unggah, tinjau, setujui, batalkan, ulangi, dan commit satu baris (dipanggil worker).
 
 use super::repo::{self, ImportBatchTerkunci, ImportRowUntukCommit, NewImportRow};
 use super::{parse, reader, ImportStatus};
@@ -89,9 +88,7 @@ pub async fn upload(
         raw_json.push(serde_json::Value::Object(raw_obj));
     }
 
-    // SKU dobel DALAM BERKAS -- baris KEDUA yang ditandai, trim+lowercase
-    // (BUKAN normalize_key, supaya "INV-001" dan "INV_001" tidak dianggap
-    // sama -- lihat parse::validate_row).
+    // SKU dobel dalam berkas: baris kedua yang ditandai, trim+lowercase (bukan `normalize_key` agar "INV-001" dan "INV_001" tak dianggap sama, lihat `parse::validate_row`).
     let mut sku_terlihat: HashSet<String> = HashSet::new();
     let sku_duplikat: Vec<bool> = baris_terurai
         .iter()
@@ -112,10 +109,7 @@ pub async fn upload(
     let peta_sku = match repo::cari_produk_by_sku(&state.pool, &sku_list).await {
         Ok(peta) => peta,
         Err(err) => {
-            // Lookup gagal TIDAK membatalkan unggahan -- semua baris
-            // diperlakukan sebagai baru. Peringatannya sudah terlihat di
-            // halaman review lewat WARN "kategori" yang serupa; di sini
-            // cukup dicatat ke log.
+            // Lookup gagal tak membatalkan unggahan (semua baris dianggap baru); peringatan serupa sudah di review lewat WARN "kategori", di sini cukup log.
             tracing::warn!(error = %err, "lookup SKU gagal saat unggah impor");
             HashMap::new()
         }
@@ -229,10 +223,7 @@ pub async fn submit(
     Ok(())
 }
 
-/// Memvalidasi DUA langkah berurutan (`pending_review` -> `approved` ->
-/// `committing`) tapi hanya `committing` yang tertulis -- worker langsung
-/// mengambilnya begitu disetujui, jadi tidak ada gunanya menahan di
-/// `approved` sesaat. Lihat catatan di `import::mod`.
+/// Memvalidasi dua langkah (`pending_review` → `approved` → `committing`) tapi hanya `committing` yang tertulis karena worker langsung mengambilnya (lihat `import::mod`).
 pub async fn approve(
     pool: &PgPool,
     batch_id: Uuid,
@@ -360,9 +351,7 @@ pub async fn map_category(
     Ok(())
 }
 
-/// Commit SATU baris -- dipanggil worker (`super::worker`). Idempoten:
-/// worker hanya mengambil baris `commit_state='pending'`, jadi baris yang
-/// sudah `ok` tidak pernah lewat sini lagi.
+/// Commit satu baris dipanggil worker; idempoten karena worker hanya mengambil `commit_state='pending'`.
 pub async fn commit_row(
     state: &AppState,
     batch: &ImportBatchTerkunci,
@@ -386,9 +375,7 @@ async fn proses_baris(
             let created_by = batch
                 .uploaded_by
                 .ok_or_else(|| AppError::internal("Batch impor tanpa pengunggah."))?;
-            // Baris CREATE dengan harga kosong = 0 (sudah diberi WARN saat
-            // upload, lihat parse::validate_row) -- BEDA dari baris UPDATE
-            // di bawah, yang `None` berarti jangan sentuh harga sama sekali.
+            // Baris CREATE dengan harga kosong = 0 (sudah WARN saat upload), beda dari UPDATE di bawah yang `None` berarti jangan sentuh harga.
             let is_active = batch.publish_on_commit && row.published.unwrap_or(true);
 
             catalog_service::create_product(
@@ -424,10 +411,7 @@ async fn proses_baris(
                 .match_product_id
                 .ok_or_else(|| AppError::internal("Baris update tanpa match_product_id."))?;
 
-            // Toggle batch menentukan apakah `published` DISENTUH sama
-            // sekali -- bukan nilainya. Kalau toggle mati, kolom `published`
-            // baris (kosong ataupun terisi) tidak pernah mengubah is_active
-            // produk yang sudah ada.
+            // Toggle batch menentukan apakah `published` disentuh, bukan nilainya; bila mati, kolom `published` tak pernah mengubah `is_active` produk yang ada.
             let is_active = if batch.publish_on_commit {
                 row.published
             } else {
@@ -438,9 +422,7 @@ async fn proses_baris(
                 state,
                 target,
                 ProductPatch {
-                    // `harga` dari rumus/eksplisit; `None` (harga & modal &
-                    // margin semua kosong) berarti JANGAN UBAH harga --
-                    // beda dari baris create yang jatuh ke 0.
+                    // `harga` dari rumus/eksplisit; `None` (harga, modal, margin kosong) berarti jangan ubah harga, beda dari create yang jatuh ke 0.
                     price: harga,
                     cost_price: row.cost.map(Some),
                     category_id: row.category_id.map(Some),

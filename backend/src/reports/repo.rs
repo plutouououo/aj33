@@ -1,40 +1,4 @@
-//! Query agregat untuk dasbor dan laporan.
-//!
-//! Semua query penjualan berbagi saringan yang sama -- periode, metode
-//! bayar, jenis transaksi -- dan hanya menghitung transaksi `completed`:
-//! transaksi yang dibatalkan bukan omzet.
-//!
-//! Saringannya ditulis ulang di tiap query, bukan dirangkai dari potongan
-//! string. `sqlx::query!` memeriksa SQL ke database saat kompilasi, dan itu
-//! hanya bisa dilakukan kalau SQL-nya literal. Pengulangan ini harganya, dan
-//! yang dibeli adalah kolom salah ketik yang ketahuan saat `cargo build`,
-//! bukan saat pemilik toko membuka laporan.
-//!
-//! OMZET ADALAH `subtotal - discount_amount`, BUKAN `total_amount`. Sejak
-//! migrasi 0007 ongkir punya kolom sendiri dan ikut tertambah di
-//! `total_amount`; ongkir bukan barang dan tidak punya margin, jadi
-//! memasukkannya ke omzet membuat setiap perhitungan laba salah. Sejak
-//! migrasi 0015 diskon juga punya kolom sendiri, dan ia kebalikannya: uang
-//! yang TIDAK pernah diterima, jadi mengabaikannya membuat omzet terlalu
-//! besar dan laba yang dilaporkan tidak pernah tercapai.
-//!
-//! OMZET SHOPEE TIDAK SEPENUHNYA CAIR. Shopee memotong `commission_fee`
-//! (persentase BISA DIEDIT kasir) + `service_fee` (persentase BISA DIEDIT,
-//! program opsional) + `withholding_tax` 0,5% (tetap) dari harga jualnya
-//! sendiri, ditambah `seller_order_processing_fee` Rp1.250 per PESANAN
-//! (bukan per barang), sebelum uangnya masuk ke toko. Nama field mengikuti
-//! `v2.payment.get_escrow_detail` Shopee (lihat migrasi 0018), bukan istilah
-//! rakitan sendiri. `revenue` tetap angka kotor -- sama dengan yang tercatat
-//! di struk -- tapi `profit` mengurangi potongan itu lewat `platform_fees`,
-//! supaya laba yang dilaporkan tidak lebih besar dari uang yang benar-benar
-//! diterima. Kanal toko dan Tokopedia/TikTok tidak kena potongan ini.
-//!
-//! Sejak migrasi 0017 nilainya DIBACA, bukan dihitung ulang: setiap transaksi
-//! Shopee menyimpan sendiri `platform_commission_fee`, `platform_service_fee`,
-//! `platform_withholding_tax`, dan `platform_order_processing_fee` -- angka
-//! yang sungguh dipakai saat checkout, termasuk kalau kasir mengedit persen
-//! komisi/layanannya. Menjumlahkan tarif tetap di sini lagi akan salah tepat
-//! untuk transaksi yang persennya diedit.
+//! Query agregat laporan: hanya transaksi `completed`; omzet = `subtotal - discount_amount` (bukan `total_amount`); `profit` mengurangi `platform_fees` Shopee dari kolom tersimpan (migrasi 0017/0018).
 
 use crate::error::AppResult;
 use chrono::{DateTime, Utc};
@@ -46,8 +10,7 @@ use uuid::Uuid;
 /// Saringan bersama seluruh angka penjualan.
 #[derive(Debug, Default, Clone)]
 pub struct SalesFilter {
-    /// Satuan untuk `date_trunc`: `day`, `week`, `month`, atau `year`.
-    /// `None` berarti seluruh waktu.
+    /// Satuan `date_trunc` (`day`, `week`, `month`, `year`); `None` berarti seluruh waktu.
     pub period: Option<&'static str>,
     pub payment_method: Option<String>,
     /// `walk_in` atau `pre_order`.
@@ -55,8 +18,7 @@ pub struct SalesFilter {
 }
 
 impl SalesFilter {
-    /// Saringan yang hanya membatasi periode. Dipakai dasbor, yang tidak
-    /// punya pilihan metode bayar maupun jenis transaksi.
+    /// Saringan yang hanya membatasi periode, dipakai dasbor yang tak punya metode bayar/jenis transaksi.
     pub fn periode(period: Option<&'static str>) -> Self {
         Self {
             period,
@@ -65,37 +27,22 @@ impl SalesFilter {
     }
 }
 
-/// Angka pokok satu periode. Beban dan harga pokok ikut di sini supaya
-/// laba bisa dihitung tanpa pemanggil perlu merangkainya sendiri.
+/// Angka pokok satu periode; beban dan harga pokok ikut agar laba dihitung tanpa perakitan pemanggil.
 #[derive(Debug, Serialize)]
 pub struct SalesSummary {
-    /// Omzet barang: jumlah `subtotal` sesudah diskon, tanpa ongkir. Angka
-    /// KOTOR -- sebelum potongan platform Shopee, sama seperti yang tercatat
-    /// di setiap transaksi. Lihat `platform_fees` untuk bagian yang tidak
-    /// pernah benar-benar cair ke toko.
+    /// Omzet barang: jumlah `subtotal` setelah diskon tanpa ongkir, angka kotor sebelum potongan Shopee (lihat `platform_fees`).
     pub revenue: Decimal,
-    /// Ongkir yang ditagihkan ke pembeli. Diperlihatkan terpisah supaya
-    /// jelas bahwa uang ini bukan hasil penjualan barang.
+    /// Ongkir yang ditagihkan ke pembeli, terpisah karena bukan hasil penjualan barang.
     pub shipping: Decimal,
-    /// Harga pokok barang terjual, diambil dari harga beli batch yang benar-
-    /// benar keluar. Batch tanpa harga beli jatuh ke `products.cost_price`
-    /// peninggalan data lama, dan kalau keduanya kosong dihitung nol --
-    /// lihat `items_without_cost`.
+    /// Harga pokok barang terjual dari harga beli batch yang keluar; batch tanpa harga beli jatuh ke `products.cost_price` peninggalan lama, kosong dihitung nol (lihat `items_without_cost`).
     pub cogs: Decimal,
     pub expenses: Decimal,
-    /// Jumlah `platform_commission_fee + platform_service_fee +
-    /// platform_withholding_tax + platform_order_processing_fee` tiap
-    /// transaksi pada periode ini -- dibaca langsung dari kolom yang
-    /// tersimpan saat checkout (migrasi 0017/0018), bukan dihitung ulang
-    /// dengan tarif tetap. Nol untuk kanal selain Shopee dan nol kalau tidak
-    /// ada penjualan Shopee pada periode ini.
+    /// Jumlah `platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee` periode ini dari kolom tersimpan (migrasi 0017/0018), nol selain Shopee.
     pub platform_fees: Decimal,
     /// `revenue - cogs - expenses - platform_fees`.
     pub profit: Decimal,
     pub transaction_count: i64,
-    /// Banyaknya baris keluaran stok yang harga pokoknya belum diisi. Selama angka
-    /// ini bukan nol, `cogs` dan `profit` adalah batas atas, bukan nilai
-    /// sebenarnya -- dan halaman laporan mengatakannya.
+    /// Baris keluaran stok yang harga pokoknya belum diisi; selama bukan nol `cogs` dan `profit` adalah batas atas dan halaman mengatakannya.
     pub items_without_cost: i64,
 }
 
@@ -155,8 +102,7 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
     .fetch_one(pool)
     .await?;
 
-    // Beban tidak mengenal metode bayar maupun jenis transaksi -- yang
-    // berlaku padanya hanya periode.
+    // Beban tak mengenal metode bayar maupun jenis transaksi, hanya periode.
     let beban = sqlx::query_scalar!(
         r#"
         SELECT COALESCE(SUM(e.amount), 0) AS "total!"
@@ -181,20 +127,7 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
     })
 }
 
-/// Angka periode SEBELUMNYA, sepanjang periode yang sama, untuk kartu trend
-/// di halaman laporan. `None` kalau saringan "Seluruh Waktu" -- rentang itu
-/// tidak punya periode sebelumnya untuk dibandingkan.
-///
-/// Jendelanya `[date_trunc(period, now) - '1 <unit>', date_trunc(period,
-/// now))`, digeser satu unit periode ke belakang dari jendela
-/// `sales_summary`. Query di bawah meniru `sales_summary` baris demi baris
-/// -- satu-satunya beda adalah batas waktu closed-open ini menggantikan
-/// `>= date_trunc(...)` yang terbuka ke `now()`.
-///
-/// `'1 ' || $1` aman sebagai literal interval di sini karena `$1` cuma
-/// pernah salah satu dari `day/week/month/year` yang sudah divalidasi
-/// `satuan_periode()` di `routes.rs` -- tidak pernah teks bebas dari
-/// pengguna.
+/// Periode sebelumnya untuk kartu trend (`None` bila "Seluruh Waktu"): jendela closed-open yang meniru `sales_summary`; `'1 ' || $1` aman karena `$1` divalidasi `satuan_periode()`.
 pub async fn sales_summary_previous(
     pool: &PgPool,
     filter: &SalesFilter,
@@ -293,8 +226,7 @@ pub struct TodayAndMonth {
     pub today_transaction_count: i64,
 }
 
-/// Satu query untuk dua angka: batas bulan sudah mencakup batas hari, jadi
-/// `FILTER` cukup untuk memisahkan keduanya tanpa membaca tabel dua kali.
+/// Satu query untuk dua angka: batas bulan mencakup batas hari sehingga `FILTER` memisahkan keduanya tanpa membaca tabel dua kali.
 pub async fn today_and_month(pool: &PgPool) -> AppResult<TodayAndMonth> {
     let row = sqlx::query!(
         r#"
@@ -330,15 +262,7 @@ pub struct MonthlyPoint {
     pub expenses: Decimal,
 }
 
-/// Omzet dan beban enam bulan terakhir, termasuk bulan yang kosong.
-///
-/// Deret bulannya dibuat Postgres dengan `generate_series`, bukan dirakit di
-/// Rust: kalau Rust yang menentukan "bulan ini", zona waktunya harus
-/// ditiru di dua tempat dan cepat atau lambat keduanya akan berbeda.
-///
-/// Saringan periode sengaja tidak ikut -- grafik ini memang selalu enam
-/// bulan. Saringan metode bayar dan jenis transaksi tetap berlaku supaya
-/// grafik bercerita tentang irisan data yang sama dengan kartu di atasnya.
+/// Omzet dan beban enam bulan terakhir termasuk bulan kosong (`generate_series` di Postgres agar zona waktu tak ditiru); saringan periode tak ikut, lainnya ikut.
 pub async fn monthly_trend(pool: &PgPool, filter: &SalesFilter) -> AppResult<Vec<MonthlyPoint>> {
     let rows = sqlx::query!(
         r#"
@@ -419,19 +343,11 @@ pub async fn expense_breakdown(
         .collect())
 }
 
-/// Satu baris tabel produk terlaris.
-///
-/// `revenue` di sini harga barangnya SEBELUM diskon. Diskon melekat pada
-/// transaksi, bukan pada barang tertentu, jadi membagikannya ke tiap baris
-/// berarti mengarang angka yang tidak pernah ada di struk mana pun. Yang
-/// dijawab tabel ini adalah "barang mana yang paling laku", dan untuk
-/// pertanyaan itu harga jualnya yang relevan -- bukan potongan yang diberikan
-/// kepada pembelinya.
+/// Baris produk terlaris; `revenue` di sini harga barang sebelum diskon karena diskon melekat pada transaksi dan membaginya ke barang berarti mengarang angka yang tak ada di struk.
 #[derive(Debug, Serialize)]
 pub struct TopProduct {
     pub product_id: Uuid,
-    /// Nama saat terjual, bukan nama sekarang: produk yang sudah diganti
-    /// namanya tetap dikenali pada laporan bulan lalu.
+    /// Nama saat terjual, bukan nama sekarang, agar produk yang diganti namanya tetap dikenali di laporan lama.
     pub name: String,
     pub sku: Option<String>,
     pub qty: i64,
@@ -483,8 +399,7 @@ pub async fn top_products(
         .collect())
 }
 
-/// Satu baris daftar penjualan. Bentuk ringkas: cukup untuk tabel dan
-/// ekspor, tanpa menarik seluruh item tiap transaksi.
+/// Satu baris daftar penjualan, bentuk ringkas untuk tabel dan ekspor tanpa seluruh item.
 #[derive(Debug, Serialize)]
 pub struct SaleRow {
     pub id: Uuid,
@@ -559,18 +474,14 @@ pub struct TransactionDetailItem {
     pub product_id: Uuid,
     /// Nama saat terjual, bukan nama sekarang -- lihat `TopProduct::name`.
     pub name: String,
-    /// SKU produk SAAT INI: item transaksi tidak menyimpan SKU sendiri,
-    /// jadi ini dibaca dari `products` dan `null` kalau produknya sudah
-    /// dihapus.
+    /// SKU produk saat ini (item transaksi tak menyimpan SKU), `null` bila produk sudah dihapus.
     pub sku: Option<String>,
     pub qty: i32,
     pub unit_price: Decimal,
     pub subtotal: Decimal,
 }
 
-/// Detail lengkap satu transaksi untuk halaman `/laporan/transaksi/{id}`.
-/// Owner saja -- sama seperti `sales_summary`, karena memuat laba dan
-/// potongan Shopee.
+/// Detail lengkap satu transaksi untuk `/laporan/transaksi/{id}`; Owner saja karena memuat laba dan potongan Shopee.
 #[derive(Debug, Serialize)]
 pub struct TransactionDetail {
     pub id: Uuid,
@@ -598,14 +509,10 @@ pub struct TransactionDetail {
     pub platform_service_fee: Decimal,
     pub platform_withholding_tax: Decimal,
     pub platform_order_processing_fee: Decimal,
-    /// Harga pokok baris yang keluar untuk transaksi ini. Batas atas kalau
-    /// `items_without_cost > 0` -- lihat `SalesSummary::cogs`.
+    /// Harga pokok baris yang keluar untuk transaksi ini, batas atas bila `items_without_cost > 0` (lihat `SalesSummary::cogs`).
     pub cogs: Decimal,
     pub items_without_cost: i64,
-    /// `subtotal - discount_amount - cogs - (platform_commission_fee +
-    /// platform_service_fee + platform_withholding_tax +
-    /// platform_order_processing_fee)`. Beban toko sengaja tidak ikut --
-    /// itu milik periode, bukan transaksi tunggal.
+    /// `subtotal - discount_amount - cogs - (platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee)`; beban toko tak ikut karena milik periode.
     pub net_profit: Decimal,
     pub items: Vec<TransactionDetailItem>,
 }
@@ -670,9 +577,7 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
     .fetch_all(pool)
     .await?;
 
-    // Sama persis logikanya dengan query `pokok` di `sales_summary`, cuma
-    // disaring ke satu transaksi lewat `reference_id` alih-alih rentang
-    // periode.
+    // Logikanya sama dengan query `pokok` di `sales_summary`, disaring ke satu transaksi lewat `reference_id`.
     let pokok = sqlx::query!(
         r#"
         SELECT COALESCE(
@@ -742,11 +647,7 @@ pub struct LowStockProduct {
     pub low_stock_threshold: i32,
 }
 
-/// Peringatan stok menipis, yang paling tipis lebih dulu.
-///
-/// Hanya produk yang benar-benar dijual: induk yang punya varian tidak
-/// memegang stok sendiri, jadi angka nol di barisnya bukan peringatan
-/// tentang apa pun.
+/// Peringatan stok menipis, tipis dulu; hanya produk yang dijual (induk berevarian tak memegang stok sendiri).
 pub async fn low_stock(pool: &PgPool, limit: i64) -> AppResult<Vec<LowStockProduct>> {
     let rows = sqlx::query_as!(
         LowStockProduct,
@@ -771,18 +672,11 @@ pub async fn low_stock(pool: &PgPool, limit: i64) -> AppResult<Vec<LowStockProdu
 #[derive(Debug, Serialize)]
 pub struct StockValue {
     pub value: Decimal,
-    /// Batch yang masih punya sisa tetapi harga belinya kosong di batch
-    /// maupun produk. Dihitung nol, jadi selama bukan nol `value` adalah
-    /// batas bawah.
+    /// Batch bersisa tanpa harga beli di batch maupun produk dihitung nol, jadi selama bukan nol `value` adalah batas bawah.
     pub batches_without_cost: i64,
 }
 
-/// Potret stok hari ini -- tidak ikut saringan periode. Harga beli dibaca
-/// dengan urutan yang sama seperti harga pokok di `sales_summary`: harga
-/// batch, lalu `products.cost_price` peninggalan data lama.
-///
-/// Induk yang punya varian dilewati: stok sungguhan ada di varian, dan
-/// batch induk tidak ada.
+/// Potret stok hari ini tanpa saringan periode; harga beli berurutan seperti `sales_summary` (batch, lalu `products.cost_price`); induk berevarian dilewati karena stok ada di varian.
 pub async fn stock_value(pool: &PgPool) -> AppResult<StockValue> {
     let row = sqlx::query!(
         r#"

@@ -5,12 +5,7 @@ use crate::config::TiktokConfig;
 use crate::error::{AppError, AppResult};
 use serde::Deserialize;
 
-/// Bentuk jawaban baku TikTok Shop: `code`/`message` selalu ada, `data`
-/// hanya kalau berhasil.
-///
-/// Bound dituliskan sendiri karena derive serde akan menambahkan
-/// `T: Default` gara-gara `#[serde(default)]` di `data` -- padahal yang
-/// diberi nilai default adalah `Option<T>`, bukan `T`.
+/// Bentuk jawaban baku TikTok Shop (`code`/`message` selalu ada, `data` hanya bila berhasil); bound ditulis sendiri karena derive serde menambah `T: Default` akibat `#[serde(default)]`.
 #[derive(Debug, Deserialize)]
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct Amplop<T> {
@@ -36,13 +31,7 @@ fn sekarang_epoch() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-/// Menyusun URL lengkap beserta tanda tangannya.
-///
-/// Tanda tangan dihitung dari parameter yang SAMA dengan yang benar-benar
-/// dikirim. Karena itu daftar parameter dirakit sekali di sini lalu dipakai
-/// untuk keduanya -- kalau dirakit dua kali, satu perubahan kecil di salah
-/// satunya membuat semua permintaan ditolak dengan pesan yang tidak
-/// menjelaskan apa-apa.
+/// Menyusun URL lengkap beserta tanda tangan; parameter dirakit sekali dan dipakai untuk keduanya, karena dirakit dua kali membuat satu perubahan kecil menolak semua permintaan tanpa penjelasan.
 fn url_bertanda_tangan(
     cfg: &TiktokConfig,
     path: &str,
@@ -115,12 +104,7 @@ async fn panggil<T: for<'de> Deserialize<'de>>(
     Ok(body.data)
 }
 
-/// Mengambil toko pertama yang mengizinkan aplikasi ini.
-///
-/// Satu aplikasi bisa diberi izin oleh beberapa toko, tapi AJ33 mengelola
-/// satu toko. Mengambil yang pertama adalah pembatasan yang disengaja;
-/// mendukung banyak toko berarti mengubah `platforms` jadi satu baris per
-/// toko, bukan satu baris per platform.
+/// Mengambil toko pertama yang mengizinkan aplikasi: pembatasan disengaja karena AJ33 mengelola satu toko (banyak toko berarti `platforms` jadi satu baris per toko).
 pub async fn toko_pertama_yang_diizinkan(
     cfg: &TiktokConfig,
     access_token: &str,
@@ -145,12 +129,7 @@ struct DetailOrder {
     orders: Vec<serde_json::Value>,
 }
 
-/// Mengambil detail satu order berdasarkan id-nya.
-///
-/// Webhook TikTok hanya membawa id order, bukan isinya. Jadi setiap kali
-/// webhook masuk, detailnya diambil dari API -- sekaligus memastikan data
-/// yang disimpan berasal dari sumber resmi, bukan dari isi webhook yang
-/// bisa saja tidak lengkap.
+/// Detail satu order dari id-nya: webhook TikTok hanya membawa id, jadi detail diambil dari API agar data berasal dari sumber resmi, bukan isi webhook yang bisa tak lengkap.
 pub async fn detail_order(
     cfg: &TiktokConfig,
     kredensial: &super::auth::Kredensial,
