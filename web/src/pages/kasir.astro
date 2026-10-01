@@ -419,8 +419,8 @@ function ringkasBatch(p: Product): string {
     <input type="hidden" name="idempotency_key" value={kunci} />
 
     {/* Di layar lebar form dipatok setinggi sisa layar (3rem = padding vertikal main) supaya halaman tak menggulung; yang menggulung hanya daftar produk dan panel keranjang. */}
-    <section class="contents min-w-0 flex-1 lg:flex lg:h-full lg:flex-col">
-      {/* Menempel di atas daftar supaya pencarian dan kategori tetap terjangkau saat katalog digulung; di ponsel section dibuat contents agar induk sticky-nya form, bukan section yang selesai sebelum keranjang. */}
+    <section class="flex min-w-0 flex-1 flex-col gap-4 lg:h-full lg:gap-0">
+      {/* Menempel di atas daftar supaya pencarian dan kategori tetap terjangkau saat katalog digulung; induk sticky-nya section agar berhenti sebelum keranjang dan tidak menimpanya di ponsel. */}
       <div class="kartu sticky top-[calc(var(--tinggi-topbar)-0.5rem)] z-10 p-3! lg:static lg:mb-3 lg:shrink-0">
         <label class="sr-only" for="cari">Cari produk</label>
         <div class="flex flex-wrap gap-2">
