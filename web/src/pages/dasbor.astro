@@ -17,10 +17,8 @@ const JENIS: Record<string, string> = {
 ---
 
 <AppShell judul="Dasbor" user={user}>
-  
-
   {/* Ikon, kartu pertama yang disorot, dan pil naik/turun sama dengan kartu Laporan agar satu sistem; Produk Aktif dan Stok Menipis tanpa pil karena cacahan keadaan sekarang. */}
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  <div class="ringkasan mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
     <div class="kartu-angka bg-merah-600 text-white">
       <div class="flex items-start justify-between gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15">

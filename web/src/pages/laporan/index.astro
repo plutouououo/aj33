@@ -42,6 +42,8 @@ const laporan = await api<SalesReport>(
 );
 
 const kueri = kueriHalaman(saringan);
+// Penanda di tombol Filter ponsel: hanya saringan utama, periode baku (Bulan Ini) tidak dihitung.
+const jumlahSaringan = [saringan.periode !== 'month', saringan.metode, saringan.jenis].filter(Boolean).length;
 const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
 
 const { summary, previous_summary, trend, expense_breakdown, top_products, top_products_total, sales } =
@@ -86,12 +88,27 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
 ---
 
 <AppShell judul="Laporan Penjualan" user={user}>
-  {/* Saringan dikirim sebagai GET agar keadaan laporan ada di URL (bisa di-bookmark, dibagikan) dan tombol ekspor membaca periode yang sama. */}
+  {/* Saringan dikirim sebagai GET agar keadaan laporan ada di URL (bisa di-bookmark, dibagikan) dan tombol ekspor membaca periode yang sama; di ponsel formnya dibuka tombol Filter lewat checkbox `peer` (tanpa JS, seperti laci sidebar). */}
+  <div class="mb-5 grid grid-cols-2 gap-2 md:block">
+    <input type="checkbox" id="buka-saringan" class="peer sr-only" />
+    <label
+      for="buka-saringan"
+      class="tombol-halus cursor-pointer gap-2 md:hidden peer-checked:border-merah-600 peer-checked:bg-merah-50 peer-checked:text-merah-700 peer-focus-visible:ring-2 peer-focus-visible:ring-merah-600"
+    >
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 5h18M6 12h12M10 19h4" />
+      </svg>
+      Filter
+      {jumlahSaringan > 0 && <span class="lencana bg-merah-600 text-white">{jumlahSaringan}</span>}
+    </label>
+    <a class="tombol-utama md:hidden" href={tautanEkspor} download>↓ Ekspor CSV</a>
+
   <form
     method="GET"
     id="saringan"
     action="#saringan"
-    class="kartu mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-[12rem_12rem_12rem_1fr]"
+    class="kartu col-span-2 hidden gap-4 peer-checked:grid sm:grid-cols-2 md:grid lg:grid-cols-[12rem_12rem_12rem_1fr]"
   >
     <div>
       <label class="label" for="periode">Periode</label>
@@ -129,13 +146,14 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     </div>
 
     <div class="flex items-end gap-3">
-      <button class="tombol-halus" type="submit">Terapkan</button>
-      <a class="tombol-utama" href={tautanEkspor} download>↓ Ekspor CSV</a>
+      <button class="tombol-halus max-md:w-full" type="submit">Terapkan</button>
+      <a class="tombol-utama max-md:hidden" href={tautanEkspor} download>↓ Ekspor CSV</a>
     </div>
   </form>
+  </div>
 
   {/* Pil naik/turun hanya perbandingan arah, bukan penilaian baik/buruk; disembunyikan untuk "Seluruh Waktu" karena tak ada periode sebelumnya (lihat `previous_summary` di backend). */}
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  <div class="ringkasan mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
     <div class="kartu-angka bg-merah-600 text-white">
       <div class="flex items-start justify-between gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15">
@@ -369,7 +387,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         <button class="tombol-halus !px-3 !py-2 !text-xs" type="submit">Terapkan</button>
       </form>
     </div>
-    <table class="tabel">
+    <table class="tabel tabel-kartu">
       <thead>
         <tr>
           <th>Produk</th>
@@ -382,7 +400,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         {
           top_products.map((p) => (
             <tr>
-              <td>
+              <td data-judul>
                 {p.product_id ? (
                   <a class="font-medium hover:underline" href={`/produk/${p.product_id}`}>
                     {p.name}
@@ -391,11 +409,11 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
                   <span class="font-medium">{p.name}</span>
                 )}
               </td>
-              <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+              <td data-label="SKU" class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
                 {p.sku ?? '—'}
               </td>
-              <td class="sel-angka">{p.qty}</td>
-              <td class="sel-angka">{rupiah(p.revenue)}</td>
+              <td data-label="Terjual" class="sel-angka">{p.qty}</td>
+              <td data-label="Omzet" class="sel-angka">{rupiah(p.revenue)}</td>
             </tr>
           ))
         }
@@ -435,7 +453,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       </p>
     </div>
 
-    <table class="tabel">
+    <table class="tabel tabel-kartu">
       <thead>
         <tr>
           <th>No. Pesanan</th>
@@ -452,26 +470,26 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         {
           sales.map((s) => (
             <tr>
-              <td class="whitespace-nowrap">
+              <td data-judul class="whitespace-nowrap">
                 <a class="font-medium text-merah-700 hover:underline" href={`/laporan/transaksi/${s.id}`}>
                   #{nomorPesanan(s.id)}
                 </a>
               </td>
-              <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+              <td data-label="Waktu" class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
                 {waktu(s.created_at)}
               </td>
-              <td>
+              <td data-label="Pembeli">
                 {s.customer_name ?? (
                   <span class="text-[var(--color-teks-lembut)]">
                     {labelJenis(s.type)}
                   </span>
                 )}
               </td>
-              <td class="text-[var(--color-teks-lembut)]">{labelMetode(s.payment_method)}</td>
-              <td class="sel-angka">{s.item_count}</td>
-              <td class="sel-angka">{rupiah(s.revenue)}</td>
-              <td class="sel-angka text-[var(--color-teks-lembut)]">{rupiah(s.shipping)}</td>
-              <td class="sel-angka font-semibold">{rupiah(s.total_amount)}</td>
+              <td data-label="Metode" class="text-[var(--color-teks-lembut)]">{labelMetode(s.payment_method)}</td>
+              <td data-label="Item" class="sel-angka">{s.item_count}</td>
+              <td data-label="Omzet" class="sel-angka">{rupiah(s.revenue)}</td>
+              <td data-label="Ongkir" class="sel-angka text-[var(--color-teks-lembut)] max-md:hidden">{rupiah(s.shipping)}</td>
+              <td data-label="Dibayar" class="sel-angka font-semibold">{rupiah(s.total_amount)}</td>
             </tr>
           ))
         }

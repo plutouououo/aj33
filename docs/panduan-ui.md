@@ -288,6 +288,21 @@ Bungkus `.kartu-rapat`, tabelnya `.tabel`. Kepala tabel memakai merah merek
 pekat dengan teks putih: kontras tinggi itulah yang memisahkan judul kolom
 dari ratusan baris di bawahnya, tanpa perlu garis tebal.
 
+**Tabel jadi kartu di ponsel.** Tambahkan `.tabel-kartu` pada `.tabel` dan beri
+tiap `<td>` `data-label="Nama kolom"`; di bawah `md` kepala tabel disembunyikan
+dan tiap baris menjadi kartu berisi pasangan label kiri / nilai kanan. Sel
+ber-`data-judul` (tanpa label) jadi judul kartu. Kolom yang kurang penting di
+ponsel cukup diberi `max-md:hidden`. Dipakai di `/laporan`.
+
+**Kartu angka `.ringkasan`.** Pembungkus `.kartu-angka` yang di ponsel (<`sm`)
+berjajar dua: kartu pertama (dan terakhir bila ganjil) selebar penuh, sisanya
+padat tanpa `.kartu-angka-bantu` (kecuali yang berisi tautan).
+
+**Saringan jadi tombol di ponsel.** Bungkus bilah saringan dengan checkbox
+`peer sr-only` + `<label>` bergaya `.tombol-halus` (hanya `md:hidden`); form
+saringannya `hidden peer-checked:grid md:grid`. Tanpa JS, sama dengan laci
+sidebar. Dipakai di `/laporan`.
+
 Urutan kolom untuk daftar apa pun: **pengenal → nama → atribut → angka →
 status → aksi**. Kolom angka pakai `.sel-angka`.
 

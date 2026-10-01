@@ -142,6 +142,23 @@
     @apply text-xs text-[var(--color-teks-lembut)];
   }
 
+  /* Di ponsel kartu angka `.ringkasan` berjajar dua; hanya kartu pertama selebar penuh dan memegang keterangan, sisanya padat agar enam angka tak memakan dua layar. */
+  @media (max-width: 39.9375rem) {
+    .ringkasan > .kartu-angka {
+      @apply p-3.5;
+    }
+    .ringkasan > :first-child,
+    .ringkasan > :last-child:nth-child(even) {
+      grid-column: span 2 / span 2;
+    }
+    .ringkasan > :not(:first-child) .kartu-angka-nilai {
+      @apply text-lg;
+    }
+    .ringkasan > :not(:first-child) .kartu-angka-bantu:not(:has(a)) {
+      @apply hidden;
+    }
+  }
+
   /* Pil naik/turun di ringkasan laporan; "turun" memakai `red-600` seperti "bahaya", bukan `merah-*` merek, agar tak terbaca sebagai warna aksi utama. */
   .lencana-naik {
     @apply lencana bg-emerald-50 text-emerald-700;
@@ -190,6 +207,43 @@
   /* Kotak centang tetap 16 px dan label pembungkus memberi area sentuh 44 px; margin negatif menjaga tata letak sel. */
   .kotak-sentuh {
     @apply -m-3.5 inline-flex p-3.5;
+  }
+
+  /* Di bawah md tabel `.tabel-kartu` jadi tumpukan kartu (label kiri dari `data-label`, nilai kanan; `data-judul` jadi judul kartu) tanpa menggandakan markup. */
+  @media (max-width: 47.9375rem) {
+    .tabel-kartu thead {
+      @apply sr-only;
+    }
+    .tabel-kartu,
+    .tabel-kartu tbody,
+    .tabel-kartu tr {
+      @apply block;
+    }
+    .tabel-kartu tbody tr {
+      @apply border-b border-dashed border-[var(--color-garis)] px-4 py-3 last:border-b-0;
+    }
+    .tabel-kartu tbody td {
+      @apply flex items-baseline justify-between gap-4 border-0 px-0 py-1.5 text-right;
+    }
+    .tabel-kartu tbody td::before {
+      content: attr(data-label);
+      @apply shrink-0 text-left text-[var(--color-teks-lembut)];
+    }
+    .tabel-kartu tbody td:not([data-label])::before {
+      @apply hidden;
+    }
+    .tabel-kartu tbody td[data-judul] {
+      @apply block pb-1.5 text-left text-base font-semibold;
+    }
+    .tabel-kartu tbody td:not([data-label]):not([data-judul]) {
+      @apply block text-center;
+    }
+    .tabel-kartu tbody td :is(a, button) {
+      @apply my-0 min-h-0;
+    }
+    .tabel-kartu tbody tr:hover td {
+      @apply bg-transparent;
+    }
   }
 
   /* Kolom angka rata kanan dan tabular supaya digit sejajar dan selisih besaran terlihat. */
