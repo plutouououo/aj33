@@ -450,6 +450,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+# Cache foto produk (`lib/blob.ts`). Satu-satunya tempat tulis di bawah
+# `ProtectSystem=strict`; systemd membuatnya milik `tokoaj33` di
+# /var/cache/aj33-foto dan mengisi `CACHE_DIRECTORY`. Aman dihapus kapan saja.
+CacheDirectory=aj33-foto
 
 [Install]
 WantedBy=multi-user.target

@@ -1,17 +1,8 @@
-/**
- * Menyajikan foto produk dari Azure Blob Storage.
- *
- * Kontainernya privat, jadi `<img src>` tidak bisa menunjuk Azure langsung.
- * Rute ini yang mengambilkannya -- lihat `lib/blob.ts` untuk alasan lengkap
- * dan untuk penyaringan nama blobnya.
- *
- * Sesi tetap diperiksa middleware: rutenya terdaftar sebagai halaman umum,
- * jadi ketiga peran boleh membukanya, tapi bukan orang yang belum masuk.
- */
+/** Menyajikan foto produk dari Azure (kontainer privat, lihat `lib/blob.ts`); ketiga peran boleh membukanya tapi sesi tetap diperiksa middleware. */
 import type { APIRoute } from 'astro';
-import { ambilFoto } from '../../lib/blob';
+import { ambilFoto, PARAM_KECIL } from '../../lib/blob';
 
-export const GET: APIRoute = async ({ params }) => {
-  const foto = await ambilFoto(params.nama ?? '');
+export const GET: APIRoute = async ({ params, url }) => {
+  const foto = await ambilFoto(params.nama ?? '', url.searchParams.has(PARAM_KECIL));
   return foto ?? new Response('Foto tidak ditemukan.', { status: 404 });
 };

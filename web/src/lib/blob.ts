@@ -1,27 +1,10 @@
-/**
- * Foto produk di Azure Blob Storage.
- *
- * Kontainernya privat -- akun storage menolak akses anonim -- jadi browser
- * tidak pernah bicara ke Azure. Keduanya lewat server ini: form mengirim
- * berkas ke sini dan server meneruskannya ke Azure (`unggahFoto`), lalu
- * `<img>` meminta `/foto/...` dan rute itu mengambilkannya (`ambilFoto`).
- *
- * Susunan ini juga yang membuat SAS token -- kredensial tulis ke seluruh
- * kontainer, berumur beberapa hari -- tidak pernah tersentuh browser dan
- * tidak pernah ikut tersimpan di basis data. Memperbaruinya cukup mengganti
- * satu baris env; tidak ada URL tersimpan yang ikut basi.
- */
+/** Foto produk di Azure Blob (kontainer privat): browser tak pernah bicara ke Azure, unggah dan ambil lewat server ini sehingga SAS token tak tersentuh browser dan tak tersimpan di DB. */
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import sharp from 'sharp';
 
-/**
- * URL kontainer lengkap dengan SAS query, mis.
- * `https://akun.blob.core.windows.net/data?sp=...&sig=...`.
- *
- * Dibaca dari `process.env` saat request berjalan, bukan dari
- * `import.meta.env` saja: Vite mengganti `import.meta.env.X` dengan nilai
- * literalnya ketika di-build, jadi SAS yang ikut ke dist adalah SAS milik
- * mesin yang mem-build -- dan memperbaruinya di server tidak berpengaruh
- * apa-apa. Lihat alasan yang sama di `api.ts`.
- */
+/** URL kontainer + SAS dibaca dari `process.env` saat request, bukan `import.meta.env` yang dibakukan Vite saat build (lihat `api.ts`). */
 function sasKontainer(): string {
   const url =
     (typeof process !== 'undefined' ? process.env.AZURE_BLOB_SAS_URL : undefined) ??
@@ -35,11 +18,7 @@ function sasKontainer(): string {
 /** Batas ukuran satu foto. */
 const MAKS_BYTE = 5 * 1024 * 1024;
 
-/**
- * Tipe yang diterima, beserta akhiran berkasnya. Daftar tetap, bukan
- * `image/*`: nama blob dirakit di sini, dan akhiran yang datang dari nama
- * berkas kiriman pengguna tidak layak dipercaya.
- */
+/** Tipe diterima berupa daftar tetap, bukan `image/*`, karena akhiran dari nama berkas kiriman pengguna tak layak dipercaya. */
 const TIPE: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -50,12 +29,16 @@ const TIPE: Record<string, string> = {
 /** Awalan rute yang menyajikan foto. Bentuk `image_url` yang tersimpan. */
 export const AWALAN_FOTO = '/foto/';
 
-/**
- * Nama blob yang boleh diminta lewat rute foto: persis bentuk yang dirakit
- * `unggahFoto`, tidak lebih. Nama datang dari URL, jadi ia data -- tanpa
- * saringan ini `..%2F` bisa menarik blob mana pun di kontainer, termasuk
- * yang bukan foto produk.
- */
+/** Satu ukuran saja, bukan lebar dari klien, agar pengguna login tak bisa memaksa server mengolah ulang foto berkali-kali; 480 px = kartu ±170 px di layar 3x. */
+const LEBAR_KECIL = 480;
+export const PARAM_KECIL = 'kecil';
+const AKHIRAN_KECIL = '.kecil.webp';
+
+const TIPE_BERKAS: Record<string, string> = Object.fromEntries(
+  Object.entries(TIPE).map(([mime, akhiran]) => [akhiran, mime])
+);
+
+/** Nama blob yang boleh diminta persis bentuk `unggahFoto`; tanpa saringan ini `..%2F` bisa menarik blob mana pun di kontainer. */
 const NAMA_SAH = /^produk\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp|avif)$/;
 
 /** Gagal yang pesannya memang ditulis untuk dibaca pengguna. */
@@ -69,10 +52,7 @@ function alamatBlob(nama: string): URL {
   return tujuan;
 }
 
-/**
- * Menaruh satu foto di kontainer dan mengembalikan alamat yang disimpan di
- * kolom `image_url` -- path rute foto, bukan alamat Azure.
- */
+/** Menaruh satu foto di kontainer dan mengembalikan path rute foto (bukan alamat Azure) untuk kolom `image_url`. */
 export async function unggahFoto(berkas: File): Promise<string> {
   const ekstensi = TIPE[berkas.type];
   if (!ekstensi) {
@@ -82,9 +62,7 @@ export async function unggahFoto(berkas: File): Promise<string> {
     throw new GagalUnggah('Ukuran foto maksimal 5 MB.');
   }
 
-  // Nama berkas asli dibuang seluruhnya. Nama kiriman pengguna bisa memuat
-  // `/` atau `..` yang mengubah letak blob, dan dua orang yang sama-sama
-  // mengunggah "foto.jpg" akan saling menimpa.
+  // Nama berkas asli dibuang karena bisa memuat `/` atau `..` dan dua unggahan "foto.jpg" akan saling menimpa.
   const nama = `produk/${crypto.randomUUID()}.${ekstensi}`;
 
   const res = await fetch(alamatBlob(nama), {
@@ -97,9 +75,7 @@ export async function unggahFoto(berkas: File): Promise<string> {
   });
 
   if (!res.ok) {
-    // Badan jawaban Azure adalah XML yang menyebut kode seperti
-    // `AuthenticationFailed` -- berguna di log, tapi bukan kalimat yang
-    // pantas ditampilkan ke pemilik toko.
+    // Badan jawaban Azure berupa XML (mis. `AuthenticationFailed`), berguna di log tapi bukan kalimat untuk pemilik toko.
     console.error('Unggah blob gagal', res.status, await res.text().catch(() => ''));
     throw new GagalUnggah('Foto gagal diunggah ke penyimpanan. Coba lagi.');
   }
@@ -107,18 +83,16 @@ export async function unggahFoto(berkas: File): Promise<string> {
   return `${AWALAN_FOTO}${nama}`;
 }
 
-/**
- * Membuang foto yang tidak dirujuk baris mana pun lagi -- dipanggil sesudah
- * foto produk diganti atau dikosongkan.
- *
- * Gagalnya sengaja tidak dilempar: pada titik ini perubahan produknya sudah
- * tersimpan, dan membatalkan pekerjaan pengguna karena sampah yang tertinggal
- * di kontainer adalah tukar yang salah. Yang tertinggal cuma satu blob yatim.
- */
+/** Membuang foto yang tak dirujuk lagi; gagalnya tak dilempar karena perubahan produk sudah tersimpan dan yang tertinggal hanya satu blob yatim. */
 export async function hapusFoto(imageUrl: string | null | undefined): Promise<void> {
   if (!imageUrl?.startsWith(AWALAN_FOTO)) return;
   const nama = imageUrl.slice(AWALAN_FOTO.length);
   if (!NAMA_SAH.test(nama)) return;
+
+  const dasar = nama.slice('produk/'.length);
+  for (const berkas of [dasar, `${dasar}${AKHIRAN_KECIL}`]) {
+    await rm(join(direktoriCache(), berkas), { force: true }).catch(() => {});
+  }
 
   try {
     const res = await fetch(alamatBlob(nama), { method: 'DELETE' });
@@ -130,15 +104,22 @@ export async function hapusFoto(imageUrl: string | null | undefined): Promise<vo
   }
 }
 
-/**
- * Mengambil satu foto dari kontainer untuk disalurkan ke browser.
- *
- * `null` berarti namanya tidak berbentuk nama foto produk, atau blobnya tidak
- * ada -- pemanggil yang memutuskan bahwa keduanya sama-sama 404. Membedakan
- * keduanya hanya memberi tahu penebak nama mana yang tebakannya mendekati.
- */
-export async function ambilFoto(nama: string): Promise<Response | null> {
+/** Mengambil foto dari cache disk bila ada, kalau tidak dari kontainer; `null` berarti nama tak valid atau blob tak ada, sama-sama 404 agar penebak nama tak mendapat petunjuk. */
+export async function ambilFoto(nama: string, kecil = false): Promise<Response | null> {
   if (!NAMA_SAH.test(nama)) return null;
+
+  // Isi blob tak pernah berubah (UUID baru tiap unggahan) sehingga peramban boleh menyimpannya selamanya; `private` karena rute di balik login dan tak boleh mengendap di cache bersama.
+  const respons = (data: Uint8Array, tipe: string) =>
+    new Response(data as BodyInit, {
+      headers: { 'Content-Type': tipe, 'Cache-Control': 'private, max-age=31536000, immutable' },
+    });
+
+  const dasar = nama.slice('produk/'.length);
+  const berkas = join(direktoriCache(), kecil ? `${dasar}${AKHIRAN_KECIL}` : dasar);
+  const tipeCache = kecil ? 'image/webp' : TIPE_BERKAS[dasar.slice(dasar.lastIndexOf('.') + 1)];
+
+  const tersimpan = await readFile(berkas).catch(() => null);
+  if (tersimpan) return respons(tersimpan, tipeCache);
 
   const res = await fetch(alamatBlob(nama));
   if (!res.ok || !res.body) {
@@ -148,15 +129,47 @@ export async function ambilFoto(nama: string): Promise<Response | null> {
     return null;
   }
 
-  // Isi blob tidak pernah berubah -- tiap unggahan memakai UUID baru -- jadi
-  // peramban boleh menyimpannya selamanya. Tanpa ini setiap kunjungan ke
-  // layar kasir menarik ulang seluruh foto lewat VPS. `private` karena
-  // rutenya di balik login dan hasilnya tidak boleh mengendap di cache
-  // bersama milik proxy mana pun.
-  return new Response(res.body, {
-    headers: {
-      'Content-Type': res.headers.get('content-type') ?? 'application/octet-stream',
-      'Cache-Control': 'private, max-age=31536000, immutable',
-    },
-  });
+  const asli = Buffer.from(await res.arrayBuffer());
+  if (!kecil) {
+    await simpanCache(berkas, asli);
+    return respons(asli, tipeCache);
+  }
+
+  try {
+    // `rotate()` menerapkan orientasi EXIF sebelum metadata dibuang, kalau tidak foto HP tampil miring.
+    const kecilWebp = await sharp(asli)
+      .rotate()
+      .resize({ width: LEBAR_KECIL, withoutEnlargement: true })
+      .webp({ quality: 75 })
+      .toBuffer();
+    await simpanCache(berkas, kecilWebp);
+    return respons(kecilWebp, tipeCache);
+  } catch (err) {
+    // Foto yang tak bisa diperkecil tampil utuh daripada kotak kosong, dan tak dicache agar pembetulan di server langsung berlaku.
+    console.error('Perkecil foto gagal', nama, err);
+    return respons(asli, res.headers.get('content-type') ?? 'application/octet-stream');
+  }
+}
+
+/** Cache foto di disk server tanpa masa berlaku (foto tak berubah); `CACHE_DIRECTORY` dari `CacheDirectory=` systemd, satu-satunya tempat tulis di bawah `ProtectSystem=strict`. */
+function direktoriCache(): string {
+  return process.env.CACHE_DIRECTORY ?? join(tmpdir(), 'aj33-foto');
+}
+
+/** Gagal menulis cache tak boleh menggagalkan foto yang sudah di tangan; ditulis ke berkas sementara lalu di-rename agar pembaca tak melihat berkas setengah jadi. */
+async function simpanCache(berkas: string, data: Uint8Array): Promise<void> {
+  const sementara = `${berkas}.${crypto.randomUUID()}.tmp`;
+  try {
+    await mkdir(dirname(berkas), { recursive: true });
+    await writeFile(sementara, data);
+    await rename(sementara, berkas);
+  } catch (err) {
+    console.error('Tulis cache foto gagal', berkas, err);
+    await rm(sementara, { force: true }).catch(() => {});
+  }
+}
+
+/** Alamat versi kecil foto untuk kartu ±170 px; foto asli bisa 3000 px dan lebih dari 1 MB, versi ini sekitar 20 KB. */
+export function fotoKecil(imageUrl: string): string {
+  return `${imageUrl}?${PARAM_KECIL}`;
 }
