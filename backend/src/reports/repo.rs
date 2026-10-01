@@ -346,7 +346,7 @@ pub async fn expense_breakdown(
 /// Baris produk terlaris; `revenue` di sini harga barang sebelum diskon karena diskon melekat pada transaksi dan membaginya ke barang berarti mengarang angka yang tak ada di struk.
 #[derive(Debug, Serialize)]
 pub struct TopProduct {
-    pub product_id: Uuid,
+    pub product_id: Option<Uuid>,
     /// Nama saat terjual, bukan nama sekarang, agar produk yang diganti namanya tetap dikenali di laporan lama.
     pub name: String,
     pub sku: Option<String>,
@@ -361,7 +361,7 @@ pub async fn top_products(
 ) -> AppResult<Vec<TopProduct>> {
     let rows = sqlx::query!(
         r#"
-        SELECT ti.product_id                        AS "product_id!",
+        SELECT ti.product_id                        AS product_id,
                max(ti.product_name_snapshot)        AS "name!",
                max(p.sku)                           AS sku,
                SUM(ti.qty)::bigint                  AS "qty!",
@@ -375,7 +375,7 @@ pub async fn top_products(
                                   AT TIME ZONE 'Asia/Jakarta')
           AND ($2::text IS NULL OR t.payment_method = $2)
           AND ($3::text IS NULL OR t.type = $3)
-        GROUP BY ti.product_id
+        GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END
         ORDER BY "qty!" DESC, "revenue!" DESC
         LIMIT $4
         "#,
@@ -471,7 +471,7 @@ pub async fn recent_sales(
 #[derive(Debug, Serialize)]
 pub struct TransactionDetailItem {
     pub id: Uuid,
-    pub product_id: Uuid,
+    pub product_id: Option<Uuid>,
     /// Nama saat terjual, bukan nama sekarang -- lihat `TopProduct::name`.
     pub name: String,
     /// SKU produk saat ini (item transaksi tak menyimpan SKU), `null` bila produk sudah dihapus.
@@ -561,7 +561,7 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
         TransactionDetailItem,
         r#"
         SELECT ti.id                    AS "id!",
-               ti.product_id             AS "product_id!",
+               ti.product_id             AS product_id,
                ti.product_name_snapshot AS "name!",
                p.sku,
                ti.qty                    AS "qty!",

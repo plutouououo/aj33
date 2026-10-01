@@ -1,4 +1,5 @@
 ---
+import Galat from '../components/Galat.astro';
 import AppShell from '../layouts/AppShell.astro';
 import { api, ApiRequestError, type User } from '../lib/api';
 import { berandaUntuk, simpanSesi } from '../lib/session';
@@ -48,7 +49,7 @@ if (Astro.request.method === 'POST') {
     </div>
 
     <form method="POST" class="kartu space-y-4">
-      {galat && <p class="galat" role="alert">{galat}</p>}
+      <Galat pesan={galat} />
 
       <div>
         <label class="label" for="username">Username</label>

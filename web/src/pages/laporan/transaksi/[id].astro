@@ -1,4 +1,5 @@
 ---
+import Galat from '../../../components/Galat.astro';
 import AppShell from '../../../layouts/AppShell.astro';
 import { api, ApiRequestError, type TransactionDetail } from '../../../lib/api';
 import { rupiah, waktu } from '../../../lib/format';
@@ -59,7 +60,7 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
     <span aria-current="page">{nomor ? `#${nomor}` : 'Tidak ditemukan'}</span>
   </nav>
 
-  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  <Galat pesan={galat} class="mb-4" />
 
   {
     transaksi && (
@@ -185,9 +186,13 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
                   {transaksi.items.map((it) => (
                     <tr>
                       <td>
-                        <a class="font-medium hover:underline" href={`/produk/${it.product_id}`}>
-                          {it.name}
-                        </a>
+                        {it.product_id ? (
+                          <a class="font-medium hover:underline" href={`/produk/${it.product_id}`}>
+                            {it.name}
+                          </a>
+                        ) : (
+                          <span class="font-medium">{it.name}</span>
+                        )}
                       </td>
                       <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
                         {it.sku ?? '—'}

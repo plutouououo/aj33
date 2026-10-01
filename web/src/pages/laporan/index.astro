@@ -360,9 +360,13 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
           top_products.map((p) => (
             <tr>
               <td>
-                <a class="font-medium hover:underline" href={`/produk/${p.product_id}`}>
-                  {p.name}
-                </a>
+                {p.product_id ? (
+                  <a class="font-medium hover:underline" href={`/produk/${p.product_id}`}>
+                    {p.name}
+                  </a>
+                ) : (
+                  <span class="font-medium">{p.name}</span>
+                )}
               </td>
               <td class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
                 {p.sku ?? '—'}

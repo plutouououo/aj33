@@ -1,4 +1,5 @@
 ---
+import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type PaginatedProducts, type Product } from '../../lib/api';
 import { fotoKecil } from '../../lib/blob';
@@ -30,6 +31,7 @@ const URUT = [
 type Urut = (typeof URUT)[number]['nilai'];
 
 let galat: string | null = null;
+let rincianGalat: string[] = [];
 
 /** Harga dan stok tak bisa disunting di daftar (lihat "Kelola" di `/produk/{id}`); aksi dari sini hanya status baris: `toggle` aktif/nonaktif dan tiga aksi massal atas `pilih_id`. */
 if (Astro.request.method === 'POST') {
@@ -56,7 +58,7 @@ if (Astro.request.method === 'POST') {
       if (dipilih.length === 0) {
         galat = 'Pilih dulu produk yang mau diubah.';
       } else {
-        // Satu per satu, bukan Promise.all, agar produk yang ditolak backend (punya varian, sudah terjual; `penahan_hapus`) tak menghentikan baris lain yang bisa berhasil.
+        // Satu per satu, bukan Promise.all, agar produk yang ditolak backend (punya varian, ada di tiket packing; `penahan_hapus`) tak menghentikan baris lain yang bisa berhasil.
         let berhasil = 0;
         const pesanGalat: string[] = [];
         for (const idBaris of dipilih) {
@@ -78,10 +80,13 @@ if (Astro.request.method === 'POST') {
 
         if (pesanGalat.length > 0) {
           // Semua pesan galat ditampilkan, bukan hanya yang pertama, karena pada hapus massal produk yang gagal tetap ada di DB dan akan terlihat seperti berhasil bila pesannya hilang.
-          galat =
-            berhasil > 0
-              ? `${berhasil} produk berhasil. ${pesanGalat.length} gagal: ${pesanGalat.join(' | ')}`
-              : pesanGalat.join(' | ');
+          const unik = [...new Set(pesanGalat)];
+          if (berhasil === 0 && unik.length === 1 && pesanGalat.length === 1) {
+            galat = unik[0];
+          } else {
+            galat = `${berhasil > 0 ? `${berhasil} produk berhasil, ` : ''}${pesanGalat.length} produk gagal diproses:`;
+            rincianGalat = unik;
+          }
         } else {
           const tujuan = new URL(Astro.url);
           tujuan.searchParams.set('pesan', aksi);
@@ -216,7 +221,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 ---
 
 <AppShell judul="Produk" user={user}>
-  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  <Galat pesan={galat} rincian={rincianGalat} class="mb-4" />
   {sukses && <p class="sukses mb-4">{sukses}</p>}
 
   <div class="mb-5 flex flex-wrap items-center justify-between gap-3">

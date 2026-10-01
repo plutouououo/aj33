@@ -473,7 +473,6 @@ pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static
         r#"
         SELECT
             EXISTS(SELECT 1 FROM products WHERE parent_id = $1)              AS "varian!",
-            EXISTS(SELECT 1 FROM transaction_items WHERE product_id = $1)    AS "penjualan!",
             EXISTS(SELECT 1 FROM ticket_items WHERE product_id = $1)         AS "tiket!",
             EXISTS(SELECT 1 FROM external_order_items WHERE product_id = $1) AS "pesanan!",
             EXISTS(SELECT 1 FROM channel_listings WHERE product_id = $1)     AS "listing!",
@@ -486,8 +485,6 @@ pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static
 
     Ok(if row.varian {
         Some("masih punya varian")
-    } else if row.penjualan {
-        Some("sudah pernah terjual di kasir")
     } else if row.tiket {
         Some("tercatat di tiket packing")
     } else if row.pesanan {
@@ -523,7 +520,7 @@ pub async fn penahan_ubah_sku(pool: &PgPool, id: Uuid) -> AppResult<Option<&'sta
     })
 }
 
-/// Menghapus produk beserta batch dan ledger stoknya; pemanggil wajib memeriksa `penahan_hapus` dulu, riwayat penjualan tak pernah ikut terhapus.
+/// Menghapus produk beserta batch dan ledger stoknya; pemanggil wajib memeriksa `penahan_hapus` dulu, dan item transaksi kasir hanya dilepas dari produknya (FK SET NULL).
 pub async fn delete_product(pool: &PgPool, id: Uuid) -> AppResult<bool> {
     let mut tx = pool.begin().await?;
 

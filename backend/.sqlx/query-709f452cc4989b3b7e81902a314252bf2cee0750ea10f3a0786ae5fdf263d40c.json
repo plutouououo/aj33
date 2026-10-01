@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            EXISTS(SELECT 1 FROM products WHERE parent_id = $1)              AS \"varian!\",\n            EXISTS(SELECT 1 FROM ticket_items WHERE product_id = $1)         AS \"tiket!\",\n            EXISTS(SELECT 1 FROM external_order_items WHERE product_id = $1) AS \"pesanan!\",\n            EXISTS(SELECT 1 FROM channel_listings WHERE product_id = $1)     AS \"listing!\",\n            EXISTS(SELECT 1 FROM shopping_list_items WHERE product_id = $1)  AS \"belanja!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "varian!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "tiket!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "pesanan!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "listing!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "belanja!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "709f452cc4989b3b7e81902a314252bf2cee0750ea10f3a0786ae5fdf263d40c"
+}

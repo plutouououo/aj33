@@ -247,7 +247,8 @@ export interface PaginatedCustomers {
 }
 
 export interface FavoriteProduct {
-  product_id: string;
+  /** `null` kalau produknya sudah dihapus. */
+  product_id: string | null;
   name: string;
   qty: number;
   spent: number;
@@ -376,7 +377,8 @@ export interface ExpenseSlice {
 }
 
 export interface TopProduct {
-  product_id: string;
+  /** `null` kalau produknya sudah dihapus. */
+  product_id: string | null;
   name: string;
   sku: string | null;
   qty: number;
@@ -407,7 +409,8 @@ export interface SalesReport {
 /** Satu baris item pada detail transaksi. */
 export interface TransactionDetailItem {
   id: string;
-  product_id: string;
+  /** `null` kalau produknya sudah dihapus. */
+  product_id: string | null;
   /** Nama saat terjual, bukan nama sekarang. */
   name: string;
   /** SKU produk saat ini. `null` kalau produknya sudah dihapus. */

@@ -1,4 +1,5 @@
 ---
+import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type CustomerDetail } from '../../lib/api';
 import { rupiah, waktu } from '../../lib/format';
@@ -85,7 +86,7 @@ const rataRata =
     <span aria-current="page">{pelanggan ? nama : 'Tidak ditemukan'}</span>
   </nav>
 
-  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  <Galat pesan={galat} class="mb-4" />
   {sukses && <p class="sukses mb-4">{sukses}</p>}
 
   {
@@ -173,9 +174,13 @@ const rataRata =
                 <ul>
                   {pelanggan.favorite_products.map((p) => (
                     <li class="flex items-baseline justify-between gap-4 border-b border-[var(--color-garis-lembut)] px-5 py-3 last:border-b-0">
-                      <a class="min-w-0 truncate text-sm hover:underline" href={`/produk/${p.product_id}`}>
-                        {p.name}
-                      </a>
+                      {p.product_id ? (
+                        <a class="min-w-0 truncate text-sm hover:underline" href={`/produk/${p.product_id}`}>
+                          {p.name}
+                        </a>
+                      ) : (
+                        <span class="min-w-0 truncate text-sm">{p.name}</span>
+                      )}
                       <span class="shrink-0 text-sm tabular-nums">
                         {p.qty} pack
                         <span class="ml-3 font-semibold">{rupiah(p.spent)}</span>

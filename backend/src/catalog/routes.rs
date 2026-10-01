@@ -296,7 +296,7 @@ async fn update_product(
     Ok(Json(service::ambil_produk(&state, id).await?))
 }
 
-/// Menghapus produk sungguhan hanya bila belum tersangkut di mana pun; yang pernah terjual atau dipetik pengepak hanya bisa dinonaktifkan agar riwayat omzet tak berlubang.
+/// Menghapus produk sungguhan selama tak tersangkut varian, tiket, pesanan marketplace, listing, atau daftar belanja; riwayat kasir tetap utuh lewat snapshot nama dan harga di item transaksi.
 async fn delete_product(
     State(state): State<AppState>,
     user: CurrentUser,

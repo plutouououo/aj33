@@ -1,4 +1,5 @@
 ---
+import Galat from '../../../components/Galat.astro';
 import AppShell from '../../../layouts/AppShell.astro';
 import { api, ApiRequestError } from '../../../lib/api';
 import { BATAS_BYTE, EKSTENSI_DIIZINKAN } from '../../../lib/impor';
@@ -53,7 +54,7 @@ if (Astro.request.method === 'POST') {
     <span aria-current="page">Baru</span>
   </nav>
 
-  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  <Galat pesan={galat} class="mb-4" />
 
   <section class="kartu max-w-xl">
     <h1 class="mb-1 text-lg font-bold">Unggah Berkas Produk</h1>

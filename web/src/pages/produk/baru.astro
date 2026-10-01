@@ -1,4 +1,5 @@
 ---
+import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type Product } from '../../lib/api';
 import { MEREK, kembaliKeDaftar } from '../../lib/produk';
@@ -109,7 +110,7 @@ const BAGIAN = [
     <span aria-current="page">Tambah Produk Baru</span>
   </nav>
 
-  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  <Galat pesan={galat} class="mb-4" />
 
   {/* Tautan lompat, bukan panel yang saling menyembunyikan; sengaja tanpa penanda "tab aktif" karena CSS tak tahu posisi gulir dan penanda akan menunjuk bagian yang salah. */}
   <nav class="bilah-tab" aria-label="Bagian formulir">

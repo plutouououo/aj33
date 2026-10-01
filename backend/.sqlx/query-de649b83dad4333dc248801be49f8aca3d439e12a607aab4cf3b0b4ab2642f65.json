@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT ti.id                    AS \"id!\",\n               ti.product_id             AS \"product_id!\",\n               ti.product_name_snapshot AS \"name!\",\n               p.sku,\n               ti.qty                    AS \"qty!\",\n               ti.unit_price             AS \"unit_price!\",\n               ti.subtotal               AS \"subtotal!\"\n        FROM transaction_items ti\n        LEFT JOIN products p ON p.id = ti.product_id\n        WHERE ti.transaction_id = $1\n        ORDER BY ti.created_at, ti.id\n        ",
+  "query": "\n        SELECT ti.id                    AS \"id!\",\n               ti.product_id             AS product_id,\n               ti.product_name_snapshot AS \"name!\",\n               p.sku,\n               ti.qty                    AS \"qty!\",\n               ti.unit_price             AS \"unit_price!\",\n               ti.subtotal               AS \"subtotal!\"\n        FROM transaction_items ti\n        LEFT JOIN products p ON p.id = ti.product_id\n        WHERE ti.transaction_id = $1\n        ORDER BY ti.created_at, ti.id\n        ",
   "describe": {
     "columns": [
       {
@@ -10,7 +10,7 @@
       },
       {
         "ordinal": 1,
-        "name": "product_id!",
+        "name": "product_id",
         "type_info": "Uuid"
       },
       {
@@ -46,7 +46,7 @@
     },
     "nullable": [
       false,
-      false,
+      true,
       false,
       true,
       false,
@@ -54,5 +54,5 @@
       false
     ]
   },
-  "hash": "d40b27803cb698fa3ec50b9aa87c091847c06f14f9957cbd934e4ffa52ae6a6f"
+  "hash": "de649b83dad4333dc248801be49f8aca3d439e12a607aab4cf3b0b4ab2642f65"
 }

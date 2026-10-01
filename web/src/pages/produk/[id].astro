@@ -1,4 +1,5 @@
 ---
+import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type ProductDetail } from '../../lib/api';
 import { rupiah, waktu, sisaHari } from '../../lib/format';
@@ -222,7 +223,7 @@ const DEKAT_KEDALUWARSA = 30;
     <span aria-current="page">{produk ? produk.name : 'Tidak ditemukan'}</span>
   </nav>
 
-  {galat && <p class="galat mb-4" role="alert">{galat}</p>}
+  <Galat pesan={galat} class="mb-4" />
   {sukses && <p class="sukses mb-4">{sukses}</p>}
 
   {!produk && <p class="kartu">Produk tidak ditemukan.</p>}
@@ -819,9 +820,10 @@ const DEKAT_KEDALUWARSA = 30;
             <form method="POST" class="flex flex-wrap items-center justify-between gap-3">
               <input type="hidden" name="aksi" value="hapus" />
               <p class="max-w-xl text-xs text-[var(--color-teks-lembut)]">
-                Menghapus produk hanya mungkin selama produk ini belum tersangkut di mana-mana.
-                Begitu pernah terjual atau masuk tiket packing, yang tersisa adalah
-                menonaktifkannya supaya riwayat penjualan tetap utuh.
+                Produk yang sudah pernah terjual di kasir tetap bisa dihapus: riwayat transaksinya
+                tetap ada dengan nama dan harga saat terjual, tapi stok dan riwayat biayanya ikut
+                hilang sehingga laba lama produk ini bergeser. Produk yang masih ada di tiket
+                packing, pesanan marketplace, listing, atau daftar belanja hanya bisa dinonaktifkan.
               </p>
               <button class="tombol-bahaya" type="submit">Hapus produk</button>
             </form>

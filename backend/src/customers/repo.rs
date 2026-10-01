@@ -273,7 +273,7 @@ pub async fn delete_customer(pool: &PgPool, id: Uuid) -> AppResult<bool> {
 /// Satu produk pada daftar "yang sering dibeli".
 #[derive(Debug, Serialize)]
 pub struct FavoriteProduct {
-    pub product_id: Uuid,
+    pub product_id: Option<Uuid>,
     /// Nama saat dibeli, bukan nama sekarang.
     pub name: String,
     pub qty: i64,
@@ -287,14 +287,14 @@ pub async fn favorite_products(
 ) -> AppResult<Vec<FavoriteProduct>> {
     let rows = sqlx::query!(
         r#"
-        SELECT ti.product_id                 AS "product_id!",
+        SELECT ti.product_id                 AS product_id,
                max(ti.product_name_snapshot) AS "name!",
                SUM(ti.qty)::bigint           AS "qty!",
                SUM(ti.subtotal)              AS "spent!"
         FROM transaction_items ti
         JOIN transactions t ON t.id = ti.transaction_id
         WHERE t.customer_id = $1 AND t.status = 'completed'
-        GROUP BY ti.product_id
+        GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END
         ORDER BY "spent!" DESC, "qty!" DESC
         LIMIT $2
         "#,

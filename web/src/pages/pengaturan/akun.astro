@@ -1,5 +1,6 @@
 ---
 /** Ganti password sendiri: dibuka sengaja atau dipantulkan middleware untuk password sementara, alurnya satu dan hanya kalimat pembuka yang beda. */
+import Galat from '../../components/Galat.astro';
 import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type User } from '../../lib/api';
 import { berandaUntuk } from '../../lib/session';
@@ -55,7 +56,7 @@ const wajib = user.must_change_password;
     }
 
     <form method="POST" class="kartu space-y-4">
-      {galat && <p class="galat" role="alert">{galat}</p>}
+      <Galat pesan={galat} />
 
       <div>
         <label class="label" for="lama">Password sekarang</label>

@@ -11,7 +11,7 @@ use uuid::Uuid;
 #[derive(Debug, Serialize)]
 pub struct TransactionItem {
     pub id: Uuid,
-    pub product_id: Uuid,
+    pub product_id: Option<Uuid>,
     pub product_name_snapshot: String,
     pub qty: i32,
     pub unit_price: Decimal,
@@ -179,7 +179,10 @@ pub async fn item_bahan_sidik_jari(
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|r| (r.product_id, r.qty)).collect())
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| r.product_id.map(|p| (p, r.qty)))
+        .collect())
 }
 
 pub struct NewTransactionItem {
