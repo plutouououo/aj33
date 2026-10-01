@@ -235,7 +235,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
   </div>
 
   {/* Tab status sekaligus saringan lewat navigasi (bukan filter sisi klien) agar berfungsi tanpa JavaScript dan hitungan selalu sinkron. */}
-  <div class="mb-4 flex gap-2 overflow-x-auto pb-1">
+  <div class="mb-4 flex gap-2 overflow-x-auto pb-1 tanpa-scrollbar">
     {TAB.map((t) => (
       <a href={tautanTab(t.nilai)} class={t.nilai === tab ? 'pil-aktif' : 'pil-diam'}>
         {t.label}
@@ -253,18 +253,31 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
   <form method="GET" class="kartu mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_10rem_10rem_9rem_7rem]">
     <input type="hidden" name="tab" value={tab === 'semua' ? '' : tab} />
+    {/* Di ponsel saringan lipat lewat checkbox + `peer` (tanpa JS); terbuka dari awal bila ada saringan aktif agar tak tersembunyi. */}
+    <input
+      type="checkbox"
+      id="buka-saringan"
+      class="peer sr-only md:hidden"
+      checked={Boolean(kategoriDipilih) || hanyaMenipis || urut !== 'terbaru' || limit !== 25}
+      aria-label="Tampilkan saringan"
+    />
 
     <div>
-      <label class="label" for="cari">Cari</label>
-      <input
-        class="kolom"
-        id="cari"
-        type="search"
-        name="cari"
-        value={cari}
-        placeholder="Cari nama atau SKU..."
-      />
+      <label class="label sr-only md:not-sr-only" for="cari">Cari</label>
+      <div class="flex gap-2">
+        <input
+          class="kolom min-w-0 flex-1"
+          id="cari"
+          type="search"
+          name="cari"
+          value={cari}
+          placeholder="Cari nama atau SKU..."
+        />
+        <label for="buka-saringan" class="tombol-halus shrink-0 cursor-pointer md:hidden">Filter</label>
+      </div>
     </div>
+
+    <div class="hidden peer-checked:contents md:contents">
 
     <div>
       <label class="label" for="kategori">Kategori</label>
@@ -314,6 +327,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
     <div class="sm:col-span-2 lg:col-span-5">
       <button class="tombol-halus" type="submit">Terapkan</button>
     </div>
+    </div>
   </form>
 
   {terpotong && (
@@ -325,7 +339,37 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
   {/* Satu form membungkus tabel dan bilah aksi massal; checkbox `pilih_id` ikut terkirim apa pun tombol yang ditekan, termasuk toggle per baris lewat kode "id:target". */}
   <form method="POST" id="borang-produk">
-  <div class="kartu-rapat overflow-x-auto">
+  {/* Ponsel memakai daftar ringkas (foto, nama, harga · stok, "Edit") dan tanpa pilihan massal, sebab checkbox ganda di dua tata letak akan terkirim dua kali; md ke atas tetap tabel penuh. */}
+  <ul class="kartu-rapat divide-y divide-[var(--color-garis-lembut)] md:hidden">
+    {halamanIni.map((p) => {
+      const varian = varianIndukPeta.get(p.id) ?? [];
+      const stok = stokInduk(p, varian);
+      return (
+        <li>
+          <a class="flex min-h-11 items-center gap-3 px-3 py-3" href={`/produk/${p.id}${bawaSaringan}`}>
+            <span class="foto-produk h-12 w-12 shrink-0 rounded-lg border">
+              {p.image_url && (
+                <img src={fotoKecil(p.image_url)} alt="" loading="lazy" decoding="async" class="h-full w-full rounded-lg object-cover" />
+              )}
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate font-semibold">{p.name}</span>
+              <span class="block text-xs text-[var(--color-teks-lembut)]">
+                {varian.length > 0 ? `${varian.length} varian` : `${rupiah(p.price)} · stok ${p.stock_qty}`}
+                {(stok.menipis || stok.habis) && (
+                  <span class="ml-1 font-semibold text-red-600">{stok.habis ? 'habis' : 'menipis'}</span>
+                )}
+                {!p.is_active && <span class="ml-1 lencana-nonaktif">Nonaktif</span>}
+              </span>
+            </span>
+            <span class="text-sm font-medium text-merah-700">{pemilik ? 'Edit' : 'Lihat'}</span>
+          </a>
+        </li>
+      );
+    })}
+  </ul>
+
+  <div class="kartu-rapat hidden overflow-x-auto md:block">
     <table class="tabel">
       <thead>
         <tr>
@@ -526,13 +570,13 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
         })}
       </tbody>
     </table>
-
-    {halamanIni.length === 0 && (
-      <p class="py-12 text-center text-[var(--color-teks-lembut)]">
-        {cari ? `Tidak ada produk yang cocok dengan "${cari}".` : 'Tidak ada produk pada tab ini.'}
-      </p>
-    )}
   </div>
+
+  {halamanIni.length === 0 && (
+    <p class="py-12 text-center text-[var(--color-teks-lembut)]">
+      {cari ? `Tidak ada produk yang cocok dengan "${cari}".` : 'Tidak ada produk pada tab ini.'}
+    </p>
+  )}
 
   <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
     <p class="text-[var(--color-teks-lembut)]">
@@ -559,14 +603,16 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
   {/* Bilah aksi massal tanpa JavaScript selalu terlihat (server menolak bila tak ada yang dicentang); dengan JS hitungan terpilih hidup dan "Hapus Terpilih" minta konfirmasi. */}
   {pemilik && (
-    <div class="bilah-bawah">
-      <span class="hanya-js text-sm font-medium" data-ringkas-bilah>Tidak ada produk dipilih</span>
-      <div class="ml-auto flex flex-wrap gap-2">
-        <button class="tombol-halus" type="submit" name="aksi" value="bulk-aktif">Aktifkan Terpilih</button>
-        <button class="tombol-halus" type="submit" name="aksi" value="bulk-nonaktif">Nonaktifkan Terpilih</button>
-        <button class="tombol-bahaya" type="submit" name="aksi" value="bulk-hapus" data-tombol-hapus>
-          Hapus Terpilih
-        </button>
+    <div class="hidden md:contents">
+      <div class="bilah-bawah">
+        <span class="hanya-js text-sm font-medium" data-ringkas-bilah>Tidak ada produk dipilih</span>
+        <div class="ml-auto flex flex-wrap gap-2">
+          <button class="tombol-halus" type="submit" name="aksi" value="bulk-aktif">Aktifkan Terpilih</button>
+          <button class="tombol-halus" type="submit" name="aksi" value="bulk-nonaktif">Nonaktifkan Terpilih</button>
+          <button class="tombol-bahaya" type="submit" name="aksi" value="bulk-hapus" data-tombol-hapus>
+            Hapus Terpilih
+          </button>
+        </div>
       </div>
     </div>
   )}

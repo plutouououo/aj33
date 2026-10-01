@@ -139,9 +139,6 @@ const BAGIAN = [
         <div class="isian">
           <label class="label" for="name">Nama produk</label>
           <input class="kolom" id="name" name="name" value={isi('name')} required />
-          <p class="isian-bantu">
-            Nama identifikasi internal — yang dicari di kasir dan dibaca pengepak. Pendek saja.
-          </p>
         </div>
 
         <div class="isian">
@@ -171,8 +168,7 @@ const BAGIAN = [
             accept="image/jpeg,image/png,image/webp,image/avif"
           />
           <p class="isian-bantu">
-            Opsional, maksimal 5 MB. Tampil di kartu produk layar kasir. Kalau formulir ini
-            sempat ditolak, fotonya perlu dipilih lagi.
+            Max 5 Mb
           </p>
         </div>
       </div>
@@ -185,13 +181,11 @@ const BAGIAN = [
         <div class="isian">
           <label class="label" for="product_type">Jenis produk</label>
           <input class="kolom" id="product_type" name="product_type" value={isi('product_type')} />
-          <p class="isian-bantu">Mis. "Ceker Bersih", "Hati Jantung Ampela", "Ayam Utuh".</p>
         </div>
 
         <div class="isian">
           <label class="label" for="variant_grade">Grade</label>
           <input class="kolom" id="variant_grade" name="variant_grade" value={isi('variant_grade')} />
-          <p class="isian-bantu">Mutu atau kelas ukuran barangnya. Mis. "Super Besar", "SP 08", "B".</p>
         </div>
 
         <div class="isian">
@@ -217,10 +211,6 @@ const BAGIAN = [
             value={isi('variant_size')}
             placeholder="mis. 2 atau 0,9"
           />
-          <p class="isian-bantu">
-            Isi satu pack dalam kg. Penjualan tetap per pack; ukuran ini yang menentukan harga
-            ecer atau grosir di kasir.
-          </p>
         </div>
 
       </div>
@@ -286,12 +276,6 @@ const BAGIAN = [
             placeholder="ikut harga ecer"
           />
         </div>
-
-        <p class="isian isian-bantu">
-          Harga marketplace boleh dikosongkan — artinya belum diatur dan mengikuti harga ecer.
-          Mengisi 0 berarti digratiskan. Kalau produk ini nanti punya varian, harga yang berlaku
-          adalah harga tiap variannya.
-        </p>
       </div>
     </section>
 
@@ -358,18 +342,8 @@ const BAGIAN = [
             value={isi('storage_location')}
             placeholder="mis. Rak A3"
           />
-          <p class="isian-bantu">
-            Rak tempat kiriman ini ditaruh — ditampilkan ke pengepak di tiket packing. Lokasi
-            milik batch, bukan produk: kiriman berikutnya boleh ditaruh di rak yang lain.
-          </p>
         </div>
-
-        <p class="isian isian-bantu">
-          Stok awal dicatat sebagai batch pertama produk ini. Batch berikutnya ditambahkan dari
-          halaman produk. Isi 0 kalau barangnya belum datang — beserta harga beli, kedaluwarsa,
-          dan lokasinya, karena ketiganya keterangan tentang kiriman yang belum ada.
-        </p>
-
+        
         <div class="isian isian-pendek">
           <label class="label" for="low_stock_threshold">Batas stok menipis</label>
           <input

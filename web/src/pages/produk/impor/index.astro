@@ -35,7 +35,25 @@ function tautanHalaman(ke: number): string {
     <a class="tombol-utama" href="/produk/impor/baru">+ Impor Baru</a>
   </div>
 
-  <div class="kartu-rapat overflow-x-auto">
+  {/* Ponsel memakai daftar ringkas (nama berkas, waktu · baris, status); md ke atas tetap tabel. */}
+  <ul class="kartu-rapat divide-y divide-[var(--color-garis-lembut)] md:hidden">
+    {batch.data.map((b) => (
+      <li>
+        <a class="flex min-h-11 items-center gap-3 px-3 py-3" href={`/produk/impor/${b.id}`}>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate font-semibold">{b.file_name}</span>
+            <span class="block text-xs text-[var(--color-teks-lembut)]">
+              {waktu(b.uploaded_at)} · {b.total_rows} baris
+              {b.status === 'committed' && ` · ${b.ok_count} ok, ${b.fail_count} gagal`}
+            </span>
+          </span>
+          <span class={kelasLencanaImpor(b.status, b.fail_count)}>{labelStatusImpor(b.status)}</span>
+        </a>
+      </li>
+    ))}
+  </ul>
+
+  <div class="kartu-rapat hidden overflow-x-auto md:block">
     <table class="tabel">
       <thead>
         <tr>
@@ -70,11 +88,11 @@ function tautanHalaman(ke: number): string {
         ))}
       </tbody>
     </table>
-
-    {batch.data.length === 0 && (
-      <p class="py-12 text-center text-[var(--color-teks-lembut)]">Belum ada berkas yang diunggah.</p>
-    )}
   </div>
+
+  {batch.data.length === 0 && (
+    <p class="py-12 text-center text-[var(--color-teks-lembut)]">Belum ada berkas yang diunggah.</p>
+  )}
 
   {halamanTerakhir > 1 && (
     <div class="mt-4 flex items-center gap-2">
