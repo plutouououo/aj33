@@ -2,6 +2,7 @@
 
 use super::repo::{self, NewTransaction, NewTransactionItem, Transaction as TxRow};
 use crate::error::{AppError, AppResult};
+use crate::settings;
 use crate::stock::{self, StockLine, StockReason};
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Deserialize;
@@ -61,13 +62,21 @@ impl SalesChannel {
         }
     }
 
-    /// Harga kanal yang `None` jatuh ke harga dasar, bukan nol (menjual nol adalah kerugian), lihat migrasi 0005.
-    fn harga(self, produk: &stock::LockedProduct) -> Decimal {
+    /// Harga kanal yang `None` jatuh ke harga ecer, bukan nol (menjual nol adalah kerugian), lihat migrasi 0005; grosir hanya milik kanal toko.
+    fn harga(self, produk: &stock::LockedProduct, qty: i32, batas_grosir_kg: Decimal) -> Decimal {
         match self {
-            Self::Toko => produk.price,
+            Self::Toko => harga_toko(produk, qty, batas_grosir_kg),
             Self::Shopee => produk.price_shopee.unwrap_or(produk.price),
             Self::Tiktok => produk.price_tiktok.unwrap_or(produk.price),
         }
+    }
+}
+
+/// Grosir bila berat baris (qty x ukuran pack) LEBIH dari batas (tepat di batas masih ecer); ukuran atau harga grosir yang kosong berarti ecer.
+fn harga_toko(produk: &stock::LockedProduct, qty: i32, batas_grosir_kg: Decimal) -> Decimal {
+    match (produk.variant_size, produk.price_wholesale) {
+        (Some(ukuran), Some(grosir)) if ukuran * Decimal::from(qty) > batas_grosir_kg => grosir,
+        _ => produk.price,
     }
 }
 
@@ -105,8 +114,8 @@ pub struct CheckoutInput {
     pub amount_paid: Option<Decimal>,
     /// Ongkos kirim; `None` berarti nol, diabaikan untuk `SalesChannel::Shopee` (lihat `checkout`).
     pub shipping_cost: Option<Decimal>,
-    /// Potongan harga seluruh belanja; `None` berarti nol, tak boleh melebihi subtotal (migrasi 0015).
-    pub discount_amount: Option<Decimal>,
+    /// Diskon ongkir: toko menanggung seluruh ongkir (jadi beban toko, pembeli tak membayarnya); tanpa ini ongkir ditagih ke pembeli. Diabaikan bila ongkir nol (migrasi 0023).
+    pub shipping_borne_by_store: bool,
     /// Persentase `commission_fee` Shopee sebagai pecahan, hanya `SalesChannel::Shopee`; `None` jatuh ke `shopee_commission_persen_default()`.
     pub platform_commission_fee_percent: Option<Decimal>,
     /// Persentase `service_fee` Shopee (opsional); `None` jatuh ke `shopee_service_persen_default()` (nol).
@@ -145,7 +154,7 @@ struct Bahan<'a> {
     payment_method: PaymentMethod,
     amount_paid: Option<Decimal>,
     shipping_cost: Decimal,
-    discount_amount: Decimal,
+    shipping_borne_by_store: bool,
     /// Nol selain Shopee; diikutkan karena persen berbeda berarti biaya tersimpan berbeda (migrasi 0018).
     platform_commission_fee_percent: Decimal,
     platform_service_fee_percent: Decimal,
@@ -178,8 +187,12 @@ fn sidik_jari(bahan: &Bahan<'_>) -> String {
     // Ongkir wajib ikut; tanpanya kirim ulang dengan ongkir baru dianggap kembar dan layar menampilkan struk kurang ongkir tanpa galat.
     hasher.update(sidik_uang(Some(bahan.shipping_cost)).as_bytes());
     hasher.update(b"|");
-    // Diskon dengan alasan sama seperti ongkir, arahnya terbalik: tanpa ini struk yang tertampil kelebihan sebesar potongan yang baru disepakati.
-    hasher.update(sidik_uang(Some(bahan.discount_amount)).as_bytes());
+    // Siapa penanggung ongkir wajib ikut: tanpanya kirim ulang setelah diskon ongkir diberikan dijawab struk lama yang masih menagih ongkir ke pembeli.
+    hasher.update(if bahan.shipping_borne_by_store {
+        b"1"
+    } else {
+        b"0"
+    });
     hasher.update(b"|");
     hasher.update(sidik_persen(bahan.platform_commission_fee_percent).as_bytes());
     hasher.update(b"|");
@@ -222,11 +235,8 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         nilai
     };
 
-    // Dinormalkan bersama ongkir (yang di-hash harus yang tersimpan); batas atas subtotal baru bisa dicek setelah harga dibaca dari DB, di bawah.
-    let diskon = uang(input.discount_amount.unwrap_or(Decimal::ZERO));
-    if diskon.is_sign_negative() {
-        return Err(AppError::bad_request("Diskon tidak boleh negatif."));
-    }
+    // Ditanggung toko hanya bermakna bila ada ongkir; dinormalkan di sini karena yang di-hash harus yang tersimpan (Shopee sudah berongkir nol).
+    let ongkir_ditanggung_toko = input.shipping_borne_by_store && ongkir > Decimal::ZERO;
 
     // Diselesaikan sebelum sidik jari karena persen bagian dari permintaan kasir; nol selain Shopee dan tak boleh ikut tersimpan (migrasi 0018, `transactions_platform_fee_channel_check`).
     let jepit_persen = |persen: Decimal, label: &str| -> AppResult<Decimal> {
@@ -284,7 +294,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         payment_method: input.payment_method,
         amount_paid: amount_paid_tersimpan,
         shipping_cost: ongkir,
-        discount_amount: diskon,
+        shipping_borne_by_store: ongkir_ditanggung_toko,
         platform_commission_fee_percent: commission_persen,
         platform_service_fee_percent: service_persen,
         items: &per_produk,
@@ -300,7 +310,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             payment_method: parse_payment(&existing.payment_method)?,
             amount_paid: existing.amount_paid,
             shipping_cost: existing.shipping_cost,
-            discount_amount: existing.discount_amount,
+            shipping_borne_by_store: existing.shipping_borne_by_store,
             platform_commission_fee_percent: existing.platform_commission_fee_percent,
             platform_service_fee_percent: existing.platform_service_fee_percent,
             items: &items_lama,
@@ -319,6 +329,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
 
     let ids: Vec<Uuid> = lines.iter().map(|l| l.product_id).collect();
     let terkunci = stock::kunci_produk(&mut tx, &ids).await?;
+    let batas_grosir_kg = settings::repo::batas_grosir_kg(&mut *tx).await?;
 
     let mut items = Vec::with_capacity(per_produk.len());
     let mut subtotal = Decimal::ZERO;
@@ -328,8 +339,8 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             .get(&product_id)
             .ok_or_else(|| AppError::not_found("Produk tidak ditemukan."))?;
 
-        // Harga diambil dari database, bukan request (kalau client menentukan harga, siapa pun bisa membeli seharga nol); dari request hanya kanalnya.
-        let unit_price = uang(input.sales_channel.harga(product));
+        // Harga diambil dari database, bukan request (kalau client menentukan harga, siapa pun bisa membeli seharga nol); dari request hanya kanal dan jumlah.
+        let unit_price = uang(input.sales_channel.harga(product, qty, batas_grosir_kg));
         let baris_subtotal = uang(unit_price * Decimal::from(qty));
         subtotal += baris_subtotal;
 
@@ -344,15 +355,8 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
 
     let subtotal = uang(subtotal);
 
-    // Diskon tak boleh melebihi harga barang (juga CHECK di DB, migrasi 0015); di sini agar kasir mendapat kalimat yang terbaca.
-    if diskon > subtotal {
-        return Err(AppError::bad_request(
-            "Diskon tidak boleh melebihi subtotal belanja.",
-        ));
-    }
-
-    // Potongan Shopee: komisi + service_fee + PPh 0,5% dari omzet setelah diskon, plus Rp1.250 per transaksi, nol selain Shopee; `rupiah_bulat` sama strateginya dengan `Math.round` di kasir.
-    let basis_fee = subtotal - diskon;
+    // Potongan Shopee: komisi + service_fee + PPh 0,5% dari omzet barang, plus Rp1.250 per transaksi, nol selain Shopee; `rupiah_bulat` sama strateginya dengan `Math.round` di kasir.
+    let basis_fee = subtotal;
     let (biaya_komisi, biaya_layanan, pph, biaya_proses) =
         if input.sales_channel == SalesChannel::Shopee {
             (
@@ -365,9 +369,14 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO)
         };
 
-    // `subtotal` tetap harga barang; diskon dan ongkir punya kolom sendiri dan bertemu di `total_amount`; untuk Shopee `total_amount` adalah uang yang cair ke toko.
+    // Ongkir hanya menambah tagihan bila pembeli yang menanggung; bila toko, ongkir tak masuk `total_amount` dan dicatat sebagai beban (`shipping_subsidy`). Untuk Shopee `total_amount` adalah uang yang cair ke toko.
+    let ongkir_ditagih = if ongkir_ditanggung_toko {
+        Decimal::ZERO
+    } else {
+        ongkir
+    };
     let total_amount =
-        uang(subtotal - diskon + ongkir - biaya_komisi - biaya_layanan - pph - biaya_proses);
+        uang(subtotal + ongkir_ditagih - biaya_komisi - biaya_layanan - pph - biaya_proses);
 
     if input.payment_method == PaymentMethod::Cash {
         let dibayar = amount_paid_tersimpan
@@ -391,7 +400,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
             payment_method: input.payment_method.as_str().to_string(),
             sales_channel: input.sales_channel.as_str().to_string(),
             subtotal,
-            discount_amount: diskon,
+            shipping_borne_by_store: ongkir_ditanggung_toko,
             shipping_cost: ongkir,
             total_amount,
             platform_commission_fee_percent: commission_persen,
@@ -501,7 +510,7 @@ mod tests {
             payment_method: PaymentMethod::Cash,
             amount_paid: Some(Decimal::new(10000, 0)),
             shipping_cost: Decimal::ZERO,
-            discount_amount: Decimal::ZERO,
+            shipping_borne_by_store: false,
             platform_commission_fee_percent: Decimal::ZERO,
             platform_service_fee_percent: Decimal::ZERO,
             items,
@@ -583,15 +592,23 @@ mod tests {
     }
 
     #[test]
-    fn diskon_berbeda_menghasilkan_sidik_jari_berbeda() {
-        // Seperti ongkir, arah sebaliknya: tanpa diskon di sidik jari, kirim ulang menagih penuh dengan struk lama tanpa potongan.
+    fn penanggung_ongkir_berbeda_menghasilkan_sidik_jari_berbeda() {
+        // Keranjang dan ongkir sama tapi penanggungnya beda adalah tagihan berbeda; tanpa ini kirim ulang setelah diskon ongkir dijawab struk lama yang menagih ongkir.
         let items = [(produk(1), 1)];
-        let dengan_diskon = Bahan {
-            discount_amount: Decimal::new(5000, 0),
+        let ditanggung_toko = Bahan {
+            shipping_cost: Decimal::new(20000, 0),
+            shipping_borne_by_store: true,
+            ..bahan(&items)
+        };
+        let ditanggung_pembeli = Bahan {
+            shipping_cost: Decimal::new(20000, 0),
             ..bahan(&items)
         };
 
-        assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&dengan_diskon));
+        assert_ne!(
+            sidik_jari(&ditanggung_pembeli),
+            sidik_jari(&ditanggung_toko)
+        );
     }
 
     #[test]
@@ -630,20 +647,110 @@ mod tests {
         assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&shopee));
     }
 
-    #[test]
-    fn harga_kanal_jatuh_ke_harga_dasar_saat_belum_diatur() {
-        // `None` berarti "belum diatur", bukan "gratis"; harga marketplace yang belum diisi adalah keadaan biasa dan menjual seharga nol adalah kerugian.
-        let produk = stock::LockedProduct {
+    /// Pack 2 kg, ecer Rp25.000 dan grosir Rp22.000; tiap pengujian mengubah satu hal.
+    fn pack_dua_kg() -> stock::LockedProduct {
+        stock::LockedProduct {
             id: produk(1),
             name: "Ceker Bersih".into(),
+            variant_size: Some(Decimal::new(2, 0)),
             price: Decimal::new(25000, 0),
+            price_wholesale: Some(Decimal::new(22000, 0)),
             price_shopee: Some(Decimal::new(28000, 0)),
             price_tiktok: None,
-            stock_qty: 10,
+            stock_qty: 100,
+        }
+    }
+
+    fn batas() -> Decimal {
+        Decimal::new(20, 0)
+    }
+
+    #[test]
+    fn harga_kanal_jatuh_ke_harga_ecer_saat_belum_diatur() {
+        // `None` berarti "belum diatur", bukan "gratis"; harga marketplace yang belum diisi adalah keadaan biasa dan menjual seharga nol adalah kerugian.
+        let produk = pack_dua_kg();
+
+        assert_eq!(
+            SalesChannel::Toko.harga(&produk, 1, batas()),
+            Decimal::new(25000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Shopee.harga(&produk, 1, batas()),
+            Decimal::new(28000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Tiktok.harga(&produk, 1, batas()),
+            Decimal::new(25000, 0)
+        );
+    }
+
+    #[test]
+    fn tepat_di_batas_masih_ecer_dan_melewatinya_grosir() {
+        // 2 kg x 10 = 20 kg tepat di batas (ecer); 11 pack = 22 kg (grosir). Batasnya "lebih dari", bukan "sama dengan atau lebih".
+        let produk = pack_dua_kg();
+
+        assert_eq!(
+            SalesChannel::Toko.harga(&produk, 10, batas()),
+            Decimal::new(25000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Toko.harga(&produk, 11, batas()),
+            Decimal::new(22000, 0)
+        );
+    }
+
+    #[test]
+    fn ukuran_pecahan_dihitung_tanpa_selisih_pembulatan() {
+        // 0,9 kg x 23 = 20,7 kg (grosir) tetapi x 22 = 19,8 kg (ecer); desimal biner akan meleset di sekitar batas.
+        let produk = stock::LockedProduct {
+            variant_size: Some(Decimal::new(9, 1)),
+            ..pack_dua_kg()
         };
 
-        assert_eq!(SalesChannel::Toko.harga(&produk), Decimal::new(25000, 0));
-        assert_eq!(SalesChannel::Shopee.harga(&produk), Decimal::new(28000, 0));
-        assert_eq!(SalesChannel::Tiktok.harga(&produk), Decimal::new(25000, 0));
+        assert_eq!(
+            SalesChannel::Toko.harga(&produk, 22, batas()),
+            Decimal::new(25000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Toko.harga(&produk, 23, batas()),
+            Decimal::new(22000, 0)
+        );
+    }
+
+    #[test]
+    fn tanpa_ukuran_atau_harga_grosir_selalu_ecer() {
+        // Produk lama belum punya ukuran atau grosir; jatuh ke ecer, bukan gratis dan bukan galat yang menahan penjualan.
+        let tanpa_ukuran = stock::LockedProduct {
+            variant_size: None,
+            ..pack_dua_kg()
+        };
+        let tanpa_grosir = stock::LockedProduct {
+            price_wholesale: None,
+            ..pack_dua_kg()
+        };
+
+        assert_eq!(
+            SalesChannel::Toko.harga(&tanpa_ukuran, 50, batas()),
+            Decimal::new(25000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Toko.harga(&tanpa_grosir, 50, batas()),
+            Decimal::new(25000, 0)
+        );
+    }
+
+    #[test]
+    fn marketplace_tak_memakai_harga_grosir() {
+        // Harga Shopee/TikTok sudah memuat strategi kanalnya sendiri; berat besar tidak boleh menurunkannya.
+        let produk = pack_dua_kg();
+
+        assert_eq!(
+            SalesChannel::Shopee.harga(&produk, 50, batas()),
+            Decimal::new(28000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Tiktok.harga(&produk, 50, batas()),
+            Decimal::new(25000, 0)
+        );
     }
 }

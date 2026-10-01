@@ -123,6 +123,25 @@ pub fn parse_money(raw: &str) -> Option<Decimal> {
     Some(nilai)
 }
 
+/// Ukuran pack dalam kg dari teks bebas ("2 kg", "0,9", "500 gr"); tanpa satuan dianggap kg, dan nol atau negatif ditolak karena bukan isi pack.
+pub fn parse_ukuran_kg(raw: &str) -> Option<Decimal> {
+    let kecil = raw.trim().to_lowercase();
+    let (angka, pembagi) = if let Some(sisa) = kecil.strip_suffix("kg") {
+        (sisa, 1)
+    } else if let Some(sisa) = kecil
+        .strip_suffix("gram")
+        .or_else(|| kecil.strip_suffix("gr"))
+        .or_else(|| kecil.strip_suffix('g'))
+    {
+        (sisa, 1000)
+    } else {
+        (kecil.as_str(), 1)
+    };
+
+    let nilai = parse_money(angka)? / Decimal::from(pembagi);
+    (nilai > Decimal::ZERO).then_some(nilai)
+}
+
 /// Buang "%" lalu `parse_money`; hasil angka persen apa adanya ("17,25%" → 17.25), bukan pecahan (pemanggil membagi 100, lihat `harga_efektif`).
 pub fn parse_percent(raw: &str) -> Option<Decimal> {
     parse_money(&raw.replace('%', ""))
@@ -262,6 +281,17 @@ pub fn validate_row(row: &ParsedRow, sku_duplikat: bool, kategori_dikenal: bool)
         isu.push(isu_rumus);
     }
 
+    if row
+        .variant_size
+        .as_deref()
+        .is_some_and(|u| parse_ukuran_kg(u).is_none())
+    {
+        isu.push(warn(
+            "variant_size",
+            "Ukuran tidak terbaca sebagai angka kg (mis. \"2 kg\") -- ukuran dikosongkan.",
+        ));
+    }
+
     if row.category_text.is_some() && !kategori_dikenal {
         isu.push(warn(
             "category_text",
@@ -310,6 +340,24 @@ mod tests {
     #[test]
     fn map_header_tidak_peka_spasi_dan_huruf_besar() {
         assert_eq!(map_header("  NAMA  "), Some(Field::Name));
+    }
+
+    // --- parse_ukuran_kg ---
+
+    #[test]
+    fn parse_ukuran_kg_membaca_satuan_kg_dan_gram() {
+        assert_eq!(parse_ukuran_kg("2 kg"), Some(Decimal::new(2, 0)));
+        assert_eq!(parse_ukuran_kg("0,9KG"), Some(Decimal::new(9, 1)));
+        assert_eq!(parse_ukuran_kg("500 gr"), Some(Decimal::new(5, 1)));
+        assert_eq!(parse_ukuran_kg("1.5"), Some(Decimal::new(15, 1)));
+    }
+
+    #[test]
+    fn parse_ukuran_kg_menolak_nol_negatif_dan_bukan_angka() {
+        assert_eq!(parse_ukuran_kg("0 kg"), None);
+        assert_eq!(parse_ukuran_kg("-2 kg"), None);
+        assert_eq!(parse_ukuran_kg("besar"), None);
+        assert_eq!(parse_ukuran_kg(""), None);
     }
 
     // --- parse_money ---

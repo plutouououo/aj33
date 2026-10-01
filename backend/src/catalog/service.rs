@@ -18,10 +18,11 @@ pub struct CreateProductInput {
     pub brand_name: Option<String>,
     pub product_type: Option<String>,
     pub variant_grade: Option<String>,
-    pub variant_size: Option<String>,
+    pub variant_size: Option<Decimal>,
     pub parent_id: Option<Uuid>,
     pub category_id: Option<Uuid>,
     pub price: Decimal,
+    pub price_wholesale: Option<Decimal>,
     pub price_shopee: Option<Decimal>,
     pub price_tiktok: Option<Decimal>,
     pub cost_price: Option<Decimal>,
@@ -45,7 +46,13 @@ pub(crate) async fn create_product(
     if name.is_empty() {
         return Err(AppError::bad_request("Nama produk wajib diisi."));
     }
-    periksa_harga(input.price, input.price_shopee, input.price_tiktok)?;
+    periksa_harga(
+        input.price,
+        input.price_wholesale,
+        input.price_shopee,
+        input.price_tiktok,
+    )?;
+    periksa_ukuran(input.variant_size)?;
     if input.stock_qty < 0 {
         return Err(AppError::bad_request("Stok awal tidak boleh negatif."));
     }
@@ -69,14 +76,14 @@ pub(crate) async fn create_product(
     let brand_name = bersihkan(input.brand_name);
     let product_type = bersihkan(input.product_type);
     let variant_grade = bersihkan(input.variant_grade);
-    let variant_size = bersihkan(input.variant_size);
+    let variant_size = input.variant_size;
 
     let sku = rakit_sku(
         state,
         &brand_name,
         &product_type,
         &variant_grade,
-        &variant_size,
+        variant_size,
     )
     .await?;
 
@@ -98,6 +105,7 @@ pub(crate) async fn create_product(
             parent_id: input.parent_id,
             category_id: input.category_id,
             price: input.price,
+            price_wholesale: input.price_wholesale,
             price_shopee: input.price_shopee,
             price_tiktok: input.price_tiktok,
             cost_price: input.cost_price,
@@ -139,9 +147,11 @@ pub(crate) async fn update_product(
 
     periksa_harga(
         patch.price.unwrap_or(sekarang.price),
+        patch.price_wholesale.unwrap_or(sekarang.price_wholesale),
         patch.price_shopee.flatten(),
         patch.price_tiktok.flatten(),
     )?;
+    periksa_ukuran(patch.variant_size.flatten())?;
 
     if let Some(Some(category_id)) = patch.category_id {
         if !repo::category_ada(&state.pool, category_id).await? {
@@ -161,11 +171,21 @@ pub(crate) async fn ambil_produk(state: &AppState, id: Uuid) -> AppResult<Produc
 /// Harga diperiksa di sini agar pesannya menyebut marketplace mana yang salah; CHECK di database tetap jaring terakhir.
 pub(crate) fn periksa_harga(
     price: Decimal,
+    price_wholesale: Option<Decimal>,
     price_shopee: Option<Decimal>,
     price_tiktok: Option<Decimal>,
 ) -> AppResult<()> {
     if price.is_sign_negative() {
-        return Err(AppError::bad_request("Harga tidak boleh negatif."));
+        return Err(AppError::bad_request("Harga ecer tidak boleh negatif."));
+    }
+    if price_wholesale.is_some_and(|h| h.is_sign_negative()) {
+        return Err(AppError::bad_request("Harga grosir tidak boleh negatif."));
+    }
+    // Grosir yang lebih mahal dari ecer hampir pasti tertukar ketik, dan akibatnya pembeli besar membayar lebih.
+    if price_wholesale.is_some_and(|h| h > price) {
+        return Err(AppError::bad_request(
+            "Harga grosir tidak boleh lebih tinggi dari harga ecer.",
+        ));
     }
     if price_shopee.is_some_and(|h| h.is_sign_negative()) {
         return Err(AppError::bad_request("Harga Shopee tidak boleh negatif."));
@@ -178,22 +198,35 @@ pub(crate) fn periksa_harga(
     Ok(())
 }
 
+/// Ukuran harus muat di NUMERIC(8,3) dan positif; di sini agar pesannya terbaca, CHECK di database tetap jaring terakhir.
+pub(crate) fn periksa_ukuran(ukuran: Option<Decimal>) -> AppResult<()> {
+    if ukuran.is_some_and(|u| u <= Decimal::ZERO || u >= Decimal::from(100_000)) {
+        return Err(AppError::bad_request(
+            "Ukuran harus lebih dari 0 dan kurang dari 100.000 kg.",
+        ));
+    }
+    Ok(())
+}
+
 /// SKU produk baru dipastikan belum dipakai, dipanggil sekali seumur produk (atribut yang disunting tak merakit ulang SKU, lihat modul `sku`).
 pub(crate) async fn rakit_sku(
     state: &AppState,
     brand_name: &Option<String>,
     product_type: &Option<String>,
     variant_grade: &Option<String>,
-    variant_size: &Option<String>,
+    variant_size: Option<Decimal>,
 ) -> AppResult<String> {
     let kamus = repo::kamus_sku(&state.pool).await?;
+
+    // Ditulis "2 kg" supaya kodenya tetap `2KG` seperti SKU yang sudah beredar; `normalize` membuang nol di belakang koma (2.000 jadi 2).
+    let ukuran = variant_size.map(|u| format!("{} kg", u.normalize()));
 
     let kode = sku::rakit(
         &kamus,
         product_type.as_deref(),
         variant_grade.as_deref(),
         brand_name.as_deref(),
-        variant_size.as_deref(),
+        ukuran.as_deref(),
     )
     .map_err(|err| AppError::bad_request(err.to_string()))?;
 

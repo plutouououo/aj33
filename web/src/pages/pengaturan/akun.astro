@@ -48,10 +48,10 @@ const wajib = user.must_change_password;
   <div class="mx-auto max-w-sm">
     {
       wajib && (
-        <p class="galat mb-4" role="alert">
-          Password akun ini masih password sementara yang dibuatkan pemilik toko.
-          Ganti dulu sebelum memakai aplikasi.
-        </p>
+        <Galat
+          class="mb-4"
+          pesan="Password akun ini masih password sementara yang dibuatkan pemilik toko. Ganti dulu sebelum memakai aplikasi."
+        />
       )
     }
 

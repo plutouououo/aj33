@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id                          AS \"id!\",\n               t.created_at                  AS \"created_at!\",\n               t.status                      AS \"status!\",\n               t.voided_at,\n               t.void_reason,\n               t.type                        AS \"transaction_type!\",\n               t.sales_channel               AS \"sales_channel!\",\n               t.payment_method               AS \"payment_method!\",\n               c.name                        AS customer_name,\n               c.phone                       AS customer_phone,\n               c.email                       AS customer_email,\n               u.name                        AS \"cashier_name!\",\n               t.subtotal                    AS \"subtotal!\",\n               t.discount_amount             AS \"discount_amount!\",\n               t.shipping_cost               AS \"shipping_cost!\",\n               t.total_amount                AS \"total_amount!\",\n               t.amount_paid,\n               t.change_amount,\n               t.platform_commission_fee_percent AS \"platform_commission_fee_percent!\",\n               t.platform_commission_fee         AS \"platform_commission_fee!\",\n               t.platform_service_fee_percent    AS \"platform_service_fee_percent!\",\n               t.platform_service_fee            AS \"platform_service_fee!\",\n               t.platform_withholding_tax        AS \"platform_withholding_tax!\",\n               t.platform_order_processing_fee   AS \"platform_order_processing_fee!\"\n        FROM transactions t\n        LEFT JOIN customers c ON c.id = t.customer_id\n        JOIN users u ON u.id = t.cashier_user_id\n        WHERE t.id = $1\n        ",
+  "query": "\n        SELECT t.id                          AS \"id!\",\n               t.created_at                  AS \"created_at!\",\n               t.status                      AS \"status!\",\n               t.voided_at,\n               t.void_reason,\n               t.type                        AS \"transaction_type!\",\n               t.sales_channel               AS \"sales_channel!\",\n               t.payment_method               AS \"payment_method!\",\n               c.name                        AS customer_name,\n               c.phone                       AS customer_phone,\n               c.email                       AS customer_email,\n               u.name                        AS \"cashier_name!\",\n               t.subtotal                    AS \"subtotal!\",\n               t.discount_amount             AS \"discount_amount!\",\n               t.shipping_cost               AS \"shipping_cost!\",\n               t.shipping_borne_by_store     AS \"shipping_borne_by_store!\",\n               t.shipping_subsidy            AS \"shipping_subsidy!\",\n               t.total_amount                AS \"total_amount!\",\n               t.amount_paid,\n               t.change_amount,\n               t.platform_commission_fee_percent AS \"platform_commission_fee_percent!\",\n               t.platform_commission_fee         AS \"platform_commission_fee!\",\n               t.platform_service_fee_percent    AS \"platform_service_fee_percent!\",\n               t.platform_service_fee            AS \"platform_service_fee!\",\n               t.platform_withholding_tax        AS \"platform_withholding_tax!\",\n               t.platform_order_processing_fee   AS \"platform_order_processing_fee!\"\n        FROM transactions t\n        LEFT JOIN customers c ON c.id = t.customer_id\n        JOIN users u ON u.id = t.cashier_user_id\n        WHERE t.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -80,46 +80,56 @@
       },
       {
         "ordinal": 15,
-        "name": "total_amount!",
-        "type_info": "Numeric"
+        "name": "shipping_borne_by_store!",
+        "type_info": "Bool"
       },
       {
         "ordinal": 16,
-        "name": "amount_paid",
+        "name": "shipping_subsidy!",
         "type_info": "Numeric"
       },
       {
         "ordinal": 17,
-        "name": "change_amount",
+        "name": "total_amount!",
         "type_info": "Numeric"
       },
       {
         "ordinal": 18,
-        "name": "platform_commission_fee_percent!",
+        "name": "amount_paid",
         "type_info": "Numeric"
       },
       {
         "ordinal": 19,
-        "name": "platform_commission_fee!",
+        "name": "change_amount",
         "type_info": "Numeric"
       },
       {
         "ordinal": 20,
-        "name": "platform_service_fee_percent!",
+        "name": "platform_commission_fee_percent!",
         "type_info": "Numeric"
       },
       {
         "ordinal": 21,
-        "name": "platform_service_fee!",
+        "name": "platform_commission_fee!",
         "type_info": "Numeric"
       },
       {
         "ordinal": 22,
-        "name": "platform_withholding_tax!",
+        "name": "platform_service_fee_percent!",
         "type_info": "Numeric"
       },
       {
         "ordinal": 23,
+        "name": "platform_service_fee!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 24,
+        "name": "platform_withholding_tax!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 25,
         "name": "platform_order_processing_fee!",
         "type_info": "Numeric"
       }
@@ -147,6 +157,8 @@
       false,
       false,
       true,
+      false,
+      true,
       true,
       false,
       false,
@@ -156,5 +168,5 @@
       false
     ]
   },
-  "hash": "36291c19beeb8510a16efee9e5eb5fe3a06d14ad94fc0f5db7dab863a078441c"
+  "hash": "eb0750074e0ef82a0df1d4efe410e6233190cb1665c0090feffbe0dca64cca1a"
 }

@@ -111,14 +111,16 @@ export interface Product {
   product_type: string | null;
   /** Mutu / kelas ukuran, mis. "SP 08", "Super Besar". */
   variant_grade: string | null;
-  /** Isi satu pack, mis. "2 kg". Satu SKU berarti satu pack. */
-  variant_size: string | null;
+  /** Isi satu pack dalam kg (boleh pecahan, mis. 0,9). `null` berarti kasir selalu memakai harga ecer. Satu SKU berarti satu pack. */
+  variant_size: number | null;
   /** Terisi berarti produk ini varian dari produk lain. */
   parent_id: string | null;
   /** Induk yang punya varian tidak dijual langsung — variannya yang dijual. */
   variant_count: number;
-  /** Harga dasar: yang dipakai kasir, sekaligus rujukan saat harga kanal kosong. */
+  /** Harga ecer per pack: yang dipakai kasir bila berat baris tak melebihi batas grosir, sekaligus rujukan saat harga kanal kosong. */
   price: number;
+  /** Harga grosir per pack, hanya kanal toko. `null` berarti belum diatur -- kasir tetap memakai harga ecer. */
+  price_wholesale: number | null;
   /** `null` berarti belum diatur -- bukan gratis. */
   price_shopee: number | null;
   /** Mencakup Tokopedia; satu kanal dengan TikTok Shop. */
@@ -169,6 +171,11 @@ export interface Category {
   name: string;
 }
 
+/** Batas harga grosir: baris kanal toko dihargai grosir bila berat baris (jumlah × ukuran pack) LEBIH dari angka ini. */
+export interface PricingSettings {
+  wholesale_threshold_kg: number;
+}
+
 /** Bagian atribut yang punya kode sendiri di kamus SKU. */
 export type SkuKind = 'jenis' | 'grade' | 'merek' | 'ukuran';
 
@@ -199,10 +206,12 @@ export interface Transaction {
   payment_method: string;
   sales_channel: SalesChannel;
   subtotal: number;
-  /** Potongan atas seluruh belanja, tidak dikurangkan dari `subtotal` agar baris struk tetap bisa dijumlahkan menjadi subtotal. */
+  /** Diskon umum lama: selalu 0 untuk transaksi baru, hanya transaksi lama yang memuatnya. */
   discount_amount: number;
-  /** Ongkir tidak termasuk `subtotal`; hanya menambah `total_amount`. */
+  /** Ongkir sebenarnya, tidak termasuk `subtotal`; menambah `total_amount` hanya bila pembeli yang menanggung. */
   shipping_cost: number;
+  /** Diskon ongkir: toko menanggung ongkir (beban toko) dan pembeli tidak membayarnya. */
+  shipping_borne_by_store: boolean;
   /** Untuk Shopee ini bukan yang dibayar pembeli melainkan uang yang cair ke toko setelah empat biaya platform dipotong; kanal lain tetap "yang dibayar pembeli". */
   total_amount: number;
   /** Nama field mengikuti `v2.payment.get_escrow_detail` Shopee (lihat `marketplace/shopee/client.rs` dan `pos::service`). */
@@ -346,14 +355,22 @@ export interface Dashboard {
   product_count: number;
   customer_count: number;
   low_stock_count: number;
+  /** Potret persediaan sekarang, bukan angka periode. */
+  stock_value: StockValue;
   recent_sales: SaleRow[];
   low_stock_products: LowStockProduct[];
 }
 
 export interface SalesSummary {
   revenue: number;
+  /** Ongkir yang ditagih ke pembeli; ongkir yang ditanggung toko ada di `shipping_subsidy`. */
   shipping: number;
+  /** Ongkir ditanggung toko lewat diskon ongkir; sudah termasuk di `expenses`. */
+  shipping_subsidy: number;
+  /** Berat barang terjual dalam kg (pack × ukuran); penjualan produk tanpa ukuran tak ikut. */
+  sold_kg: number;
   cogs: number;
+  /** Beban toko, termasuk `shipping_subsidy`. */
   expenses: number;
   /** Jumlah biaya admin + PPh 0,5% + biaya proses Rp1.250 Shopee periode ini, dibaca dari yang tersimpan per transaksi (bukan tarif tetap); nol bila tak ada penjualan Shopee. */
   platform_fees: number;
@@ -390,6 +407,10 @@ export interface StockValue {
   value: number;
   /** Batch bersisa tanpa harga beli; selama bukan nol, `value` adalah batas bawah. */
   batches_without_cost: number;
+  /** Total berat stok dalam kg (sisa pack × ukuran); pack tanpa ukuran tak ikut, jadi batas bawah selama `packs_without_size` bukan nol. */
+  total_kg: number;
+  /** Pack bersisa yang produknya belum punya ukuran. */
+  packs_without_size: number;
 }
 
 export interface SalesReport {
@@ -401,8 +422,6 @@ export interface SalesReport {
   expense_breakdown: ExpenseSlice[];
   top_products: TopProduct[];
   sales: SaleRow[];
-  /** Potret stok hari ini; tidak ikut saringan periode. */
-  stock_value: StockValue;
   sales_limit: number;
 }
 
@@ -437,6 +456,7 @@ export interface TransactionDetail {
   subtotal: number;
   discount_amount: number;
   shipping_cost: number;
+  shipping_borne_by_store: boolean;
   total_amount: number;
   amount_paid: number | null;
   change_amount: number | null;
@@ -449,7 +469,7 @@ export interface TransactionDetail {
   /** Batas atas kalau `items_without_cost > 0`. */
   cogs: number;
   items_without_cost: number;
-  /** `subtotal - discount_amount - cogs` dikurangi seluruh potongan Shopee; beban toko tak ikut karena milik periode, bukan transaksi. */
+  /** `subtotal - discount_amount - cogs` dikurangi seluruh potongan Shopee dan ongkir yang ditanggung toko; beban toko lain tak ikut karena milik periode, bukan transaksi. */
   net_profit: number;
   items: TransactionDetailItem[];
 }

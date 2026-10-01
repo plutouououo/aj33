@@ -10,13 +10,27 @@ const { pesan, rincian = [], class: kelas } = Astro.props;
 
 {
   pesan && (
-    <div class:list={['galat', kelas]} role="alert">
-      <p>{pesan}</p>
-      {rincian.length > 0 && (
-        <ul class="mt-2 max-h-60 list-disc space-y-1 overflow-y-auto pl-5">
-          {rincian.map((r) => <li>{r}</li>)}
-        </ul>
-      )}
+    <div class:list={['galat flex items-start gap-3', kelas]} role="alert">
+      <svg
+        class="mt-0.5 h-5 w-5 shrink-0"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.007v.008H12v-.008z" />
+      </svg>
+      <div class="min-w-0">
+        <p>{pesan}</p>
+        {rincian.length > 0 && (
+          <ul class="mt-2 max-h-60 list-disc space-y-1 overflow-y-auto pl-5">
+            {rincian.map((r) => <li>{r}</li>)}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }

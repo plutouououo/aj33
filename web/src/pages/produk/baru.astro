@@ -1,7 +1,8 @@
 ---
 import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
-import { api, ApiRequestError, type Category, type Product } from '../../lib/api';
+import { api, ApiRequestError, type Category, type PricingSettings, type Product } from '../../lib/api';
+import { kg } from '../../lib/format';
 import { MEREK, kembaliKeDaftar } from '../../lib/produk';
 import { GagalUnggah, unggahFoto } from '../../lib/blob';
 
@@ -27,16 +28,18 @@ if (Astro.request.method === 'POST') {
   const harga = Number(form.get('price'));
   const stok = Number(form.get('stock_qty') ?? 0);
 
-  // Harga marketplace boleh kosong (= belum diatur, pakai harga dasar) dan dikirim `undefined`, bukan 0 karena 0 berarti gratis dan merugikan.
+  // Harga marketplace boleh kosong (= belum diatur, pakai harga ecer) dan dikirim `undefined`, bukan 0 karena 0 berarti gratis dan merugikan.
   const angkaOpsional = (kolom: string): number | undefined => {
     const mentah = teks(kolom);
     if (!mentah) return undefined;
     const nilai = Number(mentah);
     return Number.isFinite(nilai) ? nilai : undefined;
   };
+  const hargaGrosir = angkaOpsional('price_wholesale');
   const hargaShopee = angkaOpsional('price_shopee');
   const hargaTiktok = angkaOpsional('price_tiktok');
   const hargaBeliBatch = angkaOpsional('purchase_price');
+  const ukuranKg = angkaOpsional('variant_size');
 
   // Kosong bila tak ada foto dipilih; peramban tetap mengirim bagian file dengan nol byte.
   const foto = form.get('foto');
@@ -45,9 +48,13 @@ if (Astro.request.method === 'POST') {
   if (!nama) {
     galat = 'Nama produk wajib diisi.';
   } else if (!Number.isFinite(harga) || harga < 0) {
-    galat = 'Harga dasar harus berupa angka yang tidak negatif.';
+    galat = 'Harga ecer harus berupa angka yang tidak negatif.';
+  } else if ((hargaGrosir ?? 0) < 0) {
+    galat = 'Harga grosir tidak boleh negatif.';
   } else if ((hargaShopee ?? 0) < 0 || (hargaTiktok ?? 0) < 0) {
     galat = 'Harga marketplace tidak boleh negatif.';
+  } else if (ukuranKg !== undefined && ukuranKg <= 0) {
+    galat = 'Ukuran harus lebih dari 0 kg.';
   } else {
     try {
       // Foto diunggah setelah semua isian lolos karena `<input type="file">` tak bisa diisi ulang server dan yang terlanjur naik ke Azure jadi blob yatim.
@@ -62,10 +69,11 @@ if (Astro.request.method === 'POST') {
           brand_name: teks('brand_name'),
           product_type: teks('product_type'),
           variant_grade: teks('variant_grade'),
-          variant_size: teks('variant_size'),
+          variant_size: ukuranKg,
           category_id: teks('category_id'),
           image_url,
           price: harga,
+          price_wholesale: hargaGrosir,
           price_shopee: hargaShopee,
           price_tiktok: hargaTiktok,
           purchase_price: hargaBeliBatch,
@@ -92,7 +100,10 @@ if (Astro.request.method === 'POST') {
 const isi = (kolom: string, baku = ''): string =>
   terkirim ? String(terkirim.get(kolom) ?? '') : baku;
 
-const kategori = await api<Category[]>('/categories', { token });
+const [kategori, pengaturanHarga] = await Promise.all([
+  api<Category[]>('/categories', { token }),
+  api<PricingSettings>('/settings/pricing', { token }),
+]);
 
 // Satu larik menyetir bilah tab dan judul bagian agar tak lepas sinkron.
 const BAGIAN = [
@@ -194,14 +205,22 @@ const BAGIAN = [
         </div>
 
         <div class="isian isian-pendek">
-          <label class="label" for="variant_size">Ukuran (isi pack)</label>
+          <label class="label" for="variant_size">Ukuran (kg per pack)</label>
           <input
             class="kolom"
             id="variant_size"
             name="variant_size"
+            type="number"
+            min="0.001"
+            step="any"
+            inputmode="decimal"
             value={isi('variant_size')}
-            placeholder="mis. 2 kg"
+            placeholder="mis. 2 atau 0,9"
           />
+          <p class="isian-bantu">
+            Isi satu pack dalam kg. Penjualan tetap per pack; ukuran ini yang menentukan harga
+            ecer atau grosir di kasir.
+          </p>
         </div>
 
       </div>
@@ -212,7 +231,7 @@ const BAGIAN = [
 
       <div class="borang-tegak">
         <div class="isian isian-pendek">
-          <label class="label" for="price">Harga dasar / kasir (Rp)</label>
+          <label class="label" for="price">Harga ecer (Rp)</label>
           <input
             class="kolom"
             id="price"
@@ -226,6 +245,21 @@ const BAGIAN = [
         </div>
 
         <div class="isian isian-pendek">
+          <label class="label" for="price_wholesale">Harga grosir (Rp)</label>
+          <input
+            class="kolom"
+            id="price_wholesale"
+            name="price_wholesale"
+            type="number"
+            min="0"
+            step="1"
+            value={isi('price_wholesale')}
+            placeholder="ikut harga ecer"
+          />
+          
+        </div>
+
+        <div class="isian isian-pendek">
           <label class="label" for="price_shopee">Harga Shopee (Rp)</label>
           <input
             class="kolom"
@@ -235,7 +269,7 @@ const BAGIAN = [
             min="0"
             step="1"
             value={isi('price_shopee')}
-            placeholder="ikut harga dasar"
+            placeholder="ikut harga ecer"
           />
         </div>
 
@@ -249,12 +283,12 @@ const BAGIAN = [
             min="0"
             step="1"
             value={isi('price_tiktok')}
-            placeholder="ikut harga dasar"
+            placeholder="ikut harga ecer"
           />
         </div>
 
         <p class="isian isian-bantu">
-          Harga marketplace boleh dikosongkan — artinya belum diatur dan mengikuti harga dasar.
+          Harga marketplace boleh dikosongkan — artinya belum diatur dan mengikuti harga ecer.
           Mengisi 0 berarti digratiskan. Kalau produk ini nanti punya varian, harga yang berlaku
           adalah harga tiap variannya.
         </p>

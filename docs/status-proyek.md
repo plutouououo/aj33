@@ -239,6 +239,22 @@ command mematikan scp. Penerima memeriksa kesehatan sampai 40 detik dan
 rilis mendarat 7,5 menit setelah push, dan binary dari Ubuntu 24.04 berjalan di
 Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 
+### Harga ecer dan grosir (migrasi 0022)
+
+- `products.variant_size` kini `NUMERIC(8,3)` berisi **kg per pack** (boleh pecahan). Teks lama dikonversi angkanya ("2 kg" jadi 2, "500 gr" jadi 0,5); yang tak berangka (mis. "Besar") menjadi NULL. SKU lama tidak berubah.
+- `products.price` kini berarti **harga ecer**; `products.price_wholesale` (nullable) adalah harga grosir. Penjualan tetap per pack.
+- Aturan di `pos/service.rs::harga_toko`: kanal **toko** memakai grosir bila `qty × variant_size` per produk (batch digabung) **lebih dari** `pricing_settings.wholesale_threshold_kg`; tepat di batas masih ecer. Ukuran atau grosir kosong berarti ecer. Shopee/TikTok tidak memakai grosir.
+- Batas (bawaan 20 kg) diubah owner di Pengaturan › Harga (`GET/PATCH /api/settings/pricing`; GET terbuka untuk semua peran login).
+- Layar kasir menghitung ulang harga baris di klien (`terapkanGrosir` di `kasir.astro`, gram bulat agar tak meleset) dan di server saat render; keduanya harus sama dengan backend.
+- Impor massal: kolom "ukuran" tetap teks bebas, diurai jadi kg saat produk dibuat (peringatan bila tak terbaca); harga grosir belum bisa diimpor, diisi dari halaman produk.
+
+### Diskon ongkir menggantikan diskon umum (migrasi 0023)
+
+- Kasir tak lagi punya input diskon umum; gantinya satu centang "Diskon ongkir: toko yang menanggung" (`shipping_borne_by_store`). `transactions.discount_amount` tetap ada hanya agar omzet transaksi lama tak berubah, dan tak pernah ditulis lagi.
+- Dicentang: pembeli tak membayar ongkir (`total_amount` tanpa ongkir) dan ongkir sebenarnya (`shipping_cost`) jadi **beban toko**. Tak dicentang: ongkir ditagih ke pembeli dan bukan beban. Ongkir nol atau kanal Shopee menormalkan penanda ke false.
+- Kolom turunan `shipping_charged` dan `shipping_subsidy` (generated, dihitung database) dipakai semua laporan. Subsidi masuk `SalesSummary.expenses`, mengurangi laba, muncul sebagai kategori "Ongkir ditanggung toko" di rincian beban, dan mengurangi `net_profit` transaksinya. Void transaksi otomatis mengeluarkannya dari laporan karena laporan hanya membaca `completed`.
+- Beban ini bukan baris di tabel `expenses`; ia diturunkan dari transaksi supaya tak bisa berselisih dengan transaksi yang di-void.
+
 ---
 
 ## Jebakan yang sudah memakan waktu

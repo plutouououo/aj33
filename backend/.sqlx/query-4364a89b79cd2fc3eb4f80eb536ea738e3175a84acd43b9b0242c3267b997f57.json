@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS \"revenue!\",\n               COALESCE(SUM(t.shipping_charged), 0) AS \"shipping!\",\n               COALESCE(SUM(t.shipping_subsidy), 0) AS \"shipping_subsidy!\",\n               COUNT(*)                          AS \"count!\",\n               COALESCE(\n                   SUM(t.platform_commission_fee + t.platform_service_fee\n                       + t.platform_withholding_tax + t.platform_order_processing_fee),\n                   0\n               )                                 AS \"platform_fees!\"\n        FROM transactions t\n        WHERE t.status = 'completed'\n          AND ($1::text IS NULL\n               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')\n                                  AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::text IS NULL OR t.payment_method = $2)\n          AND ($3::text IS NULL OR t.type = $3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "shipping!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 2,
+        "name": "shipping_subsidy!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "platform_fees!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4364a89b79cd2fc3eb4f80eb536ea738e3175a84acd43b9b0242c3267b997f57"
+}

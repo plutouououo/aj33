@@ -11,32 +11,32 @@ ON CONFLICT (email_or_username) DO NOTHING;
 -- Kategori sudah dari migrasi 0008; di sini contoh produk dengan SKU sama seperti hasil `catalog::sku` dan kamus migrasi 0013 (6-12 karakter).
 INSERT INTO products
   (id, category_id, name, seo_name, sku, product_type, variant_grade, brand_name,
-   variant_size, price, cost_price, stock_qty, low_stock_threshold, created_by)
+   variant_size, price, price_wholesale, cost_price, stock_qty, low_stock_threshold, created_by)
 SELECT
   v.id, c.id, v.name, v.seo_name, v.sku, v.jenis, v.grade, v.merek, v.ukuran,
-  v.price, v.cost_price, v.stock, 5, '11111111-1111-4111-8111-111111111101'
+  v.price, v.price_grosir, v.cost_price, v.stock, 5, '11111111-1111-4111-8111-111111111101'
 FROM (VALUES
   ('33333333-3333-4333-8333-333333333311'::uuid, 'Ceker',
    'CBSB ceker bersih super besar',
    'Ceker Ayam Bersih Super Besar Frozen 2kg Halal',
-   'CBSB-AFC-2KG', 'Ceker Bersih', 'Super Besar', 'AFCO', '2 kg',
-   28000::numeric, 21000::numeric, 24),
+   'CBSB-AFC-2KG', 'Ceker Bersih', 'Super Besar', 'AFCO', 2::numeric,
+   28000::numeric, 26000::numeric, 21000::numeric, 24),
   ('33333333-3333-4333-8333-333333333312'::uuid, 'Jeroan',
    'HJA hati jantung ampela',
    'Hati Jantung Ampela Ayam Segar Frozen 1kg',
-   'HJA-AFC-1KG', 'Hati Jantung Ampela', NULL, 'AFCO', '1 kg',
-   19500::numeric, 14000::numeric, 16),
+   'HJA-AFC-1KG', 'Hati Jantung Ampela', NULL, 'AFCO', 1::numeric,
+   19500::numeric, 18000::numeric, 14000::numeric, 16),
   ('33333333-3333-4333-8333-333333333313'::uuid, 'Ayam Utuh',
    'Ayam utuh SP 08',
    'Ayam Broiler Utuh Karkas 0.8kg Frozen Halal',
-   'AU08-AFC-2KG', 'Ayam Utuh', 'SP 08', 'AFCO', '2 kg',
-   52000::numeric, 41000::numeric, 10),
+   'AU08-AFC-2KG', 'Ayam Utuh', 'SP 08', 'AFCO', 2::numeric,
+   52000::numeric, NULL::numeric, 41000::numeric, 10),
   ('33333333-3333-4333-8333-333333333314'::uuid, 'Dada',
    'Filet dada utuh pack 2 kg',
    'Filet Dada Ayam Tanpa Tulang Tanpa Kulit 2kg Frozen',
-   'FDU-BEC-2KG', 'Filet Dada Utuh', NULL, 'BEST CHICKEN', '2 kg',
-   78000::numeric, 63000::numeric, 6)
-) AS v(id, kategori, name, seo_name, sku, jenis, grade, merek, ukuran, price, cost_price, stock)
+   'FDU-BEC-2KG', 'Filet Dada Utuh', NULL, 'BEST CHICKEN', 2::numeric,
+   78000::numeric, 74000::numeric, 63000::numeric, 6)
+) AS v(id, kategori, name, seo_name, sku, jenis, grade, merek, ukuran, price, price_grosir, cost_price, stock)
 JOIN categories c ON c.name = v.kategori
 ON CONFLICT (sku) DO NOTHING;
 

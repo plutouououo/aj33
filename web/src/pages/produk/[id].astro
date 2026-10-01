@@ -1,8 +1,14 @@
 ---
 import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
-import { api, ApiRequestError, type Category, type ProductDetail } from '../../lib/api';
-import { rupiah, waktu, sisaHari } from '../../lib/format';
+import {
+  api,
+  ApiRequestError,
+  type Category,
+  type PricingSettings,
+  type ProductDetail,
+} from '../../lib/api';
+import { kg, rupiah, waktu, sisaHari } from '../../lib/format';
 import { MEREK, kembaliKeDaftar } from '../../lib/produk';
 import { GagalUnggah, hapusFoto, unggahFoto } from '../../lib/blob';
 
@@ -76,9 +82,10 @@ if (Astro.request.method === 'POST') {
           brand_name: teks(form, 'brand_name'),
           product_type: teks(form, 'product_type'),
           variant_grade: teks(form, 'variant_grade'),
-          variant_size: teks(form, 'variant_size'),
+          variant_size: angka(form, 'variant_size'),
           category_id: teks(form, 'category_id'),
           price: angka(form, 'price') ?? 0,
+          price_wholesale: angka(form, 'price_wholesale'),
           price_shopee: angka(form, 'price_shopee'),
           price_tiktok: angka(form, 'price_tiktok'),
           low_stock_threshold: angka(form, 'low_stock_threshold') ?? 5,
@@ -113,9 +120,10 @@ if (Astro.request.method === 'POST') {
           brand_name: teks(form, 'brand_name'),
           product_type: teks(form, 'product_type'),
           variant_grade: teks(form, 'variant_grade'),
-          variant_size: teks(form, 'variant_size'),
+          variant_size: angka(form, 'variant_size') ?? undefined,
           category_id: teks(form, 'category_id'),
           price: angka(form, 'price') ?? 0,
+          price_wholesale: angka(form, 'price_wholesale') ?? undefined,
           price_shopee: angka(form, 'price_shopee'),
           price_tiktok: angka(form, 'price_tiktok'),
           purchase_price: angka(form, 'purchase_price'),
@@ -189,7 +197,10 @@ try {
   }
 }
 
-const kategori = await api<Category[]>('/categories', { token });
+const [kategori, pengaturanHarga] = await Promise.all([
+  api<Category[]>('/categories', { token }),
+  api<PricingSettings>('/settings/pricing', { token }),
+]);
 
 const punyaVarian = (produk?.variant_count ?? 0) > 0;
 const induk = produk?.parent_id
@@ -350,14 +361,19 @@ const DEKAT_KEDALUWARSA = 30;
               </div>
 
               <div class="isian isian-pendek">
-                <label class="label" for="variant_size">Ukuran (isi pack)</label>
+                <label class="label" for="variant_size">Ukuran (kg per pack)</label>
                 <input
                   class="kolom"
                   id="variant_size"
                   name="variant_size"
+                  type="number"
+                  min="0.001"
+                  step="any"
+                  inputmode="decimal"
                   value={produk.variant_size ?? ''}
-                  placeholder="mis. 2 kg"
+                  placeholder="mis. 2 atau 0,9"
                 />
+                
               </div>
 
               <div class="isian isian-pendek">
@@ -374,7 +390,7 @@ const DEKAT_KEDALUWARSA = 30;
               </div>
 
               <div class="isian isian-pendek">
-                <label class="label" for="price">Harga dasar / kasir (Rp)</label>
+                <label class="label" for="price">Harga ecer (Rp)</label>
                 <input
                   class="kolom"
                   id="price"
@@ -388,6 +404,21 @@ const DEKAT_KEDALUWARSA = 30;
               </div>
 
               <div class="isian isian-pendek">
+                <label class="label" for="price_wholesale">Harga grosir (Rp)</label>
+                <input
+                  class="kolom"
+                  id="price_wholesale"
+                  name="price_wholesale"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={produk.price_wholesale ?? ''}
+                  placeholder="ikut harga ecer"
+                />
+                
+              </div>
+
+              <div class="isian isian-pendek">
                 <label class="label" for="price_shopee">Harga Shopee (Rp)</label>
                 <input
                   class="kolom"
@@ -397,7 +428,7 @@ const DEKAT_KEDALUWARSA = 30;
                   min="0"
                   step="1"
                   value={produk.price_shopee ?? ''}
-                  placeholder="ikut harga dasar"
+                  placeholder="ikut harga ecer"
                 />
               </div>
 
@@ -411,7 +442,7 @@ const DEKAT_KEDALUWARSA = 30;
                   min="0"
                   step="1"
                   value={produk.price_tiktok ?? ''}
-                  placeholder="ikut harga dasar"
+                  placeholder="ikut harga ecer"
                 />
               </div>
 
@@ -468,8 +499,15 @@ const DEKAT_KEDALUWARSA = 30;
                         </td>
                         <td class="font-medium">{v.name}</td>
                         <td>{v.variant_grade ?? '—'}</td>
-                        <td>{v.variant_size ?? '—'}</td>
-                        <td class="sel-angka">{rupiah(v.price)}</td>
+                        <td>{v.variant_size === null ? '—' : kg(v.variant_size)}</td>
+                        <td class="sel-angka">
+                          {rupiah(v.price)}
+                          {v.price_wholesale !== null && (
+                            <span class="block text-xs text-[var(--color-teks-lembut)]">
+                              grosir {rupiah(v.price_wholesale)}
+                            </span>
+                          )}
+                        </td>
                         <td class="sel-angka">{v.stock_qty}</td>
                         <td class="text-right">
                           <a class="aksi-baris" href={`/produk/${v.id}`}>Kelola</a>
@@ -524,8 +562,17 @@ const DEKAT_KEDALUWARSA = 30;
                   </div>
 
                   <div class="isian isian-pendek">
-                    <label class="label" for="v_size">Ukuran (isi pack)</label>
-                    <input class="kolom" id="v_size" name="variant_size" />
+                    <label class="label" for="v_size">Ukuran (kg per pack)</label>
+                    <input
+                      class="kolom"
+                      id="v_size"
+                      name="variant_size"
+                      type="number"
+                      min="0.001"
+                      step="any"
+                      inputmode="decimal"
+                      placeholder="mis. 2 atau 0,9"
+                    />
                   </div>
 
                   <p class="isian isian-bantu">
@@ -537,7 +584,7 @@ const DEKAT_KEDALUWARSA = 30;
                   </p>
 
                   <div class="isian isian-pendek">
-                    <label class="label" for="v_price">Harga dasar (Rp)</label>
+                    <label class="label" for="v_price">Harga ecer (Rp)</label>
                     <input
                       class="kolom"
                       id="v_price"
@@ -551,6 +598,19 @@ const DEKAT_KEDALUWARSA = 30;
                   </div>
 
                   <div class="isian isian-pendek">
+                    <label class="label" for="v_grosir">Harga grosir (Rp)</label>
+                    <input
+                      class="kolom"
+                      id="v_grosir"
+                      name="price_wholesale"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="ikut harga ecer"
+                    />
+                  </div>
+
+                  <div class="isian isian-pendek">
                     <label class="label" for="v_shopee">Harga Shopee (Rp)</label>
                     <input
                       class="kolom"
@@ -559,7 +619,7 @@ const DEKAT_KEDALUWARSA = 30;
                       type="number"
                       min="0"
                       step="1"
-                      placeholder="ikut harga dasar"
+                      placeholder="ikut harga ecer"
                     />
                   </div>
 
@@ -572,7 +632,7 @@ const DEKAT_KEDALUWARSA = 30;
                       type="number"
                       min="0"
                       step="1"
-                      placeholder="ikut harga dasar"
+                      placeholder="ikut harga ecer"
                     />
                   </div>
 

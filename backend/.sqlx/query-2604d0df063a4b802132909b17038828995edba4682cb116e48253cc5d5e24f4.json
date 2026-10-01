@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(\n                   SUM(pb.remaining_qty * COALESCE(pb.purchase_price, p.cost_price, 0)),\n                   0\n               ) AS \"value!\",\n               COUNT(*) FILTER (\n                   WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL\n               ) AS \"tanpa_pokok!\",\n               COALESCE(SUM(pb.remaining_qty * p.variant_size), 0) AS \"total_kg!\",\n               COALESCE(SUM(pb.remaining_qty) FILTER (WHERE p.variant_size IS NULL), 0)\n                   AS \"tanpa_ukuran!\"\n        FROM product_batches pb\n        JOIN products p ON p.id = pb.product_id\n        WHERE p.is_active\n          AND pb.remaining_qty > 0\n          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "tanpa_pokok!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_kg!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "tanpa_ukuran!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "2604d0df063a4b802132909b17038828995edba4682cb116e48253cc5d5e24f4"
+}

@@ -30,10 +30,12 @@ pub struct Transaction {
     /// `toko`, `shopee`, atau `tiktok`: daftar harga yang dipakai saat menjual (migrasi 0015).
     pub sales_channel: String,
     pub subtotal: Decimal,
-    /// Potongan atas seluruh belanja, tak dikurangkan dari `subtotal` agar baris struk tetap menjumlah ke subtotal (migrasi 0015).
+    /// Diskon umum lama, selalu nol untuk transaksi baru (migrasi 0023); transaksi lama masih memuatnya.
     pub discount_amount: Decimal,
-    /// Ongkos kirim, tak masuk `subtotal` dan hanya menambah `total_amount` (migrasi 0007).
+    /// Ongkos kirim sebenarnya, tak masuk `subtotal`; menambah `total_amount` hanya bila pembeli yang menanggung (migrasi 0007).
     pub shipping_cost: Decimal,
+    /// Toko menanggung ongkir (diskon ongkir): pembeli tak membayarnya dan ongkir jadi beban toko (migrasi 0023).
+    pub shipping_borne_by_store: bool,
     pub total_amount: Decimal,
     /// Kolom biaya Shopee mengikuti field asli `get_escrow_detail` (migrasi 0018); ini persentase komisi (pecahan, 0,1725 = 17,25%), nol selain Shopee, bisa diedit kasir.
     pub platform_commission_fee_percent: Decimal,
@@ -64,6 +66,7 @@ struct TransactionHead {
     subtotal: Decimal,
     discount_amount: Decimal,
     shipping_cost: Decimal,
+    shipping_borne_by_store: bool,
     total_amount: Decimal,
     platform_commission_fee_percent: Decimal,
     platform_commission_fee: Decimal,
@@ -102,6 +105,7 @@ async fn lengkapi(pool: &PgPool, head: TransactionHead) -> AppResult<Transaction
         subtotal: head.subtotal,
         discount_amount: head.discount_amount,
         shipping_cost: head.shipping_cost,
+        shipping_borne_by_store: head.shipping_borne_by_store,
         total_amount: head.total_amount,
         platform_commission_fee_percent: head.platform_commission_fee_percent,
         platform_commission_fee: head.platform_commission_fee,
@@ -123,7 +127,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Transaction
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
                cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
-               shipping_cost, total_amount,
+               shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
                platform_withholding_tax, platform_order_processing_fee,
@@ -148,7 +152,7 @@ pub async fn find_by_idempotency_key(pool: &PgPool, key: &str) -> AppResult<Opti
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
                cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
-               shipping_cost, total_amount,
+               shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
                platform_withholding_tax, platform_order_processing_fee,
@@ -201,9 +205,9 @@ pub struct NewTransaction {
     pub payment_method: String,
     pub sales_channel: String,
     pub subtotal: Decimal,
-    pub discount_amount: Decimal,
-    /// Ongkos kirim, tak masuk `subtotal` dan hanya menambah `total_amount` (migrasi 0007).
+    /// Ongkos kirim sebenarnya, tak masuk `subtotal`; menambah `total_amount` hanya bila bukan ditanggung toko (migrasi 0007, 0023).
     pub shipping_cost: Decimal,
+    pub shipping_borne_by_store: bool,
     pub total_amount: Decimal,
     /// Nol selain kanal Shopee (migrasi 0018); nama field mengikuti `v2.payment.get_escrow_detail`.
     pub platform_commission_fee_percent: Decimal,
@@ -225,7 +229,7 @@ pub async fn insert_transaction(
         r#"
         INSERT INTO transactions
             (idempotency_key, type, customer_id, cashier_user_id, payment_method,
-             sales_channel, subtotal, discount_amount, shipping_cost, total_amount,
+             sales_channel, subtotal, shipping_cost, shipping_borne_by_store, total_amount,
              platform_commission_fee_percent, platform_commission_fee,
              platform_service_fee_percent, platform_service_fee,
              platform_withholding_tax, platform_order_processing_fee,
@@ -240,8 +244,8 @@ pub async fn insert_transaction(
         input.payment_method,
         input.sales_channel,
         input.subtotal,
-        input.discount_amount,
         input.shipping_cost,
+        input.shipping_borne_by_store,
         input.total_amount,
         input.platform_commission_fee_percent,
         input.platform_commission_fee,
@@ -282,7 +286,7 @@ pub async fn list_transactions(pool: &PgPool, limit: i64) -> AppResult<Vec<Trans
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
                cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
-               shipping_cost, total_amount,
+               shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
                platform_withholding_tax, platform_order_processing_fee,

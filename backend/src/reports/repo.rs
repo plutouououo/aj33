@@ -32,10 +32,15 @@ impl SalesFilter {
 pub struct SalesSummary {
     /// Omzet barang: jumlah `subtotal` setelah diskon tanpa ongkir, angka kotor sebelum potongan Shopee (lihat `platform_fees`).
     pub revenue: Decimal,
-    /// Ongkir yang ditagihkan ke pembeli, terpisah karena bukan hasil penjualan barang.
+    /// Ongkir yang ditagihkan ke pembeli, terpisah karena bukan hasil penjualan barang; ongkir yang ditanggung toko tak masuk sini (lihat `shipping_subsidy`).
     pub shipping: Decimal,
+    /// Ongkir yang ditanggung toko lewat diskon ongkir (migrasi 0023); sudah termasuk di `expenses`, dipisah supaya halaman bisa menyebutnya.
+    pub shipping_subsidy: Decimal,
+    /// Berat barang terjual dalam kg (pack × ukuran produk); penjualan produk tanpa ukuran, atau yang produknya sudah dihapus, tak ikut dihitung.
+    pub sold_kg: Decimal,
     /// Harga pokok barang terjual dari harga beli batch yang keluar; batch tanpa harga beli jatuh ke `products.cost_price` peninggalan lama, kosong dihitung nol (lihat `items_without_cost`).
     pub cogs: Decimal,
+    /// Beban toko: tabel `expenses` ditambah `shipping_subsidy`.
     pub expenses: Decimal,
     /// Jumlah `platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee` periode ini dari kolom tersimpan (migrasi 0017/0018), nol selain Shopee.
     pub platform_fees: Decimal,
@@ -50,7 +55,8 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
     let penjualan = sqlx::query!(
         r#"
         SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS "revenue!",
-               COALESCE(SUM(t.shipping_cost), 0) AS "shipping!",
+               COALESCE(SUM(t.shipping_charged), 0) AS "shipping!",
+               COALESCE(SUM(t.shipping_subsidy), 0) AS "shipping_subsidy!",
                COUNT(*)                          AS "count!",
                COALESCE(
                    SUM(t.platform_commission_fee + t.platform_service_fee
@@ -102,6 +108,26 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
     .fetch_one(pool)
     .await?;
 
+    let terjual = sqlx::query_scalar!(
+        r#"
+        SELECT COALESCE(SUM(ti.qty * p.variant_size), 0) AS "kg!"
+        FROM transaction_items ti
+        JOIN transactions t ON t.id = ti.transaction_id
+        JOIN products p ON p.id = ti.product_id
+        WHERE t.status = 'completed'
+          AND ($1::text IS NULL
+               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
+                                  AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::text IS NULL OR t.payment_method = $2)
+          AND ($3::text IS NULL OR t.type = $3)
+        "#,
+        filter.period,
+        filter.payment_method.as_deref(),
+        filter.transaction_type.as_deref()
+    )
+    .fetch_one(pool)
+    .await?;
+
     // Beban tak mengenal metode bayar maupun jenis transaksi, hanya periode.
     let beban = sqlx::query_scalar!(
         r#"
@@ -115,9 +141,13 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
     .fetch_one(pool)
     .await?;
 
+    let beban = beban + penjualan.shipping_subsidy;
+
     Ok(SalesSummary {
         revenue: penjualan.revenue,
         shipping: penjualan.shipping,
+        shipping_subsidy: penjualan.shipping_subsidy,
+        sold_kg: terjual,
         cogs: pokok.cogs,
         expenses: beban,
         platform_fees: penjualan.platform_fees,
@@ -139,7 +169,8 @@ pub async fn sales_summary_previous(
     let penjualan = sqlx::query!(
         r#"
         SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS "revenue!",
-               COALESCE(SUM(t.shipping_cost), 0) AS "shipping!",
+               COALESCE(SUM(t.shipping_charged), 0) AS "shipping!",
+               COALESCE(SUM(t.shipping_subsidy), 0) AS "shipping_subsidy!",
                COUNT(*)                          AS "count!",
                COALESCE(
                    SUM(t.platform_commission_fee + t.platform_service_fee
@@ -179,6 +210,27 @@ pub async fn sales_summary_previous(
           AND sa.change_qty < 0
           AND sa.reference_type = 'transaction'
           AND t.status = 'completed'
+          AND t.created_at >= (date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
+                                - ('1 ' || $1)::interval) AT TIME ZONE 'Asia/Jakarta'
+          AND t.created_at <  date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
+                               AT TIME ZONE 'Asia/Jakarta'
+          AND ($2::text IS NULL OR t.payment_method = $2)
+          AND ($3::text IS NULL OR t.type = $3)
+        "#,
+        period,
+        filter.payment_method.as_deref(),
+        filter.transaction_type.as_deref()
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let terjual = sqlx::query_scalar!(
+        r#"
+        SELECT COALESCE(SUM(ti.qty * p.variant_size), 0) AS "kg!"
+        FROM transaction_items ti
+        JOIN transactions t ON t.id = ti.transaction_id
+        JOIN products p ON p.id = ti.product_id
+        WHERE t.status = 'completed'
           AND t.created_at >= (date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
                                 - ('1 ' || $1)::interval) AT TIME ZONE 'Asia/Jakarta'
           AND t.created_at <  date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
@@ -206,9 +258,13 @@ pub async fn sales_summary_previous(
     .fetch_one(pool)
     .await?;
 
+    let beban = beban + penjualan.shipping_subsidy;
+
     Ok(Some(SalesSummary {
         revenue: penjualan.revenue,
         shipping: penjualan.shipping,
+        shipping_subsidy: penjualan.shipping_subsidy,
+        sold_kg: terjual,
         cogs: pokok.cogs,
         expenses: beban,
         platform_fees: penjualan.platform_fees,
@@ -288,6 +344,14 @@ pub async fn monthly_trend(pool: &PgPool, filter: &SalesFilter) -> AppResult<Vec
                    FROM expenses e
                    WHERE e.expense_date >= b.awal::date
                      AND e.expense_date < (b.awal + INTERVAL '1 month')::date
+               ), 0) + COALESCE((
+                   SELECT SUM(t.shipping_subsidy)
+                   FROM transactions t
+                   WHERE t.status = 'completed'
+                     AND t.created_at AT TIME ZONE 'Asia/Jakarta' >= b.awal
+                     AND t.created_at AT TIME ZONE 'Asia/Jakarta' < b.awal + INTERVAL '1 month'
+                     AND ($1::text IS NULL OR t.payment_method = $1)
+                     AND ($2::text IS NULL OR t.type = $2)
                ), 0) AS "expenses!"
         FROM bulan b
         ORDER BY b.awal
@@ -315,21 +379,37 @@ pub struct ExpenseSlice {
     pub amount: Decimal,
 }
 
+/// Beban per kategori; ongkir yang ditanggung toko ikut sebagai satu kategori sendiri dan mengikuti saringan transaksi, seperti `sales_summary`.
 pub async fn expense_breakdown(
     pool: &PgPool,
-    period: Option<&'static str>,
+    filter: &SalesFilter,
 ) -> AppResult<Vec<ExpenseSlice>> {
     let rows = sqlx::query!(
         r#"
-        SELECT COALESCE(NULLIF(trim(e.category), ''), 'Lainnya') AS "category!",
-               SUM(e.amount) AS "amount!"
-        FROM expenses e
-        WHERE $1::text IS NULL
-           OR e.expense_date >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')::date
+        SELECT x.category AS "category!", SUM(x.amount) AS "amount!"
+        FROM (
+            SELECT COALESCE(NULLIF(trim(e.category), ''), 'Lainnya') AS category,
+                   e.amount
+            FROM expenses e
+            WHERE $1::text IS NULL
+               OR e.expense_date >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')::date
+            UNION ALL
+            SELECT 'Ongkir ditanggung toko', t.shipping_subsidy
+            FROM transactions t
+            WHERE t.status = 'completed'
+              AND t.shipping_subsidy > 0
+              AND ($1::text IS NULL
+                   OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
+                                      AT TIME ZONE 'Asia/Jakarta')
+              AND ($2::text IS NULL OR t.payment_method = $2)
+              AND ($3::text IS NULL OR t.type = $3)
+        ) x
         GROUP BY 1
         ORDER BY 2 DESC
         "#,
-        period
+        filter.period,
+        filter.payment_method.as_deref(),
+        filter.transaction_type.as_deref()
     )
     .fetch_all(pool)
     .await?;
@@ -428,7 +508,7 @@ pub async fn recent_sales(
                t.type                  AS "transaction_type!",
                t.payment_method        AS "payment_method!",
                t.subtotal - t.discount_amount AS "revenue!",
-               t.shipping_cost         AS "shipping!",
+               t.shipping_charged      AS "shipping!",
                t.total_amount          AS "total_amount!",
                (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)
                                        AS "item_count!"
@@ -498,8 +578,11 @@ pub struct TransactionDetail {
     pub customer_email: Option<String>,
     pub cashier_name: String,
     pub subtotal: Decimal,
+    /// Diskon umum lama; nol untuk transaksi sejak migrasi 0023.
     pub discount_amount: Decimal,
+    /// Ongkir sebenarnya; yang ditagih ke pembeli hanya bila `shipping_borne_by_store` false.
     pub shipping_cost: Decimal,
+    pub shipping_borne_by_store: bool,
     pub total_amount: Decimal,
     pub amount_paid: Option<Decimal>,
     pub change_amount: Option<Decimal>,
@@ -512,7 +595,7 @@ pub struct TransactionDetail {
     /// Harga pokok baris yang keluar untuk transaksi ini, batas atas bila `items_without_cost > 0` (lihat `SalesSummary::cogs`).
     pub cogs: Decimal,
     pub items_without_cost: i64,
-    /// `subtotal - discount_amount - cogs - (platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee)`; beban toko tak ikut karena milik periode.
+    /// `subtotal - discount_amount - cogs - (platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee) - ongkir ditanggung toko`; beban toko lain tak ikut karena milik periode.
     pub net_profit: Decimal,
     pub items: Vec<TransactionDetailItem>,
 }
@@ -535,6 +618,8 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
                t.subtotal                    AS "subtotal!",
                t.discount_amount             AS "discount_amount!",
                t.shipping_cost               AS "shipping_cost!",
+               t.shipping_borne_by_store     AS "shipping_borne_by_store!",
+               t.shipping_subsidy            AS "shipping_subsidy!",
                t.total_amount                AS "total_amount!",
                t.amount_paid,
                t.change_amount,
@@ -621,6 +706,7 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
         subtotal: head.subtotal,
         discount_amount: head.discount_amount,
         shipping_cost: head.shipping_cost,
+        shipping_borne_by_store: head.shipping_borne_by_store,
         total_amount: head.total_amount,
         amount_paid: head.amount_paid,
         change_amount: head.change_amount,
@@ -632,7 +718,11 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
         platform_order_processing_fee: head.platform_order_processing_fee,
         cogs: pokok.cogs,
         items_without_cost: pokok.tanpa_pokok,
-        net_profit: head.subtotal - head.discount_amount - pokok.cogs - platform_fees,
+        net_profit: head.subtotal
+            - head.discount_amount
+            - pokok.cogs
+            - platform_fees
+            - head.shipping_subsidy,
         items,
     }))
 }
@@ -674,6 +764,10 @@ pub struct StockValue {
     pub value: Decimal,
     /// Batch bersisa tanpa harga beli di batch maupun produk dihitung nol, jadi selama bukan nol `value` adalah batas bawah.
     pub batches_without_cost: i64,
+    /// Total berat stok dalam kg: sisa pack × `variant_size`; pack tanpa ukuran dihitung nol, jadi selama `packs_without_size` bukan nol ini batas bawah.
+    pub total_kg: Decimal,
+    /// Pack bersisa yang produknya belum punya ukuran, sehingga tak ikut `total_kg`.
+    pub packs_without_size: i64,
 }
 
 /// Potret stok hari ini tanpa saringan periode; harga beli berurutan seperti `sales_summary` (batch, lalu `products.cost_price`); induk berevarian dilewati karena stok ada di varian.
@@ -686,7 +780,10 @@ pub async fn stock_value(pool: &PgPool) -> AppResult<StockValue> {
                ) AS "value!",
                COUNT(*) FILTER (
                    WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL
-               ) AS "tanpa_pokok!"
+               ) AS "tanpa_pokok!",
+               COALESCE(SUM(pb.remaining_qty * p.variant_size), 0) AS "total_kg!",
+               COALESCE(SUM(pb.remaining_qty) FILTER (WHERE p.variant_size IS NULL), 0)
+                   AS "tanpa_ukuran!"
         FROM product_batches pb
         JOIN products p ON p.id = pb.product_id
         WHERE p.is_active
@@ -700,6 +797,8 @@ pub async fn stock_value(pool: &PgPool) -> AppResult<StockValue> {
     Ok(StockValue {
         value: row.value,
         batches_without_cost: row.tanpa_pokok,
+        total_kg: row.total_kg,
+        packs_without_size: row.tanpa_ukuran,
     })
 }
 

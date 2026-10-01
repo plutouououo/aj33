@@ -8,12 +8,13 @@ import {
   type Customer,
   type PaginatedCustomers,
   type PaginatedProducts,
+  type PricingSettings,
   type Product,
   type ProductBatch,
   type Transaction,
 } from '../lib/api';
 import { fotoKecil } from '../lib/blob';
-import { rupiah, sisaHari, tanggal, waktu } from '../lib/format';
+import { kg, rupiah, sisaHari, tanggal, waktu } from '../lib/format';
 
 /** Kanal penjualan menentukan daftar harga; tanpa pilihan kanal, selisih harga marketplace tercatat sebagai laba palsu (yang menagih tetap backend). */
 const KANAL = [
@@ -36,11 +37,17 @@ function biayaPersenRupiah(basis: number, persen: number): number {
   return Math.round((basis * basisPoin) / 10000);
 }
 
-/** Harga kanal yang `null` jatuh ke harga dasar, sama dengan `SalesChannel::harga` di backend; kalau beda, layar tidak cocok dengan struk. */
-function hargaDi(p: Product, kanal: Kanal): number {
+/** Grosir bila berat baris (jumlah × ukuran) LEBIH dari batas, sama dengan `harga_toko` di backend; dalam gram bulat karena desimal float bisa meleset tepat di batas. */
+function pakaiGrosir(p: Product, qty: number): boolean {
+  if (p.variant_size === null || p.price_wholesale === null) return false;
+  return Math.round(p.variant_size * 1000) * qty > Math.round(batasGrosirKg * 1000);
+}
+
+/** Harga satu pack di kanal itu; `qty` hanya berarti untuk kanal toko (ecer atau grosir) dan 0 memberi harga ecer. Kanal yang `null` jatuh ke harga ecer, sama dengan `SalesChannel::harga` di backend; kalau beda, layar tidak cocok dengan struk. */
+function hargaDi(p: Product, kanal: Kanal, qty = 0): number {
   if (kanal === 'shopee') return p.price_shopee ?? p.price;
   if (kanal === 'tiktok') return p.price_tiktok ?? p.price;
-  return p.price;
+  return pakaiGrosir(p, qty) ? (p.price_wholesale as number) : p.price;
 }
 
 const user = Astro.locals.user!;
@@ -71,7 +78,7 @@ let pelangganDipilih = '';
 let metode = 'cash';
 let kanalIsi: Kanal = 'toko';
 let ongkirIsi = '';
-let diskonIsi = '';
+let gratisOngkirIsi = false;
 let dibayarIsi = '';
 let cariIsi = '';
 let kategoriIsi = '';
@@ -121,7 +128,7 @@ if (Astro.request.method === 'POST') {
   // Shopee dipaksa e-wallet di server juga, supaya request rakitan tidak menyelundupkan Shopee dengan metode tunai (kembalian jadi tak bermakna).
   if (kanalIsi === 'shopee') metode = 'ewallet';
   ongkirIsi = String(form.get('shipping_cost') ?? '').trim();
-  diskonIsi = String(form.get('discount_amount') ?? '').trim();
+  gratisOngkirIsi = form.get('shipping_borne_by_store') === '1';
   dibayarIsi = String(form.get('amount_paid') ?? '').trim();
   commissionPersenIsi = String(form.get('platform_commission_fee_percent') ?? '').trim();
   servicePersenIsi = String(form.get('platform_service_fee_percent') ?? '').trim();
@@ -135,7 +142,7 @@ if (Astro.request.method === 'POST') {
 
   if (aksi === 'kosongkan') {
     keranjang = [];
-    diskonIsi = '';
+    gratisOngkirIsi = false;
     dibayarIsi = '';
   } else if (aksi === 'pelanggan-baru') {
     const nama = String(form.get('pelanggan_nama') ?? '').trim();
@@ -175,7 +182,7 @@ if (Astro.request.method === 'POST') {
             amount_paid: metode === 'cash' ? angka('amount_paid') : undefined,
             // Ongkir tidak dikirim untuk Shopee agar niatnya jelas dari isi request, bukan hanya dari validasi backend.
             shipping_cost: kanalIsi === 'shopee' ? undefined : angka('shipping_cost'),
-            discount_amount: angka('discount_amount'),
+            shipping_borne_by_store: kanalIsi === 'shopee' ? undefined : gratisOngkirIsi,
             platform_commission_fee_percent:
               kanalIsi === 'shopee' && persenKomisi !== undefined ? persenKomisi / 100 : undefined,
             platform_service_fee_percent:
@@ -195,7 +202,7 @@ if (Astro.request.method === 'POST') {
         keranjang = [];
         pelangganDipilih = '';
         ongkirIsi = '';
-        diskonIsi = '';
+        gratisOngkirIsi = false;
         dibayarIsi = '';
         kunci = '';
         // Kanal sengaja tidak direset, karena pesanan marketplace dicatat berurutan dan kembali ke "Toko" diam-diam akan salah harga.
@@ -212,7 +219,7 @@ const kueri = new URLSearchParams({ scope: 'terjual', limit: '200' });
 if (cariIsi) kueri.set('search', cariIsi);
 if (kategoriIsi) kueri.set('category_id', kategoriIsi);
 
-const [produk, kategori, semuaBatch, pelanggan] = await Promise.all([
+const [produk, kategori, semuaBatch, pelanggan, pengaturanHarga] = await Promise.all([
   api<PaginatedProducts>(`/products?${kueri}`, { token }),
   api<Category[]>('/categories', { token }),
   // Satu permintaan untuk semua batch bersisa, bukan satu per produk (200 permintaan akan terasa sebelum barang pertama dipindai).
@@ -220,7 +227,10 @@ const [produk, kategori, semuaBatch, pelanggan] = await Promise.all([
   bolehTransaksi
     ? api<PaginatedCustomers>('/customers?limit=200', { token }).then((h) => h.data)
     : Promise.resolve([] as Customer[]),
+  api<PricingSettings>('/settings/pricing', { token }),
 ]);
+
+const batasGrosirKg = pengaturanHarga.wholesale_threshold_kg;
 
 /** Nama pelanggan untuk nota dicari dari daftar yang sama; `undefined` bila tak termuat di 200 teratas, agar nota diberi label umum, bukan "Walk-in". */
 const strukPelanggan = strukPelangganId
@@ -239,25 +249,27 @@ for (const b of semuaBatch) {
 const barang = produk.data.filter((p) => p.stock_qty > 0);
 const adaYangTerpotong = produk.total > produk.data.length;
 
-/** Harga keranjang ditetapkan ulang dari katalog, bukan dipercaya dari form (harga di form milik kanal lama); baris yang tersaring keluar memakai harganya sendiri dan backend yang menagih. */
-const hargaKatalog = new Map(produk.data.map((p) => [p.id, hargaDi(p, kanalIsi)]));
-keranjang = keranjang.map((b) => ({ ...b, harga: hargaKatalog.get(b.product_id) ?? b.harga }));
-
-/** Jumlah per batch, untuk mengisi ulang kolom di tiap baris batch. */
-const jumlahBatch = new Map(keranjang.map((b) => [`${b.product_id}:${b.batch_id}`, b.qty]));
-
-/** Jumlah per produk. Dipakai kartu: disorot atau tidak, dan berapa yang sudah dipilih. */
+/** Jumlah per produk (semua batch digabung). Dipakai kartu (disorot atau tidak, berapa dipilih) dan penentu ecer atau grosir, karena backend menimbang per produk, bukan per batch. */
 const jumlahProduk = new Map<string, number>();
 for (const b of keranjang) {
   jumlahProduk.set(b.product_id, (jumlahProduk.get(b.product_id) ?? 0) + b.qty);
 }
 
+/** Harga keranjang ditetapkan ulang dari katalog, bukan dipercaya dari form (harga di form milik kanal lama); baris yang tersaring keluar memakai harganya sendiri dan backend yang menagih. */
+const hargaKatalog = new Map(
+  produk.data.map((p) => [p.id, hargaDi(p, kanalIsi, jumlahProduk.get(p.id) ?? 0)]),
+);
+keranjang = keranjang.map((b) => ({ ...b, harga: hargaKatalog.get(b.product_id) ?? b.harga }));
+
+/** Jumlah per batch, untuk mengisi ulang kolom di tiap baris batch. */
+const jumlahBatch = new Map(keranjang.map((b) => [`${b.product_id}:${b.batch_id}`, b.qty]));
+
 const totalItem = keranjang.reduce((n, b) => n + b.qty, 0);
 const totalBelanja = keranjang.reduce((n, b) => n + b.harga * b.qty, 0);
 // Ongkir tidak berlaku untuk Shopee: kolom disembunyikan dan nilai lama yang menyangkut tetap dipaksa nol di sini.
 const ongkirAngka = kanalIsi === 'shopee' ? 0 : Math.max(0, Number(ongkirIsi) || 0);
-// Diskon dijepit setinggi subtotal agar total di layar tidak negatif; backend yang menolak yang melebihi.
-const diskonAngka = Math.min(totalBelanja, Math.max(0, Number(diskonIsi) || 0));
+// Diskon ongkir menanggung seluruh ongkir (beban toko), sama dengan `shipping_borne_by_store` di `pos/service.rs`; tanpa ongkir tak ada yang ditanggung.
+const diskonOngkirAngka = gratisOngkirIsi ? ongkirAngka : 0;
 
 // Kosong jatuh ke tarif bawaan dan dijepit 0-100, sama seperti backend menjepit pecahan ke 0..1 (`pos::service::checkout`).
 const jepitPersen = (isi: string, bawaan: number): number =>
@@ -266,8 +278,8 @@ const jepitPersen = (isi: string, bawaan: number): number =>
 const commissionPersenAngka = jepitPersen(commissionPersenIsi, SHOPEE_COMMISSION_PERSEN_DEFAULT);
 const servicePersenAngka = jepitPersen(servicePersenIsi, SHOPEE_SERVICE_PERSEN_DEFAULT);
 
-// Basis potongan Shopee adalah omzet setelah diskon, sama dengan `basis_fee` di `pos/service.rs`.
-const basisFeeShopee = Math.max(0, totalBelanja - diskonAngka);
+// Basis potongan Shopee adalah omzet barang, sama dengan `basis_fee` di `pos/service.rs`.
+const basisFeeShopee = totalBelanja;
 const biayaKomisiAngka =
   kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, commissionPersenAngka) : 0;
 const biayaLayananAngka =
@@ -279,7 +291,7 @@ const biayaOrderProcessingAngka = kanalIsi === 'shopee' ? SHOPEE_ORDER_PROCESSIN
 // Untuk Shopee angka ini bukan yang dibayar pembeli melainkan setelah empat biaya platform, labelnya berganti ke "Estimasi Total Penghasilan"; rumusnya satu untuk semua kanal.
 const totalTagihan =
   totalBelanja -
-  diskonAngka +
+  diskonOngkirAngka +
   ongkirAngka -
   biayaKomisiAngka -
   biayaLayananAngka -
@@ -296,8 +308,10 @@ interface BarisPanel {
   product_id: string;
   nama: string;
   harga: number;
-  /** Harga baris di tiap kanal agar skrip bisa menghitung ulang saat kanal diganti; `null` untuk baris yang tersaring keluar, yang tetap memakai harga bawaannya. */
+  /** Harga ecer baris di tiap kanal agar skrip bisa menghitung ulang saat kanal diganti; `null` untuk baris yang tersaring keluar, yang tetap memakai harga bawaannya. */
   hargaKanal: Record<Kanal, number> | null;
+  /** Harga satuan baris ini harga grosir; hanya penanda tampilan. */
+  grosir: boolean;
   batchLabel: string;
   qty: number;
   sisa: number;
@@ -310,7 +324,7 @@ const barisPanel: BarisPanel[] = [];
 const labelBatch = (b: ProductBatch): string =>
   `Batch ${b.batch_number ?? 'tanpa nomor'} · ${b.expiry_date ? tanggal(b.expiry_date) : 'tanpa tanggal'}`;
 
-/** Harga sebuah produk di seluruh kanal sekaligus, untuk atribut data-. */
+/** Harga ecer sebuah produk di seluruh kanal sekaligus, untuk atribut data-; ecer vs grosir kanal toko dipilih skrip dari jumlah. */
 const hargaSemuaKanal = (p: Product): Record<Kanal, number> => ({
   toko: hargaDi(p, 'toko'),
   shopee: hargaDi(p, 'shopee'),
@@ -325,8 +339,9 @@ for (const p of barang) {
       kunci: kunciBaris,
       product_id: p.id,
       nama: p.name,
-      harga: hargaDi(p, kanalIsi),
+      harga: hargaDi(p, kanalIsi, jumlahProduk.get(p.id) ?? 0),
       hargaKanal: hargaSemuaKanal(p),
+      grosir: kanalIsi === 'toko' && pakaiGrosir(p, jumlahProduk.get(p.id) ?? 0),
       batchLabel: labelBatch(b),
       qty: jumlahBatch.get(kunciBaris) ?? 0,
       sisa: b.remaining_qty,
@@ -345,6 +360,7 @@ for (const b of keranjang) {
     nama: b.nama,
     harga: b.harga,
     hargaKanal: null,
+    grosir: false,
     batchLabel: batch ? labelBatch(batch) : 'Batch di luar hasil saringan',
     qty: b.qty,
     // Tanpa batch di tangan, batas yang pasti benar hanya jumlah yang sudah diterima; backend tetap menolak bila sisanya sudah berkurang.
@@ -404,6 +420,7 @@ function ringkasBatch(p: Product): string {
     action="#struk"
     id="borang-kasir"
     data-transaksi={bolehTransaksi ? 'ya' : 'tidak'}
+    data-batas-gram={Math.round(batasGrosirKg * 1000)}
     class="flex flex-col gap-4 lg:h-[calc(100dvh-var(--tinggi-topbar)-3rem)] lg:flex-row lg:items-start"
   >
     <input type="hidden" name="idempotency_key" value={kunci} />
@@ -491,7 +508,10 @@ function ringkasBatch(p: Product): string {
               class={jumlah > 0 ? 'kartu-produk-terpilih' : 'kartu-produk'}
               data-produk
               data-satu-batch={satuBatch ? '' : undefined}
-              data-harga={hargaDi(p, kanalIsi)}
+              data-pid={p.id}
+              data-harga={hargaDi(p, kanalIsi, jumlah)}
+              data-harga-grosir={p.price_wholesale ?? undefined}
+              data-ukuran-g={p.variant_size === null ? undefined : Math.round(p.variant_size * 1000)}
               data-harga-toko={hargaDi(p, 'toko')}
               data-harga-shopee={hargaDi(p, 'shopee')}
               data-harga-tiktok={hargaDi(p, 'tiktok')}
@@ -529,7 +549,7 @@ function ringkasBatch(p: Product): string {
                     <span class="sr-only">{satuBatch ? 'Tambah 1 pack ' : 'Pilih batch untuk '}</span>{p.name}
                   </span>
                   <span class="block text-sm font-semibold tabular-nums" data-harga-tampil>
-                    {rupiah(hargaDi(p, kanalIsi))}
+                    {rupiah(hargaDi(p, kanalIsi, jumlah))}
                   </span>
                   {/* Diisi ulang skrip tiap jumlah berubah, supaya kartu dengan panel tertutup menunjukkan batch yang barusan dipilih. */}
                   <span class="block text-xs font-medium text-merah-700" data-ringkas-baris>
@@ -556,7 +576,7 @@ function ringkasBatch(p: Product): string {
                   {p.sku ?? '—'} · stok {p.stock_qty}
                 </span>
                 <span class="block text-sm font-semibold tabular-nums" data-harga-tampil>
-                  {rupiah(hargaDi(p, kanalIsi))}
+                  {rupiah(hargaDi(p, kanalIsi, jumlah))}
                 </span>
               </div>
 
@@ -566,7 +586,17 @@ function ringkasBatch(p: Product): string {
 
                 <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                   <dt class="text-[var(--color-teks-lembut)]">Ukuran</dt>
-                  <dd>{p.variant_size ?? '—'}</dd>
+                  <dd>{p.variant_size === null ? '—' : kg(p.variant_size)}</dd>
+
+                  <dt class="text-[var(--color-teks-lembut)]">Harga ecer</dt>
+                  <dd class="tabular-nums">{rupiah(p.price)}</dd>
+
+                  <dt class="text-[var(--color-teks-lembut)]">Harga grosir</dt>
+                  <dd class="tabular-nums">
+                    {p.price_wholesale === null
+                      ? '—'
+                      : `${rupiah(p.price_wholesale)} bila baris > ${kg(batasGrosirKg)}`}
+                  </dd>
 
                   <dt class="text-[var(--color-teks-lembut)]">Grade</dt>
                   <dd>{p.variant_grade ?? '—'}</dd>
@@ -603,7 +633,7 @@ function ringkasBatch(p: Product): string {
                       <div class="baris-batch" data-baris-batch>
                         <input type="hidden" name="product_id" value={p.id} />
                         <input type="hidden" name="nama" value={p.name} />
-                        <input type="hidden" name="harga" value={hargaDi(p, kanalIsi)} data-harga-kolom />
+                        <input type="hidden" name="harga" value={hargaDi(p, kanalIsi, jumlah)} data-harga-kolom />
                         <input type="hidden" name="batch_id" value={b.id} />
 
                         <label class="min-h-11 min-w-0 flex-1 cursor-pointer text-xs" for={`qty-${p.id}-${b.id}`}>
@@ -782,6 +812,7 @@ function ringkasBatch(p: Product): string {
                 <span class="col-span-2 text-xs font-medium text-merah-700">{r.batchLabel}</span>
                 <span class="self-center text-xs tabular-nums text-[var(--color-teks-lembut)]">
                   <span data-qty-teks>{r.qty}</span> × <span data-harga-satuan>{rupiah(r.harga)}</span>
+                  {' '}<span class="font-semibold text-merah-700" data-tanda-grosir hidden={!r.grosir}>grosir</span>
                 </span>
                 <div class="flex flex-wrap items-center justify-end gap-2">
                   {/* Baris yang tersaring keluar membawa isian keranjangnya sendiri, kalau tidak barang terpilih hilang diam-diam saat saringan dikirim ke server. */}
@@ -928,42 +959,40 @@ function ringkasBatch(p: Product): string {
             </p>
           </div>
 
-          {/* Ongkir dan diskon jarang dipakai di penjualan toko, jadi dilipat; tetap di DOM (ikut terkirim) dan terbuka sendiri bila sudah terisi. */}
-          <details open={Boolean(ongkirIsi || diskonIsi)}>
+          {/* Ongkir jarang dipakai di penjualan toko, jadi dilipat; tetap di DOM (ikut terkirim) dan terbuka sendiri bila sudah terisi. */}
+          <details open={Boolean(ongkirIsi || gratisOngkirIsi)}>
             <summary class="flex min-h-11 cursor-pointer list-none items-center text-xs font-semibold text-merah-700">
-              ＋ Ongkos kirim dan diskon
+              ＋ Ongkos kirim
             </summary>
-            <div class="grid gap-3 pb-1 sm:grid-cols-2">
             {/* Tidak berlaku untuk Shopee; disembunyikan, bukan dihapus dari DOM, supaya skrip tetap bisa membaca atau mengosongkan nilainya. */}
-            <div class:list={[kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-ongkir>
-              <label class="label" for="shipping_cost">Ongkos kirim (Rp)</label>
-              <input
-                class="kolom tabular-nums"
-                id="shipping_cost"
-                name="shipping_cost"
-                type="number"
-                min="0"
-                step="1"
-                value={ongkirIsi}
-                placeholder="0"
-                data-ongkir
-              />
-            </div>
+            <div class:list={['grid gap-3 pb-1', kanalIsi === 'shopee' ? 'hidden' : '']} data-blok-ongkir>
+              <div>
+                <label class="label" for="shipping_cost">Ongkos kirim (Rp)</label>
+                <input
+                  class="kolom tabular-nums"
+                  id="shipping_cost"
+                  name="shipping_cost"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={ongkirIsi}
+                  placeholder="0"
+                  data-ongkir
+                />
+              </div>
 
-            <div>
-              <label class="label" for="discount_amount">Diskon (Rp)</label>
-              <input
-                class="kolom tabular-nums"
-                id="discount_amount"
-                name="discount_amount"
-                type="number"
-                min="0"
-                step="1"
-                value={diskonIsi}
-                placeholder="0"
-                data-diskon
-              />
-            </div>
+              <label class="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="shipping_borne_by_store"
+                  value="1"
+                  checked={gratisOngkirIsi}
+                  class="h-4 w-4 accent-merah-600"
+                  data-gratis-ongkir
+                />
+                Diskon ongkir
+              </label>
+      
             </div>
           </details>
 
@@ -1010,13 +1039,13 @@ function ringkasBatch(p: Product): string {
             <div
               class:list={[
                 'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
-                diskonAngka > 0 ? '' : 'hidden',
+                diskonOngkirAngka > 0 ? '' : 'hidden',
               ]}
               data-baris-diskon
             >
-              <span>Diskon</span>
+              <span>Diskon ongkir</span>
               <span class="tabular-nums text-merah-700" data-diskon-tampil>
-                -{rupiah(diskonAngka)}
+                -{rupiah(diskonOngkirAngka)}
               </span>
             </div>
             <div
@@ -1159,18 +1188,18 @@ function ringkasBatch(p: Product): string {
                   <td class="py-0.5">Subtotal barang</td>
                   <td class="py-0.5 text-right tabular-nums">{rupiah(struk.subtotal)}</td>
                 </tr>
-                {struk.discount_amount > 0 && (
-                  <tr>
-                    <td class="py-0.5">Diskon</td>
-                    <td class="py-0.5 text-right tabular-nums">
-                      -{rupiah(struk.discount_amount)}
-                    </td>
-                  </tr>
-                )}
                 {struk.shipping_cost > 0 && (
                   <tr>
                     <td class="py-0.5">Ongkos kirim</td>
                     <td class="py-0.5 text-right tabular-nums">{rupiah(struk.shipping_cost)}</td>
+                  </tr>
+                )}
+                {struk.shipping_borne_by_store && (
+                  <tr>
+                    <td class="py-0.5">Diskon ongkir</td>
+                    <td class="py-0.5 text-right tabular-nums">
+                      -{rupiah(struk.shipping_cost)}
+                    </td>
                   </tr>
                 )}
                 {/* Untuk Shopee keempat biaya sudah mengurangi Total; ditulis sebagai baris struk biasa supaya penjumlahannya terlihat seperti Diskon dan Ongkos kirim. */}
@@ -1280,16 +1309,16 @@ function ringkasBatch(p: Product): string {
                   <td>Subtotal</td>
                   <td class="nota-kanan">{rupiah(struk.subtotal)}</td>
                 </tr>
-                {struk.discount_amount > 0 && (
-                  <tr>
-                    <td>Diskon</td>
-                    <td class="nota-kanan">-{rupiah(struk.discount_amount)}</td>
-                  </tr>
-                )}
                 {struk.shipping_cost > 0 && (
                   <tr>
                     <td>Ongkos kirim</td>
                     <td class="nota-kanan">{rupiah(struk.shipping_cost)}</td>
+                  </tr>
+                )}
+                {struk.shipping_borne_by_store && (
+                  <tr>
+                    <td>Diskon ongkir</td>
+                    <td class="nota-kanan">-{rupiah(struk.shipping_cost)}</td>
                   </tr>
                 )}
                 {struk.sales_channel === 'shopee' && (
@@ -1395,7 +1424,7 @@ function ringkasBatch(p: Product): string {
     var pesanKeranjangKosong = borang.querySelector('[data-keranjang-kosong]');
 
     var ongkir = borang.querySelector('[data-ongkir]');
-    var diskon = borang.querySelector('[data-diskon]');
+    var gratisOngkir = borang.querySelector('[data-gratis-ongkir]');
     var dibayar = borang.querySelector('[data-dibayar]');
     var commissionFeeInput = borang.querySelector('[data-commission-fee]');
     var serviceFeeInput = borang.querySelector('[data-service-fee]');
@@ -1464,6 +1493,26 @@ function ringkasBatch(p: Product): string {
       return k ? k.value : 'toko';
     }
 
+    /** Harga satuan ditulis ke kartu katalog: atribut, teks tampil, dan kolom `harga` tersembunyi. */
+    function tulisHargaKartu(row, harga) {
+      row.dataset.harga = harga;
+      Array.prototype.forEach.call(row.querySelectorAll('[data-harga-tampil]'), function (el) {
+        el.textContent = rupiah.format(parseFloat(harga));
+      });
+      Array.prototype.forEach.call(row.querySelectorAll('[data-harga-kolom]'), function (el) {
+        el.value = harga;
+      });
+    }
+
+    /** Harga satuan ditulis ke baris panel keranjang; `grosir` (boleh kosong) menyalakan tandanya. */
+    function tulisHargaKeranjang(row, harga, grosir) {
+      row.dataset.harga = harga;
+      var satuan = row.querySelector('[data-harga-satuan]');
+      if (satuan) satuan.textContent = rupiah.format(parseFloat(harga));
+      var tanda = row.querySelector('[data-tanda-grosir]');
+      if (tanda) tanda.hidden = !grosir;
+    }
+
     /** Menulis ulang harga sesuai kanal dengan memilih atribut data- dari server (bukan menghitung) agar aturan harga kanal tak hidup di tiga tempat; yang tersaring keluar dibiarkan. */
     function terapkanKanal() {
       // `data-harga-toko` dibaca sebagai `dataset.hargaToko`, dan seterusnya.
@@ -1472,24 +1521,39 @@ function ringkasBatch(p: Product): string {
 
       baris.forEach(function (row) {
         var harga = row.dataset[kunciHarga];
-        if (harga === undefined) return;
-        row.dataset.harga = harga;
-
-        Array.prototype.forEach.call(row.querySelectorAll('[data-harga-tampil]'), function (el) {
-          el.textContent = rupiah.format(parseFloat(harga));
-        });
-        Array.prototype.forEach.call(row.querySelectorAll('[data-harga-kolom]'), function (el) {
-          el.value = harga;
-        });
+        if (harga !== undefined) tulisHargaKartu(row, harga);
       });
 
       barisKeranjang.forEach(function (row) {
         var harga = row.dataset[kunciHarga];
-        if (harga === undefined) return;
-        row.dataset.harga = harga;
+        if (harga !== undefined) tulisHargaKeranjang(row, harga, false);
+      });
+    }
 
-        var satuan = row.querySelector('[data-harga-satuan]');
-        if (satuan) satuan.textContent = rupiah.format(parseFloat(harga));
+    /** Sama dengan `harga_toko` di `pos/service.rs` dan `hargaDi` di frontmatter: kanal toko memakai harga grosir bila berat baris (jumlah semua batch × ukuran, gram bulat) melebihi batas; kanal lain sudah ditulis `terapkanKanal`. */
+    function terapkanGrosir() {
+      if (kanal() !== 'toko') return;
+
+      var batasGram = parseInt(borang.dataset.batasGram || '0', 10);
+      var perProduk = {};
+
+      baris.forEach(function (row) {
+        var ecer = row.dataset.hargaToko;
+        if (ecer === undefined) return;
+
+        var grosir = row.dataset.hargaGrosir;
+        var ukuranGram = parseInt(row.dataset.ukuranG || '0', 10);
+        var dipakai =
+          grosir !== undefined && ukuranGram > 0 && jumlahBaris(row) * ukuranGram > batasGram;
+        var harga = dipakai ? grosir : ecer;
+
+        tulisHargaKartu(row, harga);
+        perProduk[row.dataset.pid] = { harga: harga, grosir: dipakai };
+      });
+
+      barisKeranjang.forEach(function (row) {
+        var tier = perProduk[row.dataset.pid];
+        if (tier) tulisHargaKeranjang(row, tier.harga, tier.grosir);
       });
     }
 
@@ -1499,6 +1563,9 @@ function ringkasBatch(p: Product): string {
     }
 
     function hitung() {
+      // Harga dulu karena jumlah yang barusan berubah bisa melewati batas grosir, dan semua angka di bawah dijumlahkan dari harga baris.
+      terapkanGrosir();
+
       // --- Katalog -----------------------------------------------------
       baris.forEach(function (row) {
         var qty = jumlahBaris(row);
@@ -1558,8 +1625,8 @@ function ringkasBatch(p: Product): string {
 
       // Ongkir tidak berlaku untuk Shopee: kolom disembunyikan dan nilainya dipaksa nol agar sisa angka kanal Toko tidak ikut terhitung.
       var biaya = isShopee ? 0 : Math.max(0, parseFloat(ongkir.value) || 0);
-      // Dipotong setinggi subtotal seperti server; backend yang menolak yang melebihi, di sini hanya mencegah total negatif.
-      var potongan = Math.min(subtotal, Math.max(0, parseFloat(diskon.value) || 0));
+      // Diskon ongkir menanggung seluruh ongkir (beban toko), sama dengan `shipping_borne_by_store` di `pos/service.rs`.
+      var potongan = gratisOngkir && gratisOngkir.checked ? biaya : 0;
 
       // Shopee tanpa pilihan metode: radio "E-wallet" dipaksa tercentang di sini agar ganti kanal tanpa reload tidak mengirim metode lama.
       if (isShopee) {
@@ -1581,8 +1648,8 @@ function ringkasBatch(p: Product): string {
       var commissionPersen = persenInput(commissionFeeInput, SHOPEE_COMMISSION_PERSEN_DEFAULT);
       var servicePersen = persenInput(serviceFeeInput, SHOPEE_SERVICE_PERSEN_DEFAULT);
 
-      // Basis potongan Shopee: omzet setelah diskon, sama dengan `basis_fee` di `pos/service.rs`.
-      var basisFee = Math.max(0, subtotal - potongan);
+      // Basis potongan Shopee: omzet barang, sama dengan `basis_fee` di `pos/service.rs`.
+      var basisFee = subtotal;
       var biayaKomisi = isShopee ? biayaPersenRupiah(basisFee, commissionPersen) : 0;
       var biayaLayanan = isShopee ? biayaPersenRupiah(basisFee, servicePersen) : 0;
       var biayaPph = isShopee ? biayaPersenRupiah(basisFee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
@@ -1775,8 +1842,8 @@ function ringkasBatch(p: Product): string {
         var qty = nilai(document.getElementById(row.dataset.kolom));
         return n + qty * parseFloat(row.dataset.harga || '0');
       }, 0);
-      var potongan = Math.min(subtotal, Math.max(0, parseFloat(diskon.value) || 0));
-      return subtotal - potongan + Math.max(0, parseFloat(ongkir.value) || 0);
+      var biaya = Math.max(0, parseFloat(ongkir.value) || 0);
+      return subtotal + (gratisOngkir && gratisOngkir.checked ? 0 : biaya);
     }
 
     // Enter di panel batch menutup panel (bukan men-submit form), dan di kolom pencarian membuka panel produk teratas.
@@ -1819,7 +1886,7 @@ function ringkasBatch(p: Product): string {
     borang.addEventListener('input', function (e) {
       if (
         e.target.matches(
-          '[data-qty], [data-qty-luar], [data-ongkir], [data-diskon], [data-dibayar], [data-commission-fee], [data-service-fee]'
+          '[data-qty], [data-qty-luar], [data-ongkir], [data-dibayar], [data-commission-fee], [data-service-fee]'
         )
       )
         hitung();
@@ -1883,7 +1950,7 @@ function ringkasBatch(p: Product): string {
     }
 
     borang.addEventListener('change', function (e) {
-      if (e.target.matches('[data-metode]')) hitung();
+      if (e.target.matches('[data-metode], [data-gratis-ongkir]')) hitung();
       // Ganti kanal berarti harga di layar berganti, jadi ditulis ulang dulu karena `hitung` menjumlahkan dari angka itu.
       if (e.target.matches('[data-kanal]')) {
         terapkanKanal();

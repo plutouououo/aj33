@@ -54,7 +54,9 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     '',
     baris(['Ringkasan', 'Nilai']),
     baris(['Omzet barang', summary.revenue]),
+    baris(['Barang terjual (kg)', summary.sold_kg]),
     baris(['Ongkir ditagihkan', summary.shipping]),
+    baris(['Ongkir ditanggung toko (termasuk di beban)', summary.shipping_subsidy]),
     baris(['Harga pokok', summary.cogs]),
     baris(['Beban', summary.expenses]),
     baris([

@@ -1,0 +1,84 @@
+---
+/** Batas harga grosir: baris kanal toko memakai harga grosir bila berat baris (jumlah pack × ukuran) lebih dari batas ini; selebihnya harga ecer. */
+import Galat from '../../components/Galat.astro';
+import PengaturanShell from '../../layouts/PengaturanShell.astro';
+import { api, ApiRequestError, type PricingSettings } from '../../lib/api';
+import { kg } from '../../lib/format';
+import { pesanDari, sesudahAksi } from '../../lib/pesan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+let galat: string | null = null;
+let sukses: string | null = null;
+let isiBatas: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  isiBatas = String(form.get('wholesale_threshold_kg') ?? '').trim();
+  const batas = Number(isiBatas);
+
+  if (isiBatas === '' || !Number.isFinite(batas) || batas <= 0) {
+    galat = 'Batas grosir harus berupa angka lebih dari 0.';
+  } else {
+    try {
+      await api<PricingSettings>('/settings/pricing', {
+        method: 'PATCH',
+        token,
+        body: { wholesale_threshold_kg: batas },
+      });
+      return Astro.redirect(sesudahAksi(Astro.url, 'simpan'), 303);
+    } catch (err) {
+      galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan pengaturan harga.';
+    }
+  }
+}
+
+if (!galat) {
+  sukses = pesanDari(Astro.url, { simpan: 'Batas grosir tersimpan. Berlaku untuk transaksi berikutnya.' });
+}
+
+const pengaturan = await api<PricingSettings>('/settings/pricing', { token });
+---
+
+<PengaturanShell judul="Harga" user={user}>
+  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
+    Penjualan tetap per pack. Di kasir (kanal Toko), berat satu baris dihitung dari jumlah pack ×
+    ukuran pack (kg). Bila lebih dari batas di bawah, baris itu memakai <strong>harga grosir</strong>;
+    sama dengan batas atau kurang memakai <strong>harga ecer</strong>.
+  </p>
+
+  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
+    Produk tanpa ukuran atau tanpa harga grosir selalu memakai harga ecer. Kanal Shopee dan
+    Tokopedia / TikTok tidak terpengaruh. Perubahan batas tidak mengubah transaksi yang sudah
+    tersimpan.
+  </p>
+
+  <Galat pesan={galat} class="mb-4" />
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+
+  <form method="POST" class="kartu borang-tegak mb-6">
+    <h2 class="font-semibold">Batas harga grosir</h2>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="wholesale_threshold_kg">Grosir bila lebih dari (kg)</label>
+      <input
+        class="kolom"
+        id="wholesale_threshold_kg"
+        name="wholesale_threshold_kg"
+        type="number"
+        min="0.001"
+        step="any"
+        inputmode="decimal"
+        value={isiBatas ?? String(pengaturan.wholesale_threshold_kg)}
+        required
+      />
+      <p class="isian-bantu">
+        Saat ini: lebih dari {kg(pengaturan.wholesale_threshold_kg)} grosir, sampai
+        {kg(pengaturan.wholesale_threshold_kg)} ecer. Contoh pack 2 kg: ≤ {Math.floor(pengaturan.wholesale_threshold_kg / 2)} pack ecer.
+      </p>
+    </div>
+
+    <button class="tombol-utama" type="submit">Simpan batas</button>
+  </form>
+</PengaturanShell>

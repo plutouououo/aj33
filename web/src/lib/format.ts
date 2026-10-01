@@ -10,6 +10,13 @@ export function rupiah(nilai: number): string {
   return RUPIAH.format(nilai);
 }
 
+const KG = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 3 });
+
+/** Berat dalam kg tanpa nol di belakang koma, mis. `2 kg` atau `0,9 kg`. */
+export function kg(nilai: number): string {
+  return `${KG.format(nilai)} kg`;
+}
+
 /** Zona waktu toko, sama dengan backend saat memotong laporan per hari (`reports/mod.rs`); disebut eksplisit karena server produksi UTC dan jam akan meleset tujuh jam. */
 const ZONA = 'Asia/Jakarta';
 

@@ -339,7 +339,7 @@ pub async fn purchases(
                t.created_at         AS "created_at!",
                t.payment_method     AS "payment_method!",
                t.subtotal - t.discount_amount AS "revenue!",
-               t.shipping_cost      AS "shipping!",
+               t.shipping_charged   AS "shipping!",
                t.total_amount       AS "total_amount!",
                (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)
                                     AS "item_count!"

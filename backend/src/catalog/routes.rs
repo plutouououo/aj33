@@ -148,12 +148,15 @@ struct ProductCreateRequest {
     brand_name: Option<String>,
     product_type: Option<String>,
     variant_grade: Option<String>,
-    variant_size: Option<String>,
+    /// Isi satu pack dalam kg (boleh pecahan); menentukan ecer atau grosir di kasir.
+    variant_size: Option<Decimal>,
     /// Terisi berarti produk ini varian dari produk lain.
     parent_id: Option<Uuid>,
     category_id: Option<Uuid>,
-    /// Harga dasar, yang dipakai kasir di toko.
+    /// Harga ecer per pack, yang dipakai kasir di toko.
     price: Decimal,
+    /// Harga grosir per pack. Kosong berarti belum diatur dan kasir memakai harga ecer.
+    price_wholesale: Option<Decimal>,
     /// Harga di marketplace. Kosong berarti belum diatur, bukan gratis.
     price_shopee: Option<Decimal>,
     /// Mencakup Tokopedia -- satu kanal dengan TikTok Shop.
@@ -191,6 +194,7 @@ async fn create_product(
             parent_id: body.parent_id,
             category_id: body.category_id,
             price: body.price,
+            price_wholesale: body.price_wholesale,
             price_shopee: body.price_shopee,
             price_tiktok: body.price_tiktok,
             cost_price: None,
@@ -228,10 +232,12 @@ struct ProductUpdateRequest {
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     variant_grade: Ubah<String>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
-    variant_size: Ubah<String>,
+    variant_size: Ubah<Decimal>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     category_id: Ubah<Uuid>,
     price: Option<Decimal>,
+    #[serde(default, deserialize_with = "repo::ubah_terkirim")]
+    price_wholesale: Ubah<Decimal>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     price_shopee: Ubah<Decimal>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
@@ -263,7 +269,6 @@ async fn update_product(
     let brand_name = ubah_teks(body.brand_name);
     let product_type = ubah_teks(body.product_type);
     let variant_grade = ubah_teks(body.variant_grade);
-    let variant_size = ubah_teks(body.variant_size);
 
     // SKU tak dirakit ulang meski atribut berubah, karena memutus label cetak, pemetaan listing marketplace, dan hafalan pegawai; yang tersisa koreksi eksplisit dengan syarat di bawah.
     let sku = match body.sku {
@@ -278,9 +283,10 @@ async fn update_product(
         brand_name,
         product_type,
         variant_grade,
-        variant_size,
+        variant_size: body.variant_size,
         category_id: body.category_id,
         price: body.price,
+        price_wholesale: body.price_wholesale,
         price_shopee: body.price_shopee,
         price_tiktok: body.price_tiktok,
         cost_price: body.cost_price,

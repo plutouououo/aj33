@@ -34,8 +34,9 @@ struct CheckoutRequest {
     amount_paid: Option<Decimal>,
     /// Ongkos kirim. Kosong berarti nol, bukan "tidak diketahui".
     shipping_cost: Option<Decimal>,
-    /// Potongan atas seluruh belanja. Kosong berarti nol.
-    discount_amount: Option<Decimal>,
+    /// Diskon ongkir: toko menanggung ongkir (beban toko) alih-alih pembeli. Kosong berarti pembeli yang menanggung.
+    #[serde(default)]
+    shipping_borne_by_store: bool,
     /// Persentase `commission_fee` Shopee sebagai pecahan (0,1725 = 17,25%), hanya untuk Shopee; kosong jatuh ke `shopee_commission_persen_default`.
     platform_commission_fee_percent: Option<Decimal>,
     /// Persentase `service_fee` Shopee (program opsional), kosong berarti nol (`shopee_service_persen_default`).
@@ -83,7 +84,7 @@ async fn checkout(
             sales_channel: body.sales_channel,
             amount_paid: body.amount_paid,
             shipping_cost: body.shipping_cost,
-            discount_amount: body.discount_amount,
+            shipping_borne_by_store: body.shipping_borne_by_store,
             platform_commission_fee_percent: body.platform_commission_fee_percent,
             platform_service_fee_percent: body.platform_service_fee_percent,
             items: body.items,

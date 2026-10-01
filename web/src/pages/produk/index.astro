@@ -3,7 +3,7 @@ import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type PaginatedProducts, type Product } from '../../lib/api';
 import { fotoKecil } from '../../lib/blob';
-import { rupiah, tanggal, sisaHari } from '../../lib/format';
+import { kg, rupiah, tanggal, sisaHari } from '../../lib/format';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -342,7 +342,8 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
             </th>
           )}
           <th>Produk</th>
-          <th class="text-right">Harga dasar</th>
+          <th class="text-right">Harga ecer</th>
+          <th class="text-right">Grosir</th>
           <th class="text-right">Shopee</th>
           <th class="text-right">Tokopedia / TikTok</th>
           <th class="text-right">Stok</th>
@@ -357,7 +358,12 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
           const punyaVarian = varian.length > 0;
           const stok = stokInduk(p, varian);
           const dekat = p.nearest_expiry !== null && DEKAT_KEDALUWARSA >= sisaHari(p.nearest_expiry);
-          const atribut = [p.category_name, p.product_type, p.variant_grade, p.variant_size]
+          const atribut = [
+            p.category_name,
+            p.product_type,
+            p.variant_grade,
+            p.variant_size === null ? null : kg(p.variant_size),
+          ]
             .filter(Boolean)
             .join(' · ');
           const catatan = kanalKosong(p, varian);
@@ -404,12 +410,15 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
                 </td>
 
                 {punyaVarian ? (
-                  <td class="sel-angka text-xs text-[var(--color-teks-samar)]" colspan={3}>
+                  <td class="sel-angka text-xs text-[var(--color-teks-samar)]" colspan={4}>
                     Harga per varian
                   </td>
                 ) : (
                   <Fragment>
                     <td class="sel-angka">{rupiah(p.price)}</td>
+                    <td class="sel-angka text-xs text-[var(--color-teks-lembut)]">
+                      {p.price_wholesale === null ? '—' : rupiah(p.price_wholesale)}
+                    </td>
                     <td class="sel-angka text-xs text-[var(--color-teks-lembut)]">
                       {p.price_shopee === null ? '—' : rupiah(p.price_shopee)}
                     </td>
@@ -464,7 +473,9 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 
               {/* Baris varian selalu terbuka tanpa tombol lipat karena variannya sedikit dan lipatan berbasis JS tak sepadan; harga disunting di halaman kelola masing-masing. */}
               {varian.map((v) => {
-                const vAtribut = [v.variant_grade, v.variant_size].filter(Boolean).join(' · ');
+                const vAtribut = [v.variant_grade, v.variant_size === null ? null : kg(v.variant_size)]
+                  .filter(Boolean)
+                  .join(' · ');
                 const vMenipis = v.stock_qty > 0 && v.stock_qty <= v.low_stock_threshold;
                 const vHabis = v.stock_qty <= 0;
                 return (
@@ -476,6 +487,9 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
                       {vAtribut && <span class="block text-xs text-[var(--color-teks-lembut)]">{vAtribut}</span>}
                     </td>
                     <td class="sel-angka">{rupiah(v.price)}</td>
+                    <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
+                      {v.price_wholesale === null ? '—' : rupiah(v.price_wholesale)}
+                    </td>
                     <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
                       {v.price_shopee === null ? '—' : rupiah(v.price_shopee)}
                     </td>

@@ -129,6 +129,8 @@ struct Dashboard {
     product_count: i64,
     customer_count: i64,
     low_stock_count: i64,
+    /// Potret persediaan sekarang (nilai dan berat), bukan angka periode.
+    stock_value: StockValue,
     recent_sales: Vec<SaleRow>,
     low_stock_products: Vec<LowStockProduct>,
 }
@@ -169,6 +171,7 @@ async fn dashboard(State(state): State<AppState>, user: CurrentUser) -> AppResul
         product_count,
         customer_count,
         low_stock_count,
+        stock_value: repo::stock_value(&state.pool).await?,
         recent_sales,
         low_stock_products,
     }))
@@ -185,8 +188,6 @@ struct SalesReport {
     expense_breakdown: Vec<ExpenseSlice>,
     top_products: Vec<TopProduct>,
     sales: Vec<SaleRow>,
-    /// Nilai persediaan sekarang; tidak ikut saringan periode.
-    stock_value: StockValue,
     /// Jumlah baris di `sales` dibanding batas yang diminta, agar halaman bisa mengatakan daftar dipotong, bukan hanya segitu penjualannya.
     sales_limit: i64,
 }
@@ -204,10 +205,9 @@ async fn sales_report(
         summary: repo::sales_summary(&state.pool, &filter).await?,
         previous_summary: repo::sales_summary_previous(&state.pool, &filter).await?,
         trend: repo::monthly_trend(&state.pool, &filter).await?,
-        expense_breakdown: repo::expense_breakdown(&state.pool, filter.period).await?,
+        expense_breakdown: repo::expense_breakdown(&state.pool, &filter).await?,
         top_products: repo::top_products(&state.pool, &top_filter, TERLARIS).await?,
         sales: repo::recent_sales(&state.pool, &filter, sales_limit).await?,
-        stock_value: repo::stock_value(&state.pool).await?,
         sales_limit,
     }))
 }

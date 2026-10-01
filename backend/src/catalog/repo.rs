@@ -25,14 +25,16 @@ pub struct Product {
     pub product_type: Option<String>,
     /// Mutu / kelas ukuran barang, mis. "SP 08", "Super Besar", "B".
     pub variant_grade: Option<String>,
-    /// Isi satu pack, mis. "2 kg". Satu SKU berarti satu pack.
-    pub variant_size: Option<String>,
+    /// Isi satu pack dalam kg, mis. 2 atau 0,9; `None` berarti belum diisi sehingga kasir selalu memakai harga ecer. Satu SKU berarti satu pack.
+    pub variant_size: Option<Decimal>,
     /// Terisi berarti baris ini varian dari produk lain.
     pub parent_id: Option<Uuid>,
     /// Banyaknya varian; induk yang punya varian tak dijual langsung, yang dijual varian-variannya.
     pub variant_count: i64,
-    /// Harga dasar untuk kasir di toko sekaligus rujukan saat harga kanal belum diisi.
+    /// Harga ecer per pack: dipakai kasir di toko saat berat baris tak melebihi batas grosir, sekaligus rujukan saat harga kanal belum diisi.
     pub price: Decimal,
+    /// Harga grosir per pack; `None` berarti belum diatur sehingga kasir tetap memakai `price`, bukan gratis (migrasi 0022).
+    pub price_wholesale: Option<Decimal>,
     /// `None` berarti belum diatur -- bukan gratis. Lihat migrasi 0005.
     pub price_shopee: Option<Decimal>,
     /// Mencakup Tokopedia; keduanya satu kanal sejak akuisisi TikTok.
@@ -133,7 +135,7 @@ pub async fn list_products(
             p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
             p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
-            p.price, p.price_shopee, p.price_tiktok, p.cost_price,
+            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
@@ -206,7 +208,7 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
             p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
             p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
-            p.price, p.price_shopee, p.price_tiktok, p.cost_price,
+            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
@@ -235,7 +237,7 @@ pub async fn list_variants(pool: &PgPool, parent_id: Uuid) -> AppResult<Vec<Prod
             p.id, p.category_id, c.name AS "category_name?", p.name, p.seo_name, p.sku,
             p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
-            p.price, p.price_shopee, p.price_tiktok, p.cost_price,
+            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
@@ -263,10 +265,11 @@ pub struct NewProduct {
     pub brand_name: Option<String>,
     pub product_type: Option<String>,
     pub variant_grade: Option<String>,
-    pub variant_size: Option<String>,
+    pub variant_size: Option<Decimal>,
     pub parent_id: Option<Uuid>,
     pub category_id: Option<Uuid>,
     pub price: Decimal,
+    pub price_wholesale: Option<Decimal>,
     pub price_shopee: Option<Decimal>,
     pub price_tiktok: Option<Decimal>,
     pub cost_price: Option<Decimal>,
@@ -286,10 +289,10 @@ pub async fn insert_product(
         r#"
         INSERT INTO products
             (name, seo_name, sku, brand_name, product_type, variant_grade, variant_size,
-             parent_id, category_id, price, price_shopee, price_tiktok,
+             parent_id, category_id, price, price_wholesale, price_shopee, price_tiktok,
              cost_price, stock_qty, low_stock_threshold, image_url, is_active, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0,
-                $14, $15, $16, $17)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0,
+                $15, $16, $17, $18)
         RETURNING id
         "#,
         input.name,
@@ -302,6 +305,7 @@ pub async fn insert_product(
         input.parent_id,
         input.category_id,
         input.price,
+        input.price_wholesale,
         input.price_shopee,
         input.price_tiktok,
         input.cost_price,
@@ -352,9 +356,10 @@ pub struct ProductPatch {
     pub brand_name: Ubah<String>,
     pub product_type: Ubah<String>,
     pub variant_grade: Ubah<String>,
-    pub variant_size: Ubah<String>,
+    pub variant_size: Ubah<Decimal>,
     pub category_id: Ubah<Uuid>,
     pub price: Option<Decimal>,
+    pub price_wholesale: Ubah<Decimal>,
     pub price_shopee: Ubah<Decimal>,
     pub price_tiktok: Ubah<Decimal>,
     pub cost_price: Ubah<Decimal>,
@@ -369,7 +374,8 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
     let (ubah_merek, brand_name) = teks(&patch.brand_name);
     let (ubah_jenis, product_type) = teks(&patch.product_type);
     let (ubah_warna, variant_grade) = teks(&patch.variant_grade);
-    let (ubah_ukuran, variant_size) = teks(&patch.variant_size);
+    let (ubah_ukuran, variant_size) = salinan(&patch.variant_size);
+    let (ubah_grosir, price_wholesale) = salinan(&patch.price_wholesale);
     let (ubah_kategori, category_id) = salinan(&patch.category_id);
     let (ubah_shopee, price_shopee) = salinan(&patch.price_shopee);
     let (ubah_tiktok, price_tiktok) = salinan(&patch.price_tiktok);
@@ -389,12 +395,13 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
             brand_name          = CASE WHEN $10::bool THEN $11::varchar ELSE brand_name END,
             product_type        = CASE WHEN $12::bool THEN $13::varchar ELSE product_type END,
             variant_grade       = CASE WHEN $14::bool THEN $15::varchar ELSE variant_grade END,
-            variant_size        = CASE WHEN $16::bool THEN $17::varchar ELSE variant_size END,
+            variant_size        = CASE WHEN $16::bool THEN $17::numeric ELSE variant_size END,
             category_id         = CASE WHEN $18::bool THEN $19::uuid    ELSE category_id END,
             price_shopee        = CASE WHEN $20::bool THEN $21::numeric ELSE price_shopee END,
             price_tiktok        = CASE WHEN $22::bool THEN $23::numeric ELSE price_tiktok END,
             cost_price          = CASE WHEN $24::bool THEN $25::numeric ELSE cost_price END,
             image_url           = CASE WHEN $26::bool THEN $27::varchar ELSE image_url END,
+            price_wholesale     = CASE WHEN $28::bool THEN $29::numeric ELSE price_wholesale END,
             updated_at          = now()
         WHERE id = $1
         "#,
@@ -424,7 +431,9 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
         ubah_modal,
         cost_price,
         ubah_gambar,
-        image_url
+        image_url,
+        ubah_grosir,
+        price_wholesale
     )
     .execute(pool)
     .await?;

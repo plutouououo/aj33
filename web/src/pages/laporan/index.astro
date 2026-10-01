@@ -1,7 +1,8 @@
 ---
 import AppShell from '../../layouts/AppShell.astro';
+import Peringatan from '../../components/Peringatan.astro';
 import { api, type SalesReport } from '../../lib/api';
-import { hitungTren, labelTren, rupiah, waktu } from '../../lib/format';
+import { hitungTren, kg, labelTren, rupiah, waktu } from '../../lib/format';
 import {
   JENIS,
   METODE,
@@ -30,7 +31,7 @@ const laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, BARI
 const kueri = kueriHalaman(saringan);
 const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
 
-const { summary, previous_summary, trend, expense_breakdown, top_products, sales, stock_value } =
+const { summary, previous_summary, trend, expense_breakdown, top_products, sales } =
   laporan;
 
 // Satu skala grafik untuk omzet dan beban agar tinggi batang keduanya bisa dibandingkan langsung.
@@ -124,7 +125,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <span class="kartu-angka-label !text-white/80">Omzet Barang</span>
       <span class="kartu-angka-nilai">{rupiah(summary.revenue)}</span>
       <span class="kartu-angka-bantu !text-white/70">
-        {labelPeriode(saringan.periode)} · ongkir {rupiah(summary.shipping)} di luar angka ini
+        {labelPeriode(saringan.periode)} · ongkir {rupiah(summary.shipping)} di luar angka ini{summary.shipping_subsidy > 0 && ` · ongkir ditanggung toko ${rupiah(summary.shipping_subsidy)} masuk beban`}
       </span>
     </div>
 
@@ -202,45 +203,39 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
           </span>
         )}
       </div>
-      <span class="kartu-angka-label">Transaksi</span>
+      <span class="kartu-angka-label">Order</span>
       <span class="kartu-angka-nilai">{summary.transaction_count}</span>
       <span class="kartu-angka-bantu">Beban tercatat {rupiah(summary.expenses)}</span>
     </div>
 
-    {/* Potret stok hari ini, bukan angka periode, jadi tanpa pil naik/turun dan tak berubah oleh saringan. */}
     <div class="kartu-angka">
       <div class="flex items-start justify-between gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
           <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m6 4.125l2.25 2.25m0 0l2.25 2.25M12 13.875l2.25-2.25M12 13.875l-2.25 2.25M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+            <path d="M12 3v18M5.5 7h13M5.5 7l-2.5 6a3 3 0 005 0L5.5 7zM18.5 7l-2.5 6a3 3 0 005 0l-2.5-6zM8 21h8" />
           </svg>
         </span>
+        {hitungTren(summary.sold_kg, previous_summary?.sold_kg) && (
+          <span class={`lencana-${hitungTren(summary.sold_kg, previous_summary?.sold_kg)!.arah}`}>
+            {labelTren(hitungTren(summary.sold_kg, previous_summary?.sold_kg))}
+          </span>
+        )}
       </div>
-      <span class="kartu-angka-label">Nilai Stok</span>
-      <span class="kartu-angka-nilai">{rupiah(stock_value.value)}</span>
-      <span class="kartu-angka-bantu">Sisa stok × harga beli, per hari ini</span>
+      <span class="kartu-angka-label">Kg Terjual</span>
+      <span class="kartu-angka-nilai">{kg(summary.sold_kg)}</span>
+      <span class="kartu-angka-bantu">Pack terjual × ukuran; produk tanpa ukuran tak ikut</span>
     </div>
   </div>
 
   {
     /* Harga pokok yang belum diisi membuat laba tampak lebih besar; dikatakan terang-terangan karena laba yang salah diam-diam lebih berbahaya daripada tanpa angka. */
     summary.items_without_cost > 0 && (
-      <p class="mb-6 rounded-lg border border-kuning-500/40 bg-kuning-50 px-4 py-3 text-sm text-kuning-700">
+      <Peringatan class="mb-6">
         {summary.items_without_cost} baris penjualan keluar dari batch yang harga belinya
         belum diisi. Selama itu, <strong>harga pokok di atas terlalu kecil dan laba terlalu
         besar</strong>. Isi harga beli batch di halaman produk supaya angkanya benar.
-      </p>
-    )
-  }
-
-  {
-    stock_value.batches_without_cost > 0 && (
-      <p class="mb-6 rounded-lg border border-kuning-500/40 bg-kuning-50 px-4 py-3 text-sm text-kuning-700">
-        {stock_value.batches_without_cost} batch yang masih ada stoknya belum punya harga beli.
-        Selama itu, <strong>nilai stok di atas terlalu kecil</strong>. Isi harga beli batch di
-        halaman produk.
-      </p>
+      </Peringatan>
     )
   }
 

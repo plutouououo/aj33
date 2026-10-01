@@ -1,5 +1,5 @@
 ---
-/** Kerangka halaman Pengaturan: sub-navigasi (Akun, Platform, Kamus SKU) khusus di sini, difilter `bolehAkses` supaya kasir/pengepak tidak melihat tautan yang ditolak middleware. */
+/** Kerangka halaman Pengaturan: sub-navigasi (Akun, Platform, Harga, Kamus SKU) khusus di sini, difilter `bolehAkses` supaya kasir/pengepak tidak melihat tautan yang ditolak middleware. */
 import AppShell from './AppShell.astro';
 import type { User } from '../lib/api';
 import { bolehAkses } from '../lib/session';
@@ -15,6 +15,7 @@ const path = Astro.url.pathname;
 const MENU = [
   { href: '/pengaturan/akun', label: 'Akun' },
   { href: '/pengaturan/platform', label: 'Platform' },
+  { href: '/pengaturan/harga', label: 'Harga' },
   { href: '/pengaturan/sku', label: 'Kamus SKU' },
 ];
 

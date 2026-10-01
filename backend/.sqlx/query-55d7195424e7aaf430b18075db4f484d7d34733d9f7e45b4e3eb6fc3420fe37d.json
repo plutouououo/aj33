@@ -1,0 +1,39 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO transactions\n            (idempotency_key, type, customer_id, cashier_user_id, payment_method,\n             sales_channel, subtotal, shipping_cost, shipping_borne_by_store, total_amount,\n             platform_commission_fee_percent, platform_commission_fee,\n             platform_service_fee_percent, platform_service_fee,\n             platform_withholding_tax, platform_order_processing_fee,\n             amount_paid, change_amount)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Numeric",
+        "Numeric",
+        "Bool",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "55d7195424e7aaf430b18075db4f484d7d34733d9f7e45b4e3eb6fc3420fe37d"
+}

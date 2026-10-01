@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT wholesale_threshold_kg FROM pricing_settings",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "wholesale_threshold_kg",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5508929212fdea34ab99c676142b9db6e5764424341968b65d734ff928bea9b1"
+}
