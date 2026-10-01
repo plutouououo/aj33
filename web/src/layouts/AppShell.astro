@@ -181,7 +181,8 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
           </aside>
 
           <div class="flex min-w-0 flex-1 flex-col transition-[margin] md:ml-[var(--lebar-sidebar)]">
-            <header class="flex items-center justify-between gap-3 border-b border-[var(--color-garis)] bg-white px-4 py-3 md:gap-4 md:px-6 md:py-4">
+            {/* Menempel di atas dengan z-[15]: di atas elemen sticky konten (z-10) tapi di bawah tirai dan laci menu (z-20/30). */}
+            <header class="sticky top-0 z-[15] flex h-[var(--tinggi-topbar)] items-center justify-between gap-3 border-b border-[var(--color-garis)] bg-white px-4 md:gap-4 md:px-6">
               <div class="flex min-w-0 items-center gap-2">
                 {/* Pemicu laci berupa `<label>`, bukan `<button>`, karena yang menggerakkannya adalah checkbox di atas. */}
                 <label

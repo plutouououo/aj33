@@ -410,7 +410,7 @@ function ringkasBatch(p: Product): string {
 
     <section class="min-w-0 flex-1">
       {/* Menempel di atas daftar supaya pencarian dan kategori tetap terjangkau saat katalog digulung; labelnya sr-only agar bilahnya ringkas. */}
-      <div class="kartu sticky top-2 z-10 mb-3 p-3!">
+      <div class="kartu sticky top-[calc(var(--tinggi-topbar)+0.5rem)] z-10 mb-3 p-3!">
         <label class="sr-only" for="cari">Cari produk</label>
         <div class="flex flex-wrap gap-2">
           {/* Tombol submit pertama di form ini disengaja: Enter di kolom mana pun jatuh ke "terapkan saringan", satu-satunya aksi yang aman dipicu tak sengaja. */}
@@ -1111,7 +1111,7 @@ function ringkasBatch(p: Product): string {
 
         {struk && (
           <Fragment>
-          <div id="struk" class="scroll-mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4" role="status">
+          <div id="struk" class="scroll-mt-[calc(var(--tinggi-topbar)+1rem)] rounded-xl border border-emerald-200 bg-emerald-50 p-4" role="status">
             <div class="flex items-center justify-between gap-2">
               <span class="lencana-selesai">Penjualan berhasil</span>
               <span class="font-mono text-xs text-emerald-800">#{struk.id.slice(0, 8)}</span>

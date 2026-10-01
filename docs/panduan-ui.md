@@ -60,6 +60,7 @@ lolos WCAG AA, sekaligus jelas berbeda dari merah peringatan yang terang.
 | Token | Nilai | Dipakai untuk |
 | --- | --- | --- |
 | `--lebar-sidebar` | `15rem` (ciut `4.25rem`) | Lebar sidebar dan margin kolom isi |
+| `--tinggi-topbar` | `4.5rem` | Tinggi topbar yang menempel di atas (`z-[15]`, di bawah tirai/laci z-20/30). Tinggi tetap, bukan mengikuti isi, karena elemen sticky lain (`.bilah-tab`, pencarian dan panel kasir, `scroll-margin` anchor) bergeser sebesar ini agar tak tertutup |
 | `--tinggi-bilah-tab` | `3.25rem` | Tinggi `.bilah-tab` sekaligus `scroll-margin` tiap bagian — satu angka supaya lompatan `#anchor` tidak berhenti di balik bilahnya |
 | `--lebar-borang` | `34rem` | Lebar maksimum satu kolom isian |
 
