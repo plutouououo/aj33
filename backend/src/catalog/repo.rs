@@ -146,9 +146,11 @@ pub async fn list_products(
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
         WHERE ($1::text IS NULL
-               OR p.name ILIKE '%' || $1 || '%'
-               OR p.seo_name ILIKE '%' || $1 || '%'
-               OR p.sku ILIKE '%' || $1 || '%')
+               OR NOT EXISTS (
+                   SELECT 1 FROM unnest(regexp_split_to_array(btrim($1), '\s+')) AS kata
+                   WHERE NOT (p.name ILIKE '%' || kata || '%'
+                              OR p.seo_name ILIKE '%' || kata || '%'
+                              OR p.sku ILIKE '%' || kata || '%')))
           AND ($2::uuid IS NULL OR p.category_id = $2)
           AND (NOT $3::bool OR p.is_active)
           AND ($4::uuid IS NULL OR p.parent_id = $4)
@@ -175,9 +177,11 @@ pub async fn list_products(
         SELECT count(*) AS "count!"
         FROM products p
         WHERE ($1::text IS NULL
-               OR p.name ILIKE '%' || $1 || '%'
-               OR p.seo_name ILIKE '%' || $1 || '%'
-               OR p.sku ILIKE '%' || $1 || '%')
+               OR NOT EXISTS (
+                   SELECT 1 FROM unnest(regexp_split_to_array(btrim($1), '\s+')) AS kata
+                   WHERE NOT (p.name ILIKE '%' || kata || '%'
+                              OR p.seo_name ILIKE '%' || kata || '%'
+                              OR p.sku ILIKE '%' || kata || '%')))
           AND ($2::uuid IS NULL OR p.category_id = $2)
           AND (NOT $3::bool OR p.is_active)
           AND ($4::uuid IS NULL OR p.parent_id = $4)

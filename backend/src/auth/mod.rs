@@ -1,4 +1,4 @@
-//! Autentikasi: JWT HS256 (claim `sub` dan `role`, 8 jam) mengikuti proyek lama, hanya penyimpanannya yang pindah ke cookie httpOnly agar Astro bisa membacanya.
+//! Autentikasi: JWT HS256 (claim `sub` dan `role`, 30 hari) mengikuti proyek lama, hanya penyimpanannya yang pindah ke cookie httpOnly agar Astro bisa membacanya.
 
 mod repo;
 mod routes;

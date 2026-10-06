@@ -82,7 +82,10 @@ pub async fn list_customers(
             WHERE t.status = 'completed' AND t.customer_id IS NOT NULL
             GROUP BY t.customer_id
         ) b ON b.customer_id = c.id
-        WHERE ($1::text IS NULL OR c.name ILIKE '%' || $1 || '%' OR c.phone ILIKE '%' || $1 || '%')
+        WHERE ($1::text IS NULL
+               OR NOT EXISTS (
+                   SELECT 1 FROM unnest(regexp_split_to_array(btrim($1), '\s+')) AS kata
+                   WHERE NOT (c.name ILIKE '%' || kata || '%' OR c.phone ILIKE '%' || kata || '%')))
           AND ($2::text IS NULL
                OR ($2 = 'belanja' AND b.customer_id IS NOT NULL)
                OR c.source = $2)
@@ -106,7 +109,10 @@ pub async fn list_customers(
         r#"
         SELECT count(*) AS "count!"
         FROM customers c
-        WHERE ($1::text IS NULL OR c.name ILIKE '%' || $1 || '%' OR c.phone ILIKE '%' || $1 || '%')
+        WHERE ($1::text IS NULL
+               OR NOT EXISTS (
+                   SELECT 1 FROM unnest(regexp_split_to_array(btrim($1), '\s+')) AS kata
+                   WHERE NOT (c.name ILIKE '%' || kata || '%' OR c.phone ILIKE '%' || kata || '%')))
           AND ($2::text IS NULL
                OR ($2 = 'belanja' AND EXISTS (
                    SELECT 1 FROM transactions t

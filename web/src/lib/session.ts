@@ -2,8 +2,8 @@
 import type { AstroCookies } from 'astro';
 import { COOKIE_SESI, type Role, type User } from './api';
 
-/** Sama dengan masa berlaku JWT di backend (8 jam). */
-const UMUR_DETIK = 8 * 60 * 60;
+/** Sama dengan masa berlaku JWT di backend (30 hari). */
+const UMUR_DETIK = 30 * 24 * 60 * 60;
 
 export function simpanSesi(cookies: AstroCookies, token: string): void {
   cookies.set(COOKIE_SESI, token, {

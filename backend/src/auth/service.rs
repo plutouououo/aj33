@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Sesi login berlaku 8 jam, sama seperti proyek lama.
-const TOKEN_BERLAKU_JAM: i64 = 8;
+/// Sesi login berlaku 30 hari agar kasir tak perlu login ulang selama belum logout.
+const TOKEN_BERLAKU_HARI: i64 = 30;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -176,7 +176,7 @@ fn buat_token(secret: &str, user_id: Uuid, role: Role) -> AppResult<String> {
     let claims = Claims {
         sub: user_id.to_string(),
         role: role.as_str().to_string(),
-        exp: (Utc::now() + Duration::hours(TOKEN_BERLAKU_JAM)).timestamp(),
+        exp: (Utc::now() + Duration::days(TOKEN_BERLAKU_HARI)).timestamp(),
     };
 
     encode(

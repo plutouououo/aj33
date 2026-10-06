@@ -122,9 +122,15 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
                    md:z-20 md:translate-x-0"
           >
             <div class="flex items-center gap-2.5 px-4 py-4">
-              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-merah-600 text-sm font-bold text-white">
+              {/* Di layar lebar logo ikut menciutkan/melebarkan sidebar; di ponsel tidak berfungsi karena laci selalu selebar penuh. */}
+              <button
+                type="button"
+                data-ciutkan
+                class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-merah-600 text-sm font-bold text-white md:cursor-pointer"
+                aria-controls="sidebar"
+              >
                 B
-              </span>
+              </button>
               <span class="teks-sidebar min-w-0 flex-1">
                 <span class="block truncate text-sm font-bold leading-tight">Toko Ayam Aneka Jaya 33</span>
                 <span class="block truncate text-xs text-[var(--color-teks-lembut)]">
@@ -169,6 +175,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             {/* Hanya di layar lebar; di ponsel laci sudah selebar penuh, jadi menciutkannya tidak menambah ruang. */}
             <button
               id="ciutkan"
+              data-ciutkan
               type="button"
               class="hidden items-center gap-3 border-t border-[var(--color-garis)] px-5 py-3.5
                      text-sm text-[var(--color-teks-lembut)] hover:text-merah-700 md:flex"
@@ -284,6 +291,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
       (() => {
         const tombol = document.getElementById('ciutkan');
         const ikon = document.getElementById('ciutkan-ikon');
+        const pemicu = document.querySelectorAll('[data-ciutkan]');
         if (!tombol) return;
 
         const gambar = () => {
@@ -293,7 +301,8 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
           if (ikon) ikon.textContent = ciut ? '»' : '«';
         };
 
-        tombol.addEventListener('click', () => {
+        const balik = () => {
+          if (!matchMedia('(min-width: 768px)').matches) return;
           const ciut = document.documentElement.dataset.sidebar === 'ciut';
           if (ciut) delete document.documentElement.dataset.sidebar;
           else document.documentElement.dataset.sidebar = 'ciut';
@@ -304,8 +313,9 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             // Tidak bisa disimpan: pilihannya tetap berlaku untuk halaman ini.
           }
           gambar();
-        });
+        };
 
+        pemicu.forEach((el) => el.addEventListener('click', balik));
         gambar();
       })();
 
