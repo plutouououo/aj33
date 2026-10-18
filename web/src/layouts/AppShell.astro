@@ -275,12 +275,12 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             </main>
           </div>
 
-          {/* Di bawah tirai dan laci (z-20/30) seperti topbar, jadi laci yang dibuka "Lainnya" menutupinya. */}
+          {/* Di bawah tirai dan laci (z-20/30) seperti topbar; padding bawah menjauhkan tombol dari tepi layar dan garis gestur ponsel yang sering ikut tersentuh. */}
           <nav
             aria-label="Navigasi cepat"
             data-jejak-area="tab-bawah"
             class="fixed inset-x-0 bottom-0 z-[15] grid h-[var(--tinggi-tab-bawah)] auto-cols-fr grid-flow-col
-                   border-t border-[var(--color-garis)] bg-white md:hidden"
+                   border-t border-[var(--color-garis)] bg-white pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:hidden"
           >
             {tabTampil.map((m) => (
               <a

@@ -305,7 +305,7 @@
 
   /* --- Bilah tab bawah ponsel ------------------------------------------ */
 
-  /* Ikon di atas label, target sentuh setinggi bilah; aktif memakai merah merek seperti `.nav-tautan-aktif`. */
+  /* Ikon di atas label, target sentuh setinggi isi bilah (di atas ruang kosong dasarnya); aktif memakai merah merek seperti `.nav-tautan-aktif`. */
   .tab-bawah {
     @apply flex flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium
            text-stone-500;
@@ -616,7 +616,7 @@
 /* Di bawah md sidebar jadi laci layar penuh, jadi lebar ciut yang tersimpan di localStorage dipaksa normal (tombol Ciutkan tersembunyi di layar kecil, keadaan itu tak bisa diubah). */
 @media (max-width: 47.9375rem) {
   :root {
-    --tinggi-tab-bawah: 3.5rem;
+    --tinggi-tab-bawah: calc(4.5rem + env(safe-area-inset-bottom));
   }
   :root[data-sidebar='ciut'] {
     --lebar-sidebar: 15rem;
