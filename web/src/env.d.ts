@@ -14,6 +14,9 @@ declare global {
 interface ImportMetaEnv {
   readonly BACKEND_URL: string;
   readonly AZURE_BLOB_SAS_URL: string;
+  readonly VAPID_PUBLIC_KEY?: string;
+  readonly VAPID_PRIVATE_KEY?: string;
+  readonly VAPID_SUBJECT?: string;
 }
 
 export {};

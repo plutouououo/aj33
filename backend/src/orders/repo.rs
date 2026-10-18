@@ -16,6 +16,8 @@ pub struct OrderItem {
     pub item_name_snapshot: String,
     pub qty: i32,
     pub unit_price: Option<Decimal>,
+    pub model_sku: Option<String>,
+    pub model_name: Option<String>,
     /// Nama produk internal hasil pemetaan, kalau sudah dipetakan.
     pub product_name: Option<String>,
 }
@@ -31,9 +33,15 @@ pub struct Order {
     pub sla_deadline: Option<DateTime<Utc>>,
     pub total_amount: Option<Decimal>,
     pub shipping_carrier: Option<String>,
+    pub payment_method: Option<String>,
+    pub is_cod: bool,
     pub received_at: DateTime<Utc>,
     /// Id tiket packing bila sudah dibuat, dipakai UI untuk tahu apakah order masih menunggu tiket.
     pub ticket_id: Option<Uuid>,
+    pub recipient_name: Option<String>,
+    pub recipient_address: Option<String>,
+    pub recipient_city: Option<String>,
+    pub recipient_district: Option<String>,
     pub items: Vec<OrderItem>,
 }
 
@@ -47,8 +55,14 @@ struct OrderHead {
     sla_deadline: Option<DateTime<Utc>>,
     total_amount: Option<Decimal>,
     shipping_carrier: Option<String>,
+    payment_method: Option<String>,
+    is_cod: bool,
     received_at: DateTime<Utc>,
     ticket_id: Option<Uuid>,
+    recipient_name: Option<String>,
+    recipient_address: Option<String>,
+    recipient_city: Option<String>,
+    recipient_district: Option<String>,
 }
 
 async fn lengkapi(pool: &PgPool, head: OrderHead) -> AppResult<Order> {
@@ -56,7 +70,7 @@ async fn lengkapi(pool: &PgPool, head: OrderHead) -> AppResult<Order> {
         OrderItem,
         r#"
         SELECT i.id, i.product_id, i.external_item_ref, i.item_name_snapshot,
-               i.qty, i.unit_price, p.name AS "product_name?"
+               i.qty, i.unit_price, i.model_sku, i.model_name, p.name AS "product_name?"
         FROM external_order_items i
         LEFT JOIN products p ON p.id = i.product_id
         WHERE i.external_order_id = $1
@@ -77,28 +91,52 @@ async fn lengkapi(pool: &PgPool, head: OrderHead) -> AppResult<Order> {
         sla_deadline: head.sla_deadline,
         total_amount: head.total_amount,
         shipping_carrier: head.shipping_carrier,
+        payment_method: head.payment_method,
+        is_cod: head.is_cod,
         received_at: head.received_at,
         ticket_id: head.ticket_id,
+        recipient_name: head.recipient_name,
+        recipient_address: head.recipient_address,
+        recipient_city: head.recipient_city,
+        recipient_district: head.recipient_district,
         items,
     })
 }
 
-pub async fn list_orders(pool: &PgPool, status: Option<&str>, limit: i64) -> AppResult<Vec<Order>> {
+/// `tanpa_tiket` menyaring ke pesanan yang belum dikirim ke pengepak, antrean halaman Pesanan Masuk.
+pub async fn list_orders(
+    pool: &PgPool,
+    status: Option<&str>,
+    tanpa_tiket: bool,
+    limit: i64,
+) -> AppResult<Vec<Order>> {
     let heads = sqlx::query_as!(
         OrderHead,
         r#"
         SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id,
                o.status, o.sla_type, o.sla_deadline, o.total_amount,
-               o.shipping_carrier, o.received_at AS "received_at!",
-               t.id AS "ticket_id?"
+               o.shipping_carrier, o.payment_method, o.is_cod,
+               o.received_at AS "received_at!",
+               t.id AS "ticket_id?",
+               a.recipient_name AS "recipient_name?", a.full_address AS "recipient_address?",
+               a.city AS "recipient_city?", a.district AS "recipient_district?"
         FROM external_orders o
         JOIN platforms pl ON pl.id = o.platform_id
         LEFT JOIN tickets t ON t.external_order_id = o.id
+        LEFT JOIN LATERAL (
+            SELECT recipient_name, full_address, city, district
+            FROM order_shipping_address
+            WHERE external_order_id = o.id
+            ORDER BY created_at DESC
+            LIMIT 1
+        ) a ON true
         WHERE ($1::text IS NULL OR o.status = $1)
-        ORDER BY o.received_at DESC
-        LIMIT $2
+          AND (NOT $2::bool OR t.id IS NULL)
+        ORDER BY CASE WHEN $2 THEN o.sla_deadline END ASC NULLS LAST, o.received_at DESC
+        LIMIT $3
         "#,
         status,
+        tanpa_tiket,
         limit
     )
     .fetch_all(pool)
@@ -118,11 +156,21 @@ pub async fn find_order(pool: &PgPool, id: Uuid) -> AppResult<Option<Order>> {
         r#"
         SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id,
                o.status, o.sla_type, o.sla_deadline, o.total_amount,
-               o.shipping_carrier, o.received_at AS "received_at!",
-               t.id AS "ticket_id?"
+               o.shipping_carrier, o.payment_method, o.is_cod,
+               o.received_at AS "received_at!",
+               t.id AS "ticket_id?",
+               a.recipient_name AS "recipient_name?", a.full_address AS "recipient_address?",
+               a.city AS "recipient_city?", a.district AS "recipient_district?"
         FROM external_orders o
         JOIN platforms pl ON pl.id = o.platform_id
         LEFT JOIN tickets t ON t.external_order_id = o.id
+        LEFT JOIN LATERAL (
+            SELECT recipient_name, full_address, city, district
+            FROM order_shipping_address
+            WHERE external_order_id = o.id
+            ORDER BY created_at DESC
+            LIMIT 1
+        ) a ON true
         WHERE o.id = $1
         "#,
         id
@@ -372,4 +420,164 @@ pub async fn delete_mapping(pool: &PgPool, product_id: Uuid, mapping_id: Uuid) -
     .await?;
 
     Ok(hasil.rows_affected() > 0)
+}
+
+// --- Pesanan dari label pengiriman Shopee ---
+
+/// Produk jual dengan SKU ini; produk induk bervarian dilewati karena stoknya hidup di varian.
+pub async fn produk_dari_sku(pool: &PgPool, sku: &str) -> AppResult<Option<Uuid>> {
+    let id = sqlx::query_scalar!(
+        r#"
+        SELECT p.id
+        FROM products p
+        WHERE upper(p.sku) = upper($1)
+          AND p.is_active
+          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)
+        "#,
+        sku
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(id)
+}
+
+pub struct LabelBarisBaru {
+    pub product_id: Uuid,
+    pub name: String,
+    pub sku: String,
+    pub variation: Option<String>,
+    pub qty: i32,
+}
+
+pub struct LabelBaru<'a> {
+    pub platform_id: Uuid,
+    pub order_sn: &'a str,
+    pub sla_type: &'a str,
+    pub sla_deadline: DateTime<Utc>,
+    pub payment_label: &'a str,
+    pub is_cod: bool,
+    pub shipping_carrier: &'a str,
+    pub recipient_name: &'a str,
+    pub address: &'a str,
+    pub city: &'a str,
+    pub district: &'a str,
+    pub raw_payload: serde_json::Value,
+    pub items: &'a [LabelBarisBaru],
+}
+
+/// Mencatat pesanan, penerimanya, dan barangnya sekaligus; `None` bila nomor pesanan sudah ada, karena label yang sama sering terunggah ulang dan pesanan lama mungkin sudah bertiket.
+pub async fn insert_pesanan_label(pool: &PgPool, label: &LabelBaru<'_>) -> AppResult<Option<Uuid>> {
+    let mut tx = pool.begin().await?;
+
+    let Some(order_id) = sqlx::query_scalar!(
+        r#"
+        INSERT INTO external_orders
+            (platform_id, external_order_id, status, sla_type, sla_deadline,
+             payment_method, is_cod, shipping_carrier, raw_payload)
+        VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (platform_id, external_order_id) DO NOTHING
+        RETURNING id
+        "#,
+        label.platform_id,
+        label.order_sn,
+        label.sla_type,
+        label.sla_deadline,
+        label.payment_label,
+        label.is_cod,
+        label.shipping_carrier,
+        label.raw_payload
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+
+    // Label tak memuat telepon penerima, jadi pembeli yang sama dikenali dari nama dan alamatnya.
+    let customer_id = match sqlx::query_scalar!(
+        r#"
+        SELECT id FROM customers
+        WHERE source = 'marketplace' AND name = $1 AND address = $2
+        ORDER BY created_at
+        LIMIT 1
+        "#,
+        label.recipient_name,
+        label.address
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    {
+        Some(id) => {
+            sqlx::query!(
+                "UPDATE customers SET city = $2, district = $3, updated_at = now() WHERE id = $1",
+                id,
+                label.city,
+                label.district
+            )
+            .execute(&mut *tx)
+            .await?;
+            id
+        }
+        None => {
+            sqlx::query_scalar!(
+                r#"
+                INSERT INTO customers (name, address, city, district, source)
+                VALUES ($1, $2, $3, $4, 'marketplace')
+                RETURNING id
+                "#,
+                label.recipient_name,
+                label.address,
+                label.city,
+                label.district
+            )
+            .fetch_one(&mut *tx)
+            .await?
+        }
+    };
+
+    sqlx::query!(
+        "UPDATE external_orders SET customer_id = $2 WHERE id = $1",
+        order_id,
+        customer_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query!(
+        r#"
+        INSERT INTO order_shipping_address
+            (external_order_id, recipient_name, full_address, city, district)
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+        order_id,
+        label.recipient_name,
+        label.address,
+        label.city,
+        label.district
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    for item in label.items {
+        sqlx::query!(
+            r#"
+            INSERT INTO external_order_items
+                (external_order_id, product_id, item_name_snapshot, qty, model_sku, model_name)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+            order_id,
+            item.product_id,
+            item.name,
+            item.qty,
+            item.sku,
+            item.variation
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    Ok(Some(order_id))
 }

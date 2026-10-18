@@ -1,6 +1,6 @@
 /* Service worker sempit: aplikasi bisa dipasang, aset statis dari cache, halaman offline; halaman TIDAK di-cache (stok berubah, salinan lama bisa membuat kasir menjual barang habis). */
 
-const VERSI = 'aj33-v1';
+const VERSI = 'aj33-v2';
 const HALAMAN_OFFLINE = '/offline';
 
 const ASET_AWAL = [HALAMAN_OFFLINE, '/manifest.webmanifest', '/ikon.svg'];
@@ -59,5 +59,39 @@ self.addEventListener('fetch', (event) => {
           return res;
         }),
     ),
+  );
+});
+
+// Isi notifikasi dikirim server Astro (`lib/push.ts`) sebagai JSON { title, body, url }.
+self.addEventListener('push', (event) => {
+  let isi = { title: 'AJ33', body: '', url: '/tiket' };
+  try {
+    isi = { ...isi, ...event.data.json() };
+  } catch {
+    // Push tanpa isi JSON tetap ditampilkan dengan judul bawaan.
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(isi.title, {
+      body: isi.body,
+      icon: '/ikon-192.png',
+      badge: '/ikon-192.png',
+      data: { url: isi.url },
+      tag: 'tiket-baru',
+      renotify: true,
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url ?? '/tiket', self.location.origin).href;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((jendela) => {
+      const ada = jendela.find((j) => j.url.startsWith(self.location.origin));
+      if (ada) return ada.navigate(url).then((j) => (j ?? ada).focus());
+      return self.clients.openWindow(url);
+    }),
   );
 });

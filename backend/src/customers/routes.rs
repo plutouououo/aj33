@@ -1,7 +1,7 @@
 //! Endpoint pelanggan.
 
 use super::repo::{
-    self, Customer, CustomerFilter, CustomerPatch, FavoriteProduct, PurchaseRow, Urutan,
+    self, Customer, CustomerFilter, CustomerPatch, FavoriteProduct, PurchaseRow, Urutan, Wilayah,
 };
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
@@ -31,6 +31,7 @@ const NAMA_MAKS: usize = 150;
 const TELEPON_MAKS: usize = 30;
 /// `address` TEXT tanpa batas di database; batas di sini soal yang masuk akal diketik sebagai alamat agar kolom tak jadi tempat menempel apa saja.
 const ALAMAT_MAKS: usize = 500;
+const WILAYAH_MAKS: usize = 100;
 
 /// Riwayat dan produk favorit yang ikut pada halaman detail.
 const RIWAYAT: i64 = 20;
@@ -159,6 +160,8 @@ struct CustomerCreateRequest {
     name: String,
     phone: Option<String>,
     address: Option<String>,
+    city: Option<String>,
+    district: Option<String>,
 }
 
 async fn create_customer(
@@ -172,7 +175,11 @@ async fn create_customer(
     periksa_nama(name)?;
 
     let phone = bersihkan(body.phone, TELEPON_MAKS, "Nomor telepon")?;
-    let address = bersihkan(body.address, ALAMAT_MAKS, "Alamat")?;
+    let wilayah = Wilayah {
+        address: bersihkan(body.address, ALAMAT_MAKS, "Alamat")?,
+        city: bersihkan(body.city, WILAYAH_MAKS, "Kabupaten/kota")?,
+        district: bersihkan(body.district, WILAYAH_MAKS, "Kecamatan")?,
+    };
 
     if let Some(phone) = phone.as_deref() {
         // Pelanggan langganan yang kembali tak jadi baris baru; dijawab 200, bukan 201, karena tak ada yang dibuat.
@@ -181,8 +188,7 @@ async fn create_customer(
         }
     }
 
-    let customer =
-        repo::insert_customer(&state.pool, name, phone.as_deref(), address.as_deref()).await?;
+    let customer = repo::insert_customer(&state.pool, name, phone.as_deref(), &wilayah).await?;
     Ok((axum::http::StatusCode::CREATED, Json(customer)))
 }
 
@@ -194,6 +200,10 @@ struct CustomerUpdateRequest {
     phone: Option<Option<String>>,
     #[serde(default, deserialize_with = "sebut")]
     address: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sebut")]
+    city: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sebut")]
+    district: Option<Option<String>>,
 }
 
 /// Membedakan "tak disebut" dari "disebut null"; tanpa ini serde memetakan keduanya ke `None` dan mengosongkan telepon mustahil.
@@ -229,6 +239,14 @@ async fn update_customer(
         },
         address: match body.address {
             Some(v) => Some(bersihkan(v, ALAMAT_MAKS, "Alamat")?),
+            None => None,
+        },
+        city: match body.city {
+            Some(v) => Some(bersihkan(v, WILAYAH_MAKS, "Kabupaten/kota")?),
+            None => None,
+        },
+        district: match body.district {
+            Some(v) => Some(bersihkan(v, WILAYAH_MAKS, "Kecamatan")?),
             None => None,
         },
     };

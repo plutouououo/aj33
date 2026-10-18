@@ -2,6 +2,6 @@
 
 mod repo;
 mod routes;
-mod service;
+pub mod service;
 
 pub use routes::router;

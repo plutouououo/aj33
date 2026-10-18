@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT product_id, qty FROM ticket_items WHERE ticket_id = $1",
+  "query": "SELECT product_id, qty, batch_id FROM ticket_items WHERE ticket_id = $1",
   "describe": {
     "columns": [
       {
@@ -12,6 +12,11 @@
         "ordinal": 1,
         "name": "qty",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "batch_id",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -21,8 +26,9 @@
     },
     "nullable": [
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "ad6ff83f2aaac25fad4ad5695ed8c01f9153a66b9688ac1fe7547dce4488479c"
+  "hash": "86f695fa557c970776fee54730b77b6c486d06479234ab5e68e594b3cb2b8581"
 }

@@ -10,10 +10,8 @@ use uuid::Uuid;
 /// Alasan stok berubah menentukan `reference_type`, keduanya dibatasi CHECK sehingga pasangan salah baru ketahuan saat INSERT ditolak.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StockReason {
-    /// Penjualan POS.
+    /// Penjualan POS, termasuk pesanan marketplace yang tiketnya selesai.
     Sale,
-    /// Serah-terima tiket packing untuk order marketplace.
-    ExternalOrder,
     /// Koreksi manual oleh Owner.
     ManualAdjustment,
     /// Barang masuk sebagai batch lengkap dengan kedaluwarsa, dibedakan dari koreksi manual agar ledger menjawab "datang dari kiriman mana".
@@ -26,7 +24,6 @@ impl StockReason {
     fn as_str(self) -> &'static str {
         match self {
             Self::Sale => "sale",
-            Self::ExternalOrder => "external_order",
             Self::ManualAdjustment => "manual_adjustment",
             Self::Restock => "restock",
             Self::VoidReversal => "void_reversal",
@@ -37,7 +34,6 @@ impl StockReason {
         match self {
             // Void mengacu balik ke transaksi yang dibatalkan, sama seperti penjualan aslinya.
             Self::Sale | Self::VoidReversal => "transaction",
-            Self::ExternalOrder => "external_order",
             // Batch masuk tak berasal dari transaksi/pesanan; "manual" satu-satunya nilai CHECK untuk asal seperti itu.
             Self::ManualAdjustment | Self::Restock => "manual",
         }
@@ -586,10 +582,6 @@ mod tests {
     #[test]
     fn alasan_dan_reference_type_berpasangan_sesuai_check_constraint() {
         assert_eq!(StockReason::Sale.reference_type(), "transaction");
-        assert_eq!(
-            StockReason::ExternalOrder.reference_type(),
-            "external_order"
-        );
         assert_eq!(StockReason::ManualAdjustment.reference_type(), "manual");
         assert_eq!(StockReason::Restock.as_str(), "restock");
         assert_eq!(StockReason::Restock.reference_type(), "manual");

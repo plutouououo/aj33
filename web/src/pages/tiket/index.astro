@@ -2,6 +2,7 @@
 import AppShell from '../../layouts/AppShell.astro';
 import { api, type Ticket } from '../../lib/api';
 import { waktu } from '../../lib/format';
+import { kunciPublikVapid } from '../../lib/push';
 import { LABEL_STATUS, URUTAN_STATUS, kelasLencana } from '../../lib/tiket';
 
 const user = Astro.locals.user!;
@@ -19,10 +20,25 @@ if (punyaku) kueri.set('mine', 'true');
 const terkirim = kueri.toString();
 
 const daftar = await api<Ticket[]>(`/tickets${terkirim ? `?${terkirim}` : ''}`, { token });
+const kunciVapid = kunciPublikVapid();
 const sekarang = Date.now();
 ---
 
 <AppShell judul="Tiket" user={user}>
+  {/* Langganan push butuh JavaScript; tanpa JS atau tanpa dukungan browser bagian ini tetap tersembunyi dan halaman bekerja seperti biasa. */}
+  {
+    kunciVapid && (
+      <div class="kartu mb-5 flex flex-wrap items-center justify-between gap-3" data-notifikasi={kunciVapid} hidden>
+        <p class="text-sm" data-notifikasi-teks>
+          Nyalakan notifikasi agar perangkat ini berbunyi saat ada tiket baru.
+        </p>
+        <button class="tombol-utama" type="button" data-notifikasi-tombol>
+          Aktifkan notifikasi
+        </button>
+      </div>
+    )
+  }
+
   <div class="mb-5 flex flex-wrap items-end justify-between gap-4">
     <p class="text-sm text-[var(--color-teks-lembut)]">
       {daftar.length} tiket · yang paling mendesak di atas
@@ -118,3 +134,59 @@ const sekarang = Date.now();
     </table>
   </div>
 </AppShell>
+
+<script>
+  /** Kunci VAPID (base64url) diubah ke byte, bentuk yang diminta `pushManager.subscribe`. */
+  function keByte(kunci: string): Uint8Array<ArrayBuffer> {
+    const b64 = (kunci + '='.repeat((4 - (kunci.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+    return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  }
+
+  async function simpan(langganan: PushSubscription): Promise<boolean> {
+    const res = await fetch('/notifikasi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(langganan),
+    });
+    return res.ok;
+  }
+
+  async function siapkan(): Promise<void> {
+    const wadah = document.querySelector<HTMLElement>('[data-notifikasi]');
+    if (!wadah || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    const tombol = wadah.querySelector<HTMLButtonElement>('[data-notifikasi-tombol]')!;
+    const teks = wadah.querySelector<HTMLElement>('[data-notifikasi-teks]')!;
+    const reg = await navigator.serviceWorker.ready;
+    const ada = await reg.pushManager.getSubscription();
+
+    // Perangkat yang sudah berlangganan dikirim ulang agar terikat ke akun yang sedang login (perangkat bisa berganti akun).
+    if (ada && Notification.permission === 'granted') {
+      await simpan(ada);
+      return;
+    }
+
+    wadah.hidden = false;
+    tombol.addEventListener('click', async () => {
+      tombol.disabled = true;
+      try {
+        if ((await Notification.requestPermission()) !== 'granted') {
+          teks.textContent = 'Izin notifikasi ditolak. Buka pengaturan situs di browser untuk mengizinkannya.';
+          return;
+        }
+        const langganan = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: keByte(wadah.dataset.notifikasi!),
+        });
+        if (await simpan(langganan)) wadah.hidden = true;
+        else teks.textContent = 'Notifikasi gagal diaktifkan. Coba lagi.';
+      } catch {
+        teks.textContent = 'Browser ini tidak mendukung notifikasi. Di iPhone, tambahkan aplikasi ke Layar Utama dulu.';
+      } finally {
+        tombol.disabled = false;
+      }
+    });
+  }
+
+  siapkan();
+</script>

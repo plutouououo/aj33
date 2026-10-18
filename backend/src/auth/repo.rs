@@ -1,6 +1,7 @@
 //! Akses tabel `users`, hanya membaca dan menulis baris tanpa aturan bisnis.
 
 use crate::error::AppResult;
+use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -69,4 +70,27 @@ pub async fn update_password(pool: &PgPool, id: Uuid, password_hash: &str) -> Ap
     .await?;
 
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct Pengguna {
+    pub id: Uuid,
+    pub name: String,
+    pub role: String,
+}
+
+pub async fn list_aktif(pool: &PgPool, role: Option<&str>) -> AppResult<Vec<Pengguna>> {
+    let rows = sqlx::query_as!(
+        Pengguna,
+        r#"
+        SELECT id, name, role FROM users
+        WHERE is_active AND ($1::text IS NULL OR role = $1)
+        ORDER BY name
+        "#,
+        role
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
 }

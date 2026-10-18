@@ -4,20 +4,72 @@ use super::repo::{self, TiketTerkunci};
 use super::TicketStatus;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
-use crate::stock::{self, StockLine, StockReason};
-use sqlx::PgPool;
+use crate::pos::service::{
+    self as pos, CheckoutInput, CheckoutItem, PaymentMethod, SalesChannel, TransactionType,
+};
+use crate::stock::{self, StockLine};
+use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// Membuat tiket pesanan marketplace; barang yang listing-nya belum dipetakan membuatnya DITOLAK agar paket tak kurang, dan Owner diberi tahu barang yang perlu dipetakan.
 pub async fn buat(pool: &PgPool, external_order_id: Uuid, notes: Option<&str>) -> AppResult<Uuid> {
     let mut tx = pool.begin().await?;
+    let ticket_id = buat_dalam(&mut tx, external_order_id, notes, &HashMap::new()).await?;
+    tx.commit().await?;
 
-    if !repo::ada_pesanan(&mut tx, external_order_id).await? {
+    Ok(ticket_id)
+}
+
+/// Satu pesanan yang dikirim owner beserta batch pilihannya per produk; produk tanpa pilihan diambil FEFO.
+pub struct PesananKirim {
+    pub external_order_id: Uuid,
+    pub batches: HashMap<Uuid, Uuid>,
+}
+
+/// Mengirim sekumpulan pesanan sebagai tiket ke satu pengepak sekaligus; semuanya atau tidak sama sekali, agar owner tak perlu menebak pesanan mana yang sudah terkirim.
+pub async fn kirim(
+    pool: &PgPool,
+    pesanan: &[PesananKirim],
+    kepada: Uuid,
+    oleh: CurrentUser,
+) -> AppResult<Vec<Uuid>> {
+    if pesanan.is_empty() {
+        return Err(AppError::bad_request("Pilih minimal satu pesanan."));
+    }
+
+    let mut tx = pool.begin().await?;
+
+    if !repo::bisa_mengepak(&mut tx, kepada).await? {
+        return Err(AppError::bad_request(
+            "Tiket hanya bisa dikirim ke pengguna aktif berperan pengepak atau owner.",
+        ));
+    }
+
+    let mut tiket = Vec::with_capacity(pesanan.len());
+    for p in pesanan {
+        let id = buat_dalam(&mut tx, p.external_order_id, None, &p.batches).await?;
+        repo::set_penugasan(&mut tx, id, kepada, oleh.id).await?;
+        repo::set_status_pesanan(&mut tx, p.external_order_id, "processing").await?;
+        tiket.push(id);
+    }
+
+    tx.commit().await?;
+
+    Ok(tiket)
+}
+
+/// Membuat tiket pesanan marketplace; barang yang listing-nya belum dipetakan membuatnya DITOLAK agar paket tak kurang, dan Owner diberi tahu barang yang perlu dipetakan.
+async fn buat_dalam(
+    tx: &mut Transaction<'_, Postgres>,
+    external_order_id: Uuid,
+    notes: Option<&str>,
+    batches: &HashMap<Uuid, Uuid>,
+) -> AppResult<Uuid> {
+    if !repo::ada_pesanan(tx, external_order_id).await? {
         return Err(AppError::not_found("Pesanan tidak ditemukan."));
     }
 
-    let baris = repo::baris_pesanan(&mut tx, external_order_id).await?;
+    let baris = repo::baris_pesanan(tx, external_order_id).await?;
     if baris.is_empty() {
         return Err(AppError::conflict(
             "Pesanan ini belum punya rincian barang, jadi tiket packing belum bisa dibuat.",
@@ -55,16 +107,17 @@ pub async fn buat(pool: &PgPool, external_order_id: Uuid, notes: Option<&str>) -
         &baris
             .iter()
             .filter_map(|b| {
+                let product_id = b.product_id?;
                 Some(StockLine {
-                    product_id: b.product_id?,
+                    product_id,
                     qty: b.qty,
-                    batch_id: None,
+                    batch_id: batches.get(&product_id).copied(),
                 })
             })
             .collect::<Vec<_>>(),
     );
 
-    let ticket_id = repo::insert_ticket(&mut tx, external_order_id, notes)
+    let ticket_id = repo::insert_ticket(tx, external_order_id, notes)
         .await?
         .ok_or_else(|| AppError::conflict("Pesanan ini sudah punya tiket packing."))?;
 
@@ -74,10 +127,24 @@ pub async fn buat(pool: &PgPool, external_order_id: Uuid, notes: Option<&str>) -
             .map(String::as_str)
             .unwrap_or("Produk tanpa nama");
 
-        repo::insert_item(&mut tx, ticket_id, line.product_id, nama_produk, line.qty).await?;
-    }
+        if let Some(batch_id) = line.batch_id {
+            if !repo::batch_milik_produk(tx, batch_id, line.product_id).await? {
+                return Err(AppError::bad_request(format!(
+                    "Batch yang dipilih bukan milik \"{nama_produk}\"."
+                )));
+            }
+        }
 
-    tx.commit().await?;
+        repo::insert_item(
+            tx,
+            ticket_id,
+            line.product_id,
+            nama_produk,
+            line.qty,
+            line.batch_id,
+        )
+        .await?;
+    }
 
     Ok(ticket_id)
 }
@@ -117,7 +184,7 @@ pub async fn tugaskan(
     Ok(())
 }
 
-/// Memindahkan status satu langkah; stok pesanan marketplace berkurang hanya saat `handed_over` (barang ke kurir), bukan lebih awal.
+/// Memindahkan status satu langkah; pesanan baru tercatat sebagai penjualan dan stoknya berkurang saat `handed_over` (barang keluar), bukan lebih awal.
 pub async fn pindah_status(
     pool: &PgPool,
     ticket_id: Uuid,
@@ -137,26 +204,7 @@ pub async fn pindah_status(
     }
 
     if tujuan == TicketStatus::HandedOver {
-        let lines: Vec<StockLine> = repo::baris_stok(&mut tx, ticket_id)
-            .await?
-            .into_iter()
-            .map(|b| StockLine {
-                product_id: b.product_id,
-                qty: b.qty,
-                // Pesanan marketplace tak lewat meja kasir sehingga tak ada yang memilih batch: FEFO satu-satunya aturan.
-                batch_id: None,
-            })
-            .collect();
-
-        // `reference_id` menunjuk pesanan, bukan tiket (pasangan `reference_type = 'external_order'`), yang dicari saat menelusuri kenapa stok berkurang.
-        stock::kurangi(
-            &mut tx,
-            &lines,
-            StockReason::ExternalOrder,
-            tiket.external_order_id,
-            Some(oleh.id),
-        )
-        .await?;
+        catat_penjualan(pool, &mut tx, tiket.external_order_id, ticket_id, oleh).await?;
     }
 
     repo::set_status(
@@ -198,6 +246,58 @@ pub async fn tandai_item(
     tx.commit().await?;
 
     Ok(())
+}
+
+/// Penjualan lewat jalur kasir yang sama (harga kanal, potongan Shopee, ledger stok) agar laporan, void, dan riwayat pelanggan memperlakukannya seperti transaksi lain; kunci idempotensinya id pesanan.
+async fn catat_penjualan(
+    pool: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
+    external_order_id: Uuid,
+    ticket_id: Uuid,
+    oleh: CurrentUser,
+) -> AppResult<()> {
+    let pesanan = repo::info_pesanan(tx, external_order_id).await?;
+    let sales_channel = match pesanan.platform_name.as_str() {
+        "shopee" => SalesChannel::Shopee,
+        "tiktok" | "tokopedia" => SalesChannel::Tiktok,
+        lain => {
+            return Err(AppError::conflict(format!(
+                "Pesanan platform \"{lain}\" belum bisa dicatat sebagai penjualan."
+            )))
+        }
+    };
+
+    let items = repo::baris_stok(tx, ticket_id)
+        .await?
+        .into_iter()
+        .map(|b| CheckoutItem {
+            product_id: b.product_id,
+            qty: b.qty,
+            batch_id: b.batch_id,
+        })
+        .collect();
+
+    let transaction_id = pos::catat_dari_pesanan(
+        pool,
+        tx,
+        &CheckoutInput {
+            idempotency_key: format!("pesanan:{external_order_id}"),
+            transaction_type: TransactionType::PreOrder,
+            customer_id: pesanan.customer_id,
+            payment_method: PaymentMethod::Ewallet,
+            sales_channel,
+            amount_paid: None,
+            shipping_cost: None,
+            shipping_borne_by_store: false,
+            platform_commission_fee_percent: None,
+            platform_service_fee_percent: None,
+            items,
+            cashier_user_id: oleh.id,
+        },
+    )
+    .await?;
+
+    repo::tautkan_penjualan(tx, external_order_id, transaction_id).await
 }
 
 async fn ambil_terkunci(

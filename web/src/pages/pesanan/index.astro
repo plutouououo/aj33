@@ -1,0 +1,271 @@
+---
+import Galat from '../../components/Galat.astro';
+import Peringatan from '../../components/Peringatan.astro';
+import AppShell from '../../layouts/AppShell.astro';
+import {
+  api,
+  ApiRequestError,
+  type HasilLabel,
+  type Order,
+  type Pengguna,
+  type ProductBatch,
+} from '../../lib/api';
+import { tanggal, waktu } from '../../lib/format';
+import { bacaLabelPdf } from '../../lib/label-shopee';
+import { pesanDari, sesudahAksi } from '../../lib/pesan';
+import { kirimNotifikasi } from '../../lib/push';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const BATAS_BYTE = 10 * 1024 * 1024;
+
+let galat: string | null = null;
+let rincianGalat: string[] = [];
+let hasilLabel: HasilLabel[] | null = null;
+let halamanGagal: { halaman: number; pesan: string }[] = [];
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = String(form.get('aksi') ?? '');
+
+  if (aksi === 'unggah') {
+    const berkas = form.get('label');
+    if (!(berkas instanceof File) || berkas.size === 0) {
+      galat = 'Pilih PDF label pengiriman dulu.';
+    } else if (berkas.size > BATAS_BYTE) {
+      galat = `Ukuran PDF maksimal ${BATAS_BYTE / (1024 * 1024)} MB.`;
+    } else {
+      // Hasil per label ditampilkan langsung, bukan lewat redirect, karena rinciannya terlalu panjang untuk URL; unggah ulang aman karena label yang sama dijawab "sudah ada".
+      try {
+        const baca = await bacaLabelPdf(new Uint8Array(await berkas.arrayBuffer()));
+        halamanGagal = baca.gagal;
+        hasilLabel =
+          baca.labels.length > 0
+            ? await api<HasilLabel[]>('/orders/labels', {
+                method: 'POST',
+                token,
+                body: { labels: baca.labels },
+              })
+            : [];
+        if (baca.labels.length === 0 && baca.gagal.length === 0) {
+          galat = 'PDF ini tidak memuat label pengiriman.';
+        }
+      } catch (err) {
+        galat =
+          err instanceof ApiRequestError
+            ? err.message
+            : 'PDF tidak bisa dibaca. Pastikan ini label dari Seller Centre Shopee.';
+      }
+    }
+  } else if (aksi === 'kirim') {
+    const pengepak = String(form.get('pengepak') ?? '');
+    const dipilih = form.getAll('pesanan').map(String);
+
+    if (!pengepak) {
+      galat = 'Pilih pengepak tujuan.';
+    } else if (dipilih.length === 0) {
+      galat = 'Centang minimal satu pesanan untuk dikirim.';
+    } else {
+      // Nama isian `batch:<pesanan>:<produk>`; kosong berarti FEFO.
+      const orders = dipilih.map((order_id) => ({
+        order_id,
+        batches: [...form.entries()]
+          .filter(([k, v]) => k.startsWith(`batch:${order_id}:`) && String(v))
+          .map(([k, v]) => ({ product_id: k.split(':')[2], batch_id: String(v) })),
+      }));
+
+      try {
+        await api<{ ticket_ids: string[] }>('/tickets/bulk', {
+          method: 'POST',
+          token,
+          body: { user_id: pengepak, orders },
+        });
+        await kirimNotifikasi(token, pengepak, {
+          title: 'Tiket packing baru',
+          body: `${orders.length} pesanan menunggu diambil.`,
+          url: '/tiket',
+        });
+        return Astro.redirect(sesudahAksi(Astro.url, 'terkirim'), 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Tiket gagal dikirim.';
+      }
+    }
+  } else {
+    galat = 'Aksi tidak dikenal.';
+  }
+}
+
+const sukses = galat ? null : pesanDari(Astro.url, { terkirim: 'Tiket terkirim ke pengepak.' });
+
+if (hasilLabel) {
+  const gagalCatat = hasilLabel.filter((h) => h.status === 'gagal');
+  if (gagalCatat.length > 0 || halamanGagal.length > 0) {
+    galat ??= 'Sebagian label tidak tercatat.';
+    rincianGalat = [
+      ...halamanGagal.map((g) => `Halaman ${g.halaman}: ${g.pesan}`),
+      ...gagalCatat.map((h) => `${h.order_sn}: ${h.message}`),
+    ];
+  }
+}
+const dibuat = hasilLabel?.filter((h) => h.status === 'dibuat').length ?? 0;
+const sudahAda = hasilLabel?.filter((h) => h.status === 'sudah_ada').length ?? 0;
+
+const [pesanan, pengepak, batches] = await Promise.all([
+  api<Order[]>('/orders?status=new&pending_ticket=true', { token }),
+  api<Pengguna[]>('/users?role=pengepak', { token }),
+  api<ProductBatch[]>('/batches', { token }),
+]);
+
+const batchPer = new Map<string, ProductBatch[]>();
+for (const b of batches) {
+  batchPer.set(b.product_id, [...(batchPer.get(b.product_id) ?? []), b]);
+}
+
+/** Pilihan batch berbunyi seperti yang dicari di gudang: kedaluwarsa, rak, sisa. */
+function labelBatch(b: ProductBatch): string {
+  return [
+    b.expiry_date ? `exp ${tanggal(b.expiry_date)}` : (b.batch_number ?? 'tanpa tanggal'),
+    b.storage_location,
+    `sisa ${b.remaining_qty}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+const PENGIRIMAN: Record<string, string> = {
+  instant: 'Instant',
+  same_day: 'Sameday',
+  reguler: 'Reguler',
+};
+---
+
+<AppShell judul="Pesanan Masuk" user={user}>
+  <Galat pesan={galat} rincian={rincianGalat} class="mb-4" />
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+  {
+    hasilLabel && (dibuat > 0 || sudahAda > 0) && (
+      <p class="sukses mb-4">
+        {dibuat} pesanan baru tercatat{sudahAda > 0 && `, ${sudahAda} sudah pernah dicatat`}.
+      </p>
+    )
+  }
+
+  <section class="kartu mb-6">
+    <h2 class="mb-1 font-semibold">Unggah Label Shopee</h2>
+    <p class="mb-4 text-sm text-[var(--color-teks-lembut)]">
+      PDF hasil "Cetak Label" di Seller Centre, boleh berisi banyak label. Barang dicocokkan lewat SKU,
+      jadi SKU di Shopee harus sama dengan SKU di app.
+    </p>
+    <form method="POST" enctype="multipart/form-data" class="flex flex-wrap items-end gap-3">
+      <input type="hidden" name="aksi" value="unggah" />
+      <input class="kolom max-w-sm" type="file" name="label" accept="application/pdf" required />
+      <button class="tombol-utama" type="submit">Baca label</button>
+    </form>
+  </section>
+
+  {
+    pesanan.length === 0 ? (
+      <p class="text-sm text-stone-500">Tidak ada pesanan yang menunggu dikirim ke pengepak.</p>
+    ) : (
+      <form method="POST">
+        <input type="hidden" name="aksi" value="kirim" />
+
+        <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <p class="text-sm text-[var(--color-teks-lembut)]">
+            {pesanan.length} pesanan menunggu · tenggat terdekat di atas
+          </p>
+          {pengepak.length === 0 ? (
+            <Peringatan>Belum ada akun pengepak aktif untuk dikirimi tiket.</Peringatan>
+          ) : (
+            <div class="flex flex-wrap items-end gap-2">
+              <div>
+                <label class="label" for="pengepak">Kirim ke</label>
+                <select class="kolom w-48" id="pengepak" name="pengepak" required>
+                  {pengepak.map((p) => (
+                    <option value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button class="tombol-utama" type="submit">Kirim tiket terpilih</button>
+            </div>
+          )}
+        </div>
+
+        <ul class="flex flex-col gap-4">
+          {pesanan.map((o) => (
+            <li class="kartu">
+              <label class="flex cursor-pointer flex-wrap items-start gap-3">
+                <input class="mt-1 h-4 w-4" type="checkbox" name="pesanan" value={o.id} checked />
+                <div class="min-w-0 flex-1">
+                  <p class="font-semibold">
+                    {o.external_order_id}
+                    <span class="lencana-perlu-tindakan ml-2">
+                      {PENGIRIMAN[o.sla_type] ?? o.sla_type}
+                    </span>
+                    {o.is_cod && <span class="lencana-berjalan ml-1">COD</span>}
+                  </p>
+                  <p class="text-sm text-stone-600">
+                    {o.recipient_name ?? 'Tanpa nama'}
+                    {(o.recipient_district || o.recipient_city) &&
+                      ` · ${[o.recipient_district, o.recipient_city].filter(Boolean).join(', ')}`}
+                  </p>
+                  {o.recipient_address && (
+                    <p class="text-xs text-[var(--color-teks-samar)]">{o.recipient_address}</p>
+                  )}
+                </div>
+                <div class="text-right text-xs text-stone-500">
+                  {o.payment_method && <p>{o.payment_method}</p>}
+                  {o.sla_deadline && <p>Batas {waktu(o.sla_deadline)}</p>}
+                </div>
+              </label>
+
+              <div class="mt-3 overflow-x-auto">
+                <table class="w-full border-collapse text-sm">
+                  <thead>
+                    <tr class="border-b border-[var(--color-garis)] text-left text-xs uppercase tracking-wide text-stone-500">
+                      <th class="py-2 pr-4 font-semibold">Produk</th>
+                      <th class="py-2 pr-4 font-semibold">SKU</th>
+                      <th class="py-2 pr-4 font-semibold">Variasi</th>
+                      <th class="py-2 pr-4 text-right font-semibold">Qty</th>
+                      <th class="py-2 font-semibold">Ambil dari batch</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {o.items.map((it, i) => {
+                      const pilihan = it.product_id ? (batchPer.get(it.product_id) ?? []) : [];
+                      // Satu pilihan batch per produk; baris kedua produk yang sama ikut pilihan baris pertama.
+                      const pertama = o.items.findIndex((x) => x.product_id === it.product_id) === i;
+                      return (
+                        <tr class="border-b border-[var(--color-garis)] last:border-0">
+                          <td class="py-2 pr-4">{it.product_name ?? it.item_name_snapshot}</td>
+                          <td class="py-2 pr-4 font-mono text-xs">{it.model_sku ?? '-'}</td>
+                          <td class="py-2 pr-4">{it.model_name ?? '-'}</td>
+                          <td class="py-2 pr-4 text-right tabular-nums">{it.qty}</td>
+                          <td class="py-2">
+                            {it.product_id && pertama && (
+                              <select
+                                class="kolom min-w-56"
+                                name={`batch:${o.id}:${it.product_id}`}
+                                aria-label={`Batch ${it.product_name ?? it.item_name_snapshot}`}
+                              >
+                                <option value="">Otomatis (kedaluwarsa terdekat)</option>
+                                {pilihan.map((b) => (
+                                  <option value={b.id}>{labelBatch(b)}</option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </form>
+    )
+  }
+</AppShell>

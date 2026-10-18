@@ -2,7 +2,7 @@
 import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Ticket } from '../../lib/api';
-import { waktu } from '../../lib/format';
+import { tanggal, waktu } from '../../lib/format';
 import { LABEL_STATUS, kelasLencana, langkahBerikutnya, masihBisaDiambil } from '../../lib/tiket';
 
 const user = Astro.locals.user!;
@@ -62,6 +62,23 @@ const lanjut = tiket && boleh ? langkahBerikutnya(tiket.status) : null;
 const bisaDiambil =
   tiket !== null && masihBisaDiambil(tiket.status) && tiket.assigned_to_user_id !== user.id;
 const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
+
+const batchTeks = (it: Ticket['items'][number]) =>
+  it.batch_expiry ? `exp ${tanggal(it.batch_expiry)}` : it.batch_number;
+
+// Foto barang dikirim pengepak ke WhatsApp owner bersama isi tiket; ACC owner terjadi di WhatsApp, di luar aplikasi.
+const teksWa = tiket
+  ? [
+      `Tiket ${tiket.order_ref} (${tiket.platform_name})`,
+      ...tiket.items.map(
+        (it) => `- ${it.product_name_snapshot} x${it.qty}${batchTeks(it) ? ` (${batchTeks(it)})` : ''}`,
+      ),
+      tiket.assigned_to_name ? `Pengepak: ${tiket.assigned_to_name}` : '',
+      new URL(`/tiket/${tiket.id}`, Astro.url).href,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  : '';
 ---
 
 <AppShell judul={tiket?.order_ref ?? 'Tiket'} user={user}>
@@ -131,6 +148,7 @@ const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
                     </p>
                     <p class="text-xs text-stone-500">
                       Ambil {it.qty}
+                      {batchTeks(it) && <span class="ml-1.5">· batch {batchTeks(it)}</span>}
                       {/* Lokasi ditebalkan karena itu yang dicari pengepak lebih dulu, dan daftar urut per rak sehingga dibaca atas-bawah menyusuri gudang sekali jalan. */}
                       {it.storage_location ? (
                         <span class="ml-1.5 font-semibold text-merah-700">
@@ -188,6 +206,28 @@ const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
               </form>
             )}
 
+            {boleh && tiket.status === 'packed' && (
+              <div class="mb-4 flex flex-col gap-2" data-bagikan-wa>
+                <p class="text-sm text-stone-600">
+                  Kirim foto barang ke WhatsApp owner. Selesaikan tiket setelah owner ACC.
+                </p>
+                <label class="tombol-halus w-full cursor-pointer text-center" data-foto-label hidden>
+                  Ambil foto barang
+                  <input class="sr-only" type="file" accept="image/*" capture="environment" data-foto />
+                </label>
+                <a
+                  class="tombol-halus w-full text-center"
+                  href={`https://wa.me/?text=${encodeURIComponent(teksWa)}`}
+                  target="_blank"
+                  rel="noopener"
+                  data-wa
+                  data-teks={teksWa}
+                >
+                  Kirim ke WhatsApp
+                </a>
+              </div>
+            )}
+
             {lanjut && (
               <form method="POST">
                 <input type="hidden" name="aksi" value="status" />
@@ -200,8 +240,8 @@ const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
 
             {tiket.status === 'handed_over' && (
               <p class="text-sm text-emerald-800">
-                Selesai{tiket.completed_at && ` pada ${waktu(tiket.completed_at)}`}. Stok sudah
-                dikurangi.
+                Selesai{tiket.completed_at && ` pada ${waktu(tiket.completed_at)}`}. Penjualan sudah
+                tercatat dan stok sudah dikurangi.
               </p>
             )}
 
@@ -214,3 +254,31 @@ const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
     )
   }
 </AppShell>
+
+<script>
+  // Dengan Web Share, foto ikut terkirim bersama teks tiket; tanpa itu tautan wa.me biasa mengirim teksnya saja dan foto dilampirkan manual.
+  const wadah = document.querySelector<HTMLElement>('[data-bagikan-wa]');
+  const contoh = new File([''], 'cek.jpg', { type: 'image/jpeg' });
+  if (wadah && navigator.canShare?.({ files: [contoh] })) {
+    const input = wadah.querySelector<HTMLInputElement>('[data-foto]')!;
+    const label = wadah.querySelector<HTMLElement>('[data-foto-label]')!;
+    const tautan = wadah.querySelector<HTMLAnchorElement>('[data-wa]')!;
+    label.hidden = false;
+
+    input.addEventListener('change', () => {
+      const foto = input.files?.[0];
+      label.firstChild!.textContent = foto ? `Foto: ${foto.name} ` : 'Ambil foto barang ';
+    });
+
+    tautan.addEventListener('click', async (e) => {
+      const foto = input.files?.[0];
+      if (!foto) return;
+      e.preventDefault();
+      try {
+        await navigator.share({ files: [foto], text: tautan.dataset.teks });
+      } catch {
+        // Dibatalkan pengguna; tidak ada yang perlu dilakukan.
+      }
+    });
+  }
+</script>

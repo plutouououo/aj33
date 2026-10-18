@@ -13,7 +13,11 @@ pub struct TicketItem {
     pub product_name_snapshot: String,
     pub qty: i32,
     pub is_packed: bool,
-    /// Rak dibaca langsung dari batch bersisa (bukan salinan di `ticket_items`) karena lokasi harus yang SEKARANG; sejak migrasi 0016 bisa banyak rak, urut FEFO.
+    /// Batch pilihan owner saat mengirim tiket; `None` berarti FEFO saat tiket selesai.
+    pub batch_id: Option<Uuid>,
+    pub batch_number: Option<String>,
+    pub batch_expiry: Option<chrono::NaiveDate>,
+    /// Rak batch pilihan, atau tanpa pilihan dibaca dari batch bersisa urut FEFO; dibaca langsung (bukan salinan) karena lokasi harus yang SEKARANG.
     pub storage_location: Option<String>,
 }
 
@@ -55,8 +59,9 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
         TicketItem,
         r#"
         SELECT ti.id, ti.product_id, ti.product_name_snapshot, ti.qty,
-               ti.is_packed,
-               (
+               ti.is_packed, ti.batch_id,
+               pb.batch_number AS "batch_number?", pb.expiry_date AS "batch_expiry?",
+               CASE WHEN ti.batch_id IS NOT NULL THEN pb.storage_location ELSE (
                    -- Rak yang masih berisi, tanpa pengulangan dan urut FEFO (batch habis tak ikut); dikelompokkan per rak dulu karena `string_agg DISTINCT` tak menjamin urutan ORDER BY subkueri.
                    SELECT string_agg(rak.storage_location, ', '
                                      ORDER BY rak.exp NULLS LAST, rak.masuk)
@@ -70,11 +75,12 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
                          AND b.storage_location IS NOT NULL
                        GROUP BY b.storage_location
                    ) rak
-               ) AS storage_location
+               ) END AS storage_location
         FROM ticket_items ti
+        LEFT JOIN product_batches pb ON pb.id = ti.batch_id
         WHERE ti.ticket_id = $1
         -- Diurutkan per rak, bukan per nama, agar pengepak menyusuri gudang sekali jalan; barang tanpa lokasi jatuh ke bawah.
-        ORDER BY 6 ASC NULLS LAST, ti.product_name_snapshot, ti.id
+        ORDER BY 9 ASC NULLS LAST, ti.product_name_snapshot, ti.id
         "#,
         head.id
     )
@@ -230,16 +236,18 @@ pub async fn insert_item(
     product_id: Uuid,
     product_name_snapshot: &str,
     qty: i32,
+    batch_id: Option<Uuid>,
 ) -> AppResult<()> {
     sqlx::query!(
         r#"
-        INSERT INTO ticket_items (ticket_id, product_id, product_name_snapshot, qty)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO ticket_items (ticket_id, product_id, product_name_snapshot, qty, batch_id)
+        VALUES ($1, $2, $3, $4, $5)
         "#,
         ticket_id,
         product_id,
         product_name_snapshot,
-        qty
+        qty,
+        batch_id
     )
     .execute(&mut **tx)
     .await?;
@@ -378,6 +386,7 @@ pub async fn ada_yang_belum_dikemas(
 pub struct BarisStok {
     pub product_id: Uuid,
     pub qty: i32,
+    pub batch_id: Option<Uuid>,
 }
 
 pub async fn baris_stok(
@@ -386,11 +395,89 @@ pub async fn baris_stok(
 ) -> AppResult<Vec<BarisStok>> {
     let rows = sqlx::query_as!(
         BarisStok,
-        "SELECT product_id, qty FROM ticket_items WHERE ticket_id = $1",
+        "SELECT product_id, qty, batch_id FROM ticket_items WHERE ticket_id = $1",
         ticket_id
     )
     .fetch_all(&mut **tx)
     .await?;
 
     Ok(rows)
+}
+
+pub async fn batch_milik_produk(
+    tx: &mut Transaction<'_, Postgres>,
+    batch_id: Uuid,
+    product_id: Uuid,
+) -> AppResult<bool> {
+    let ada = sqlx::query_scalar!(
+        "SELECT EXISTS (SELECT 1 FROM product_batches WHERE id = $1 AND product_id = $2)",
+        batch_id,
+        product_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(ada.unwrap_or(false))
+}
+
+pub async fn set_status_pesanan(
+    tx: &mut Transaction<'_, Postgres>,
+    external_order_id: Uuid,
+    status: &str,
+) -> AppResult<()> {
+    sqlx::query!(
+        "UPDATE external_orders SET status = $2, updated_at = now() WHERE id = $1",
+        external_order_id,
+        status
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+pub struct InfoPesanan {
+    pub platform_name: String,
+    pub customer_id: Option<Uuid>,
+}
+
+pub async fn info_pesanan(
+    tx: &mut Transaction<'_, Postgres>,
+    external_order_id: Uuid,
+) -> AppResult<InfoPesanan> {
+    let row = sqlx::query_as!(
+        InfoPesanan,
+        r#"
+        SELECT pl.platform_name, o.customer_id
+        FROM external_orders o
+        JOIN platforms pl ON pl.id = o.platform_id
+        WHERE o.id = $1
+        "#,
+        external_order_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(row)
+}
+
+/// Pesanan yang barangnya sudah keluar ditautkan ke penjualannya, agar dari pesanan bisa ditelusuri transaksi mana yang mengurangi stoknya.
+pub async fn tautkan_penjualan(
+    tx: &mut Transaction<'_, Postgres>,
+    external_order_id: Uuid,
+    transaction_id: Uuid,
+) -> AppResult<()> {
+    sqlx::query!(
+        r#"
+        UPDATE external_orders
+        SET status = 'shipped', transaction_id = $2, updated_at = now()
+        WHERE id = $1
+        "#,
+        external_order_id,
+        transaction_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }

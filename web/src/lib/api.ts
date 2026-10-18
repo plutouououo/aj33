@@ -242,6 +242,9 @@ export interface Customer {
   phone: string | null;
   /** Alamat antar. `null` untuk pembeli yang datang ke toko. */
   address: string | null;
+  /** Kabupaten/kota dan kecamatan, terisi otomatis dari label pengiriman Shopee. */
+  city: string | null;
+  district: string | null;
   /** `walk_in` untuk yang dibuat di kasir, `marketplace` untuk hasil impor. */
   source: string;
   created_at: string;
@@ -303,7 +306,11 @@ export interface TicketItem {
   product_name_snapshot: string;
   qty: number;
   is_packed: boolean;
-  /** Rak tempat barang masih ada, urut FEFO dipisah koma, dibaca dari batch bersisa sehingga selalu keadaan sekarang. */
+  /** Batch pilihan owner saat mengirim tiket; `null` berarti FEFO saat tiket selesai. */
+  batch_id: string | null;
+  batch_number: string | null;
+  batch_expiry: string | null;
+  /** Rak batch pilihan, atau tanpa pilihan rak tempat barang masih ada urut FEFO dipisah koma; selalu keadaan sekarang. */
   storage_location: string | null;
 }
 
@@ -321,6 +328,59 @@ export interface Ticket {
   completed_at: string | null;
   notes: string | null;
   items: TicketItem[];
+}
+
+// --- Pesanan marketplace ---
+
+export interface OrderItem {
+  id: string;
+  product_id: string | null;
+  item_name_snapshot: string;
+  qty: number;
+  model_sku: string | null;
+  model_name: string | null;
+  /** Nama produk di app; ditampilkan menggantikan nama listing marketplace. */
+  product_name: string | null;
+}
+
+export interface Order {
+  id: string;
+  platform_name: string;
+  external_order_id: string;
+  status: string;
+  sla_type: 'instant' | 'same_day' | 'reguler';
+  sla_deadline: string | null;
+  shipping_carrier: string | null;
+  payment_method: string | null;
+  is_cod: boolean;
+  received_at: string;
+  ticket_id: string | null;
+  recipient_name: string | null;
+  recipient_address: string | null;
+  recipient_city: string | null;
+  recipient_district: string | null;
+  items: OrderItem[];
+}
+
+/** Jawaban `POST /orders/labels` per label. */
+export interface HasilLabel {
+  order_sn: string;
+  status: 'dibuat' | 'sudah_ada' | 'gagal';
+  order_id: string | null;
+  message: string | null;
+}
+
+/** Pengguna aktif dari `GET /users`, untuk memilih pengepak. */
+export interface Pengguna {
+  id: string;
+  name: string;
+  role: Role;
+}
+
+export interface LanggananPush {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
 }
 
 // --- Dasbor dan laporan ---

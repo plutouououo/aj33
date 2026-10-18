@@ -15,6 +15,9 @@ pub struct Customer {
     pub phone: Option<String>,
     /// Alamat antar. `null` untuk pembeli yang datang ke toko.
     pub address: Option<String>,
+    /// Kabupaten/kota dan kecamatan, terisi otomatis dari label pengiriman Shopee.
+    pub city: Option<String>,
+    pub district: Option<String>,
     /// `walk_in` untuk yang dibuat di kasir, `marketplace` untuk hasil impor.
     pub source: String,
     pub created_at: DateTime<Utc>,
@@ -67,7 +70,7 @@ pub async fn list_customers(
     let rows = sqlx::query_as!(
         Customer,
         r#"
-        SELECT c.id, c.name, c.phone, c.address, c.source,
+        SELECT c.id, c.name, c.phone, c.address, c.city, c.district, c.source,
                c.created_at                       AS "created_at!",
                COALESCE(b.jumlah, 0)              AS "purchase_count!",
                COALESCE(b.total, 0)               AS "total_spent!",
@@ -132,7 +135,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Customer>> 
     let row = sqlx::query_as!(
         Customer,
         r#"
-        SELECT c.id, c.name, c.phone, c.address, c.source,
+        SELECT c.id, c.name, c.phone, c.address, c.city, c.district, c.source,
                c.created_at                                          AS "created_at!",
                (SELECT count(*) FROM transactions t
                 WHERE t.customer_id = c.id AND t.status = 'completed') AS "purchase_count!",
@@ -176,17 +179,19 @@ pub async fn insert_customer(
     pool: &PgPool,
     name: &str,
     phone: Option<&str>,
-    address: Option<&str>,
+    wilayah: &Wilayah,
 ) -> AppResult<Customer> {
     let id = sqlx::query_scalar!(
         r#"
-        INSERT INTO customers (name, phone, address, source)
-        VALUES ($1, $2, $3, 'walk_in')
+        INSERT INTO customers (name, phone, address, city, district, source)
+        VALUES ($1, $2, $3, $4, $5, 'walk_in')
         RETURNING id
         "#,
         name,
         phone,
-        address
+        wilayah.address.as_deref(),
+        wilayah.city.as_deref(),
+        wilayah.district.as_deref()
     )
     .fetch_one(pool)
     .await?;
@@ -197,12 +202,20 @@ pub async fn insert_customer(
         .ok_or_else(|| sqlx::Error::RowNotFound.into())
 }
 
+pub struct Wilayah {
+    pub address: Option<String>,
+    pub city: Option<String>,
+    pub district: Option<String>,
+}
+
 /// Bidang yang boleh diubah: `None` = jangan sentuh, `Some(None)` = kosongkan; dibedakan di tipe agar tak ada handler yang menghapus telepon hanya karena form tak mengirimnya.
 #[derive(Debug, Default)]
 pub struct CustomerPatch {
     pub name: Option<String>,
     pub phone: Option<Option<String>>,
     pub address: Option<Option<String>>,
+    pub city: Option<Option<String>>,
+    pub district: Option<Option<String>>,
 }
 
 pub async fn update_customer(
@@ -216,6 +229,8 @@ pub async fn update_customer(
         SET name       = COALESCE($2, name),
             phone      = CASE WHEN $3::bool THEN $4 ELSE phone END,
             address    = CASE WHEN $5::bool THEN $6 ELSE address END,
+            city       = CASE WHEN $7::bool THEN $8 ELSE city END,
+            district   = CASE WHEN $9::bool THEN $10 ELSE district END,
             updated_at = now()
         WHERE id = $1
         RETURNING id
@@ -226,6 +241,10 @@ pub async fn update_customer(
         patch.phone.as_ref().and_then(|v| v.as_deref()),
         patch.address.is_some(),
         patch.address.as_ref().and_then(|v| v.as_deref()),
+        patch.city.is_some(),
+        patch.city.as_ref().and_then(|v| v.as_deref()),
+        patch.district.is_some(),
+        patch.district.as_ref().and_then(|v| v.as_deref()),
     )
     .fetch_optional(pool)
     .await?;

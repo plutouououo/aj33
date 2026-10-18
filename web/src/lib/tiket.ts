@@ -13,8 +13,8 @@ export const LABEL_STATUS: Record<TicketStatus, string> = {
   unassigned: 'Belum diambil',
   assigned: 'Sudah diambil',
   packing: 'Sedang dikemas',
-  packed: 'Selesai dikemas',
-  handed_over: 'Diserahkan ke kurir',
+  packed: 'Menunggu ACC owner',
+  handed_over: 'Selesai',
 };
 
 /** Kuning menunggu tindakan, merah merek berjalan, hijau selesai, sama dengan lencana di halaman lain. */
@@ -37,9 +37,9 @@ export function langkahBerikutnya(
     case 'assigned':
       return { status: 'packing', label: 'Mulai kemas' };
     case 'packing':
-      return { status: 'packed', label: 'Selesai dikemas' };
+      return { status: 'packed', label: 'Barang sudah diambil' };
     case 'packed':
-      return { status: 'handed_over', label: 'Serahkan ke kurir' };
+      return { status: 'handed_over', label: 'Selesaikan tiket' };
     // `unassigned` hanya bergerak lewat penugasan, `handed_over` adalah akhir.
     default:
       return null;

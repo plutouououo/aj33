@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE external_orders\n        SET status = 'shipped', transaction_id = $2, updated_at = now()\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "874f6ecbb0b9492662d4d5fb7df63307f9d16b0ca4d29911e4283b1463818309"
+}

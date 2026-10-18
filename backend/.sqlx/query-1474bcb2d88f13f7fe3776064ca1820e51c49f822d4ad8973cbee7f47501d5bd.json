@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT p.id\n        FROM products p\n        WHERE upper(p.sku) = upper($1)\n          AND p.is_active\n          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1474bcb2d88f13f7fe3776064ca1820e51c49f822d4ad8973cbee7f47501d5bd"
+}

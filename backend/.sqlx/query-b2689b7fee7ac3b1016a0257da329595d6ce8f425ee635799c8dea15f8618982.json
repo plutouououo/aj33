@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO external_orders\n            (platform_id, external_order_id, status, sla_type, sla_deadline,\n             payment_method, is_cod, shipping_carrier, raw_payload)\n        VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8)\n        ON CONFLICT (platform_id, external_order_id) DO NOTHING\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Timestamptz",
+        "Varchar",
+        "Bool",
+        "Varchar",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b2689b7fee7ac3b1016a0257da329595d6ce8f425ee635799c8dea15f8618982"
+}

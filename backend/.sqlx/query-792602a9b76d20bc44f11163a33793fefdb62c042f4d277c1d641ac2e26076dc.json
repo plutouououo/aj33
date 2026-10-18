@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE customers\n        SET name       = COALESCE($2, name),\n            phone      = CASE WHEN $3::bool THEN $4 ELSE phone END,\n            address    = CASE WHEN $5::bool THEN $6 ELSE address END,\n            city       = CASE WHEN $7::bool THEN $8 ELSE city END,\n            district   = CASE WHEN $9::bool THEN $10 ELSE district END,\n            updated_at = now()\n        WHERE id = $1\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Bool",
+        "Varchar",
+        "Bool",
+        "Text",
+        "Bool",
+        "Varchar",
+        "Bool",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "792602a9b76d20bc44f11163a33793fefdb62c042f4d277c1d641ac2e26076dc"
+}

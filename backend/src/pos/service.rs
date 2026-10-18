@@ -206,7 +206,18 @@ fn sidik_jari(bahan: &Bahan<'_>) -> String {
     hex::encode(hasher.finalize())
 }
 
-pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
+/// Isi transaksi yang sudah dinormalkan persis seperti akan tersimpan, karena sidik jari dan tulisan harus berbahan sama.
+struct Rencana {
+    ongkir: Decimal,
+    ongkir_ditanggung_toko: bool,
+    commission_persen: Decimal,
+    service_persen: Decimal,
+    lines: Vec<StockLine>,
+    per_produk: Vec<(Uuid, i32)>,
+    amount_paid_tersimpan: Option<Decimal>,
+}
+
+async fn rencanakan(pool: &PgPool, input: &CheckoutInput) -> AppResult<Rencana> {
     if input.items.is_empty() {
         return Err(AppError::bad_request(
             "Transaksi harus punya minimal 1 item.",
@@ -287,17 +298,31 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
 
     // Harga, baris struk, dan sidik jari bekerja per produk, bukan per batch (pembeli membeli barang, bukan kiriman), sehingga kirim ulang sah tetap dikenali walau batch berbeda.
     let per_produk = stock::total_per_produk(&lines);
+
+    Ok(Rencana {
+        ongkir,
+        ongkir_ditanggung_toko,
+        commission_persen,
+        service_persen,
+        lines,
+        per_produk,
+        amount_paid_tersimpan,
+    })
+}
+
+pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
+    let rencana = rencanakan(pool, &input).await?;
     let sidik = sidik_jari(&Bahan {
         transaction_type: input.transaction_type,
         sales_channel: input.sales_channel,
         customer_id: input.customer_id,
         payment_method: input.payment_method,
-        amount_paid: amount_paid_tersimpan,
-        shipping_cost: ongkir,
-        shipping_borne_by_store: ongkir_ditanggung_toko,
-        platform_commission_fee_percent: commission_persen,
-        platform_service_fee_percent: service_persen,
-        items: &per_produk,
+        amount_paid: rencana.amount_paid_tersimpan,
+        shipping_cost: rencana.ongkir,
+        shipping_borne_by_store: rencana.ongkir_ditanggung_toko,
+        platform_commission_fee_percent: rencana.commission_persen,
+        platform_service_fee_percent: rencana.service_persen,
+        items: &rencana.per_produk,
     });
 
     // Request ulang sah: kembalikan transaksi yang ada tanpa menyentuh stok lagi.
@@ -326,10 +351,42 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     }
 
     let mut tx = pool.begin().await?;
+    let transaction_id = tulis(&mut tx, &input, &rencana).await?;
+    tx.commit().await?;
+
+    repo::find_by_id(pool, transaction_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Transaksi tidak ditemukan."))
+}
+
+/// Penjualan pesanan marketplace yang tiketnya selesai; ditulis di transaksi database tiket agar status tiket, transaksi, dan stok berubah bersama atau tidak sama sekali.
+pub async fn catat_dari_pesanan(
+    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: &CheckoutInput,
+) -> AppResult<Uuid> {
+    let rencana = rencanakan(pool, input).await?;
+    tulis(tx, input, &rencana).await
+}
+
+async fn tulis(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: &CheckoutInput,
+    rencana: &Rencana,
+) -> AppResult<Uuid> {
+    let Rencana {
+        ongkir,
+        ongkir_ditanggung_toko,
+        commission_persen,
+        service_persen,
+        ref lines,
+        ref per_produk,
+        amount_paid_tersimpan,
+    } = *rencana;
 
     let ids: Vec<Uuid> = lines.iter().map(|l| l.product_id).collect();
-    let terkunci = stock::kunci_produk(&mut tx, &ids).await?;
-    let batas_grosir_kg = settings::repo::batas_grosir_kg(&mut *tx).await?;
+    let terkunci = stock::kunci_produk(tx, &ids).await?;
+    let batas_grosir_kg = settings::repo::batas_grosir_kg(&mut **tx).await?;
 
     let mut items = Vec::with_capacity(per_produk.len());
     let mut subtotal = Decimal::ZERO;
@@ -391,7 +448,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     let change_amount = amount_paid_tersimpan.map(|dibayar| uang(dibayar - total_amount));
 
     let transaction_id = repo::insert_transaction(
-        &mut tx,
+        tx,
         &NewTransaction {
             idempotency_key: input.idempotency_key.clone(),
             transaction_type: input.transaction_type.as_str().to_string(),
@@ -418,19 +475,15 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
 
     // Baris produk sudah terkunci di transaksi ini, jadi penguncian di `kurangi` tak menunggu siapa pun; pemeriksaan stok tetap satu-satunya tempat stok berubah.
     stock::kurangi(
-        &mut tx,
-        &lines,
+        tx,
+        lines,
         StockReason::Sale,
         transaction_id,
         Some(input.cashier_user_id),
     )
     .await?;
 
-    tx.commit().await?;
-
-    repo::find_by_id(pool, transaction_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("Transaksi tidak ditemukan."))
+    Ok(transaction_id)
 }
 
 /// Membatalkan transaksi: stok kembali persis ke batch asal lalu ditandai `voided`; laporan omzet dan riwayat pelanggan sudah menyaring `status = 'completed'` sehingga tak perlu langkah tambahan.

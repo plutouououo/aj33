@@ -9,6 +9,7 @@ mod jejak;
 mod marketplace;
 mod orders;
 mod pos;
+mod push;
 mod reports;
 mod settings;
 mod stock;
@@ -87,6 +88,7 @@ async fn main() {
         .nest("/api", jejak::router())
         .nest("/api", orders::router())
         .nest("/api", pos::router())
+        .nest("/api", push::router())
         .nest("/api", reports::router())
         .nest("/api", settings::router())
         .nest("/api", tickets::router())

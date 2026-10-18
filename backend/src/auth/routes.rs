@@ -1,5 +1,6 @@
 //! Endpoint auth dan extractor untuk semua modul; backend hanya mengenal `Authorization: Bearer`, urusan cookie milik Astro, sehingga hanya ada satu cara autentikasi yang dijaga.
 
+use super::repo;
 use super::service::{self, PublicUser};
 use super::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
@@ -16,6 +17,7 @@ pub fn router() -> Router<AppState> {
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
         .route("/auth/password", post(change_password))
+        .route("/users", get(list_users))
 }
 
 impl CurrentUser {
@@ -112,4 +114,29 @@ async fn change_password(
     .await?;
 
     Ok(Json(updated))
+}
+
+#[derive(Debug, Deserialize)]
+struct UserListQuery {
+    role: Option<String>,
+}
+
+/// Pengguna aktif untuk dipilih owner, mis. pengepak tujuan tiket.
+async fn list_users(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    axum::extract::Query(q): axum::extract::Query<UserListQuery>,
+) -> AppResult<Json<Vec<repo::Pengguna>>> {
+    user.require(&[Role::Owner])?;
+
+    let role = match q.role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        Some(raw) => Some(
+            Role::parse(raw)
+                .ok_or_else(|| AppError::bad_request("Peran tidak dikenal."))?
+                .as_str(),
+        ),
+        None => None,
+    };
+
+    Ok(Json(repo::list_aktif(&state.pool, role).await?))
 }

@@ -261,6 +261,51 @@ Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 - Biaya proses Rp1.250 baru tampil dan dihitung setelah keranjang berisi (sebelumnya "Estimasi Total Penghasilan" kosong tampil -Rp1.250).
 - Kanal Tokopedia/TikTok kini berisian sama dengan Shopee: tanpa ongkir, tanpa pilihan metode (dipaksa e-wallet), tanpa "uang diterima". Backend (`SalesChannel::marketplace`) mengabaikan ongkir dan menolak tunai untuk kedua kanal. Biaya platform Tokopedia belum ada, jadi labelnya tetap "Total".
 
+### Pesanan Shopee dari label pengiriman (migrasi 0027)
+
+API Shopee tidak bisa dipakai, jadi pesanan masuk lewat PDF label ("Cetak
+Label" di Seller Centre). Alurnya: owner unggah PDF di `/pesanan` → server
+Astro membaca PDF (`web/src/lib/label-shopee.ts`, pdfjs-dist) → backend
+mencatatnya (`POST /orders/labels`) → owner mencentang pesanan, memilih batch
+per barang dan pengepak → `POST /tickets/bulk` → notifikasi Web Push ke
+perangkat pengepak → pengepak ambil barang, kirim foto + isi tiket ke
+WhatsApp owner, owner ACC di WhatsApp (di luar aplikasi) → pengepak
+"Selesaikan tiket".
+
+- **Membaca label.** Satu label per halaman. Yang diambil: nomor pesanan,
+  penerima, alamat, kabupaten dan kecamatan (kotak di bawah alamat), kotak
+  pembayaran (CASHLESS/COD), metode Instant/Sameday, batas kirim, dan tabel
+  barang (SKU, variasi, qty). Label mencetak "INSTANT / SAMEDAY" dua-duanya;
+  yang dipilih ditandai **garis bawah**, yang di PDF berupa bidang isi tipis,
+  jadi pembacanya mengikuti CTM dari operator list pdfjs. `pdf-extract` (Rust)
+  sempat dicoba dan ditinggalkan: lebar sebagian glyph terbaca 0 sehingga
+  posisi kata bergeser dan kolom tak bisa dipisahkan.
+- **Telepon penerima tidak ada di label.** Shopee menyembunyikannya; nomor
+  yang tercetak di blok "Pengirim" milik toko. Pelanggan dari label dikenali
+  lewat nama + alamat (`source = 'marketplace'`), tanpa telepon.
+- **Barang dicocokkan lewat SKU** (`products.sku`, tanpa membedakan huruf
+  besar-kecil, produk aktif tanpa varian). Nama yang tampil adalah nama di
+  app; nama Shopee hanya disimpan di `item_name_snapshot`. Label dengan SKU
+  kosong atau tak dikenal ditolak per label, label lain tetap tercatat.
+  Nomor pesanan yang sudah ada dijawab "sudah ada", jadi unggah ulang aman.
+- **Batch pilihan owner** disimpan di `ticket_items.batch_id`; kosong = FEFO.
+  Rak di tiket mengikuti batch pilihan itu.
+- **Penjualan baru tercatat saat tiket selesai** (`handed_over`): lewat
+  `pos::service::catat_dari_pesanan`, jalur yang sama dengan kasir (harga
+  kanal Shopee, potongan Shopee dari pengaturan, ledger stok `sale`), dalam
+  transaksi database yang sama dengan perubahan status tiket. Kunci
+  idempotensinya `pesanan:<id pesanan>`, dan pesanannya ditautkan lewat
+  `external_orders.transaction_id`. Akibatnya void transaksi itu
+  mengembalikan stok ke batch asal seperti void biasa. `StockReason::ExternalOrder`
+  dihapus karena tak ada lagi yang memakainya.
+- **Web Push**: langganan per perangkat di `push_subscriptions`, dikirim oleh
+  server Astro (`web/src/lib/push.ts`, pustaka `web-push`) karena backend
+  hanya menyimpan alamatnya. Butuh `VAPID_*` di `web.env`
+  (`panduan-deploy.md`). Di iPhone notifikasi hanya jalan bila aplikasi
+  ditambahkan ke Layar Utama (iOS 16.4+).
+- **Pelanggan** punya `city` (kabupaten/kota) dan `district` (kecamatan),
+  terisi otomatis dari label dan bisa disunting di halaman pelanggan.
+
 ---
 
 ## Jebakan yang sudah memakan waktu
@@ -332,9 +377,6 @@ prepared statement, dan sqlx memakainya untuk tiap query.
   upload multipart dan isian file di form. Catatan: tabel `product_images`
   **bukan** untuk ini (terikat `channel_listing_id`, isinya gambar listing
   marketplace).
-- Halaman `/pesanan` (Pesanan Masuk) belum dibuat; menunya disembunyikan dari
-  `AppShell.astro` supaya tidak mengarah ke 404 — pasang lagi di sana begitu
-  halamannya ada.
 - `/pengaturan/platform` sekarang sudah ada halamannya, tapi masih placeholder
   "segera hadir" — belum ada endpoint backend untuk connect/disconnect
   Shopee/TikTok Shop maupun baca status koneksinya dari tabel `platforms`.

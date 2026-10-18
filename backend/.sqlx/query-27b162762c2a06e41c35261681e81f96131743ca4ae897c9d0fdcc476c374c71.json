@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT i.id, i.product_id, i.external_item_ref, i.item_name_snapshot,\n               i.qty, i.unit_price, p.name AS \"product_name?\"\n        FROM external_order_items i\n        LEFT JOIN products p ON p.id = i.product_id\n        WHERE i.external_order_id = $1\n        ORDER BY i.created_at, i.id\n        ",
+  "query": "\n        SELECT i.id, i.product_id, i.external_item_ref, i.item_name_snapshot,\n               i.qty, i.unit_price, i.model_sku, i.model_name, p.name AS \"product_name?\"\n        FROM external_order_items i\n        LEFT JOIN products p ON p.id = i.product_id\n        WHERE i.external_order_id = $1\n        ORDER BY i.created_at, i.id\n        ",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,16 @@
       },
       {
         "ordinal": 6,
+        "name": "model_sku",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "model_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
         "name": "product_name?",
         "type_info": "Varchar"
       }
@@ -51,8 +61,10 @@
       false,
       false,
       true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "f1bf6b37a87f4b183f83dedd90219606da0faa7c97a4ff443ac4a00f1dc69ad9"
+  "hash": "27b162762c2a06e41c35261681e81f96131743ca4ae897c9d0fdcc476c374c71"
 }

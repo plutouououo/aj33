@@ -9,13 +9,14 @@ use crate::AppState;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/orders/{id}/ticket", post(create_ticket))
         .route("/tickets", get(list_tickets))
+        .route("/tickets/bulk", post(kirim_tiket))
         .route("/tickets/{id}", get(get_ticket))
         .route("/tickets/{id}/assign", post(assign))
         .route("/tickets/{id}/status", patch(set_status))
@@ -47,6 +48,58 @@ async fn create_ticket(
     Ok((
         axum::http::StatusCode::CREATED,
         Json(muat(&state, id).await?),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct BatchPilihan {
+    product_id: Uuid,
+    batch_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+struct PesananPilihan {
+    order_id: Uuid,
+    #[serde(default)]
+    batches: Vec<BatchPilihan>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KirimRequest {
+    user_id: Uuid,
+    orders: Vec<PesananPilihan>,
+}
+
+#[derive(Debug, Serialize)]
+struct KirimResponse {
+    ticket_ids: Vec<Uuid>,
+}
+
+async fn kirim_tiket(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<KirimRequest>,
+) -> AppResult<(axum::http::StatusCode, Json<KirimResponse>)> {
+    user.require(&[Role::Owner])?;
+
+    let pesanan: Vec<service::PesananKirim> = body
+        .orders
+        .into_iter()
+        .map(|p| service::PesananKirim {
+            external_order_id: p.order_id,
+            batches: p
+                .batches
+                .into_iter()
+                .map(|b| (b.product_id, b.batch_id))
+                .collect(),
+        })
+        .collect();
+
+    let ticket_ids = service::kirim(&state.pool, &pesanan, body.user_id, user).await?;
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(KirimResponse { ticket_ids }),
     ))
 }
 

@@ -24,9 +24,11 @@ browser ──443──▶ Caddy ──▶ web :4321 (Astro SSR) ──▶ backe
   merender. Sesi disimpan di cookie httpOnly.
 - **db/migrations/** — migrasi SQL bernomor urut, dijalankan otomatis oleh
   backend saat start (`sqlx::migrate!`)
-- Form pakai POST HTML biasa. JavaScript hanya untuk hal kosmetik (sidebar)
-  dan halaman kasir (`web/src/pages/kasir.astro`) — yang **tetap harus
-  berfungsi penuh tanpa JS**.
+- Form pakai POST HTML biasa. JavaScript hanya untuk hal kosmetik (sidebar),
+  halaman kasir (`web/src/pages/kasir.astro`) — yang **tetap harus
+  berfungsi penuh tanpa JS** — serta langganan notifikasi dan berbagi foto ke
+  WhatsApp di halaman tiket (keduanya mustahil tanpa JS; tanpa JS halaman
+  tiket tetap jalan).
 - **Paginasi wajib berpindah halaman tanpa memuat ulang seluruh halaman**:
   pakai `components/Paginasi.astro` dan bungkus daftarnya dengan `data-daftar`
   (aturan lengkap di [`docs/panduan-ui.md`](docs/panduan-ui.md), bagian Pola
@@ -34,7 +36,8 @@ browser ──443──▶ Caddy ──▶ web :4321 (Astro SSR) ──▶ backe
 
 Modul backend (`backend/src/<modul>/{mod,routes,repo,service}.rs`):
 `auth`, `catalog` (produk/SKU), `customers`, `marketplace` (Shopee/TikTok),
-`orders`, `pos` (kasir), `reports`, `tickets` (packing).
+`orders` (termasuk pesanan dari label PDF Shopee), `pos` (kasir), `push`
+(langganan Web Push), `reports`, `tickets` (packing).
 
 ## Konvensi bahasa
 

@@ -1,6 +1,7 @@
 //! Endpoint platform, webhook, pesanan marketplace, dan pemetaan produk.
 
 use super::repo::{self, Mapping, Order, PlatformStatus};
+use super::service::{self, HasilLabel, LabelShopee};
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
 use crate::marketplace::tiktok::{self, NAMA_PLATFORM};
@@ -28,6 +29,7 @@ pub fn router() -> Router<AppState> {
         .route("/platforms/shopee/sync", post(sync_shopee))
         .route("/webhooks/tiktok", post(webhook))
         .route("/orders", get(list_orders))
+        .route("/orders/labels", post(catat_label))
         .route("/orders/{id}", get(get_order))
         .route(
             "/products/{id}/mappings",
@@ -401,6 +403,8 @@ async fn simpan_order(
 #[derive(Debug, Deserialize)]
 struct OrderListQuery {
     status: Option<String>,
+    #[serde(default)]
+    pending_ticket: bool,
 }
 
 async fn list_orders(
@@ -408,8 +412,23 @@ async fn list_orders(
     _user: CurrentUser,
     Query(q): Query<OrderListQuery>,
 ) -> AppResult<Json<Vec<Order>>> {
-    let rows = repo::list_orders(&state.pool, q.status.as_deref(), 100).await?;
+    let rows = repo::list_orders(&state.pool, q.status.as_deref(), q.pending_ticket, 100).await?;
     Ok(Json(rows))
+}
+
+#[derive(Debug, Deserialize)]
+struct LabelRequest {
+    labels: Vec<LabelShopee>,
+}
+
+/// PDF label dibaca di Astro; yang sampai di sini isinya, dan tiap label dijawab tersendiri (dibuat, sudah ada, atau gagal beserta alasannya).
+async fn catat_label(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<LabelRequest>,
+) -> AppResult<Json<Vec<HasilLabel>>> {
+    user.require(&[Role::Owner])?;
+    Ok(Json(service::catat_label(&state.pool, body.labels).await?))
 }
 
 async fn get_order(

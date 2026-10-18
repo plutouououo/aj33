@@ -27,6 +27,8 @@ if (Astro.request.method === 'POST') {
           name: nama,
           phone: String(form.get('phone') ?? '').trim() || undefined,
           address: String(form.get('address') ?? '').trim() || undefined,
+          city: String(form.get('city') ?? '').trim() || undefined,
+          district: String(form.get('district') ?? '').trim() || undefined,
         },
       });
       return Astro.redirect(sesudahAksi(Astro.url, 'tambah'), 303);
@@ -119,7 +121,7 @@ const ASAL: Record<string, string> = {
   <details class="kartu mb-5">
     <summary class="cursor-pointer py-3 text-sm font-semibold">+ Tambah Pelanggan</summary>
 
-    <form method="POST" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_12rem_1fr_8rem]">
+    <form method="POST" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_12rem_1fr_10rem_10rem_8rem]">
       <input type="hidden" name="aksi" value="tambah" />
 
       <div>
@@ -135,6 +137,16 @@ const ASAL: Record<string, string> = {
       <div>
         <label class="label" for="address">Alamat Antar</label>
         <input class="kolom" id="address" name="address" maxlength="500" />
+      </div>
+
+      <div>
+        <label class="label" for="city">Kabupaten/Kota</label>
+        <input class="kolom" id="city" name="city" maxlength="100" />
+      </div>
+
+      <div>
+        <label class="label" for="district">Kecamatan</label>
+        <input class="kolom" id="district" name="district" maxlength="100" />
       </div>
 
       <div class="flex items-start">
@@ -229,6 +241,11 @@ const ASAL: Record<string, string> = {
               <td class="whitespace-nowrap text-[var(--color-teks-lembut)]">{c.phone ?? '—'}</td>
               <td class="max-w-[16rem] truncate text-xs text-[var(--color-teks-lembut)]">
                 {c.address ?? '—'}
+                {(c.district || c.city) && (
+                  <span class="block truncate font-medium">
+                    {[c.district, c.city].filter(Boolean).join(', ')}
+                  </span>
+                )}
               </td>
               <td>
                 <span class={c.source === 'marketplace' ? 'lencana-berjalan' : 'lencana-nonaktif'}>

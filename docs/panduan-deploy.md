@@ -327,6 +327,22 @@ blobnya memakai SAS (`web/src/pages/foto/[...nama].ts`). Konsekuensinya lalu
 lintas foto ikut lewat VPS; foto dijawab dengan `Cache-Control` satu tahun,
 jadi peramban hanya menariknya sekali.
 
+**Notifikasi tiket (Web Push).** Tambahkan tiga baris ini ke `web.env`
+supaya perangkat pengepak berbunyi saat owner mengirim tiket. Tanpa ketiganya
+fitur tetap jalan, hanya tanpa notifikasi (tombol "Aktifkan notifikasi" di
+halaman Tiket tidak muncul). Kunci dibuat sekali dengan
+`npx web-push generate-vapid-keys` (dari folder `web/`):
+
+```bash
+VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=mailto:email-owner@contoh.com
+```
+
+Jangan mengganti pasangan kunci setelah dipakai: semua langganan perangkat
+terikat ke kunci publiknya, dan setiap perangkat harus mengaktifkan
+notifikasi ulang.
+
 **4. Kunci izinnya**, karena `backend.env` berisi kredensial database:
 
 ```bash
