@@ -385,12 +385,6 @@ function sisaBatch(b: ProductBatch): { label: string; mepet: boolean } {
   };
 }
 
-/** Rak produk urut FEFO tanpa pengulangan; sejak migrasi 0016 lokasi milik batch, jadi satu label tunggal bisa menyuruh pengepak ke rak yang salah. */
-function lokasiProduk(daftar: ProductBatch[]): string {
-  const rak = daftar.map((b) => b.storage_location).filter((l): l is string => !!l);
-  return [...new Set(rak)].join(', ');
-}
-
 /** Ringkasan batch yang sudah dipilih, untuk kartu yang panelnya tertutup. */
 function ringkasBatch(p: Product): string {
   return (batchProduk.get(p.id) ?? [])
@@ -597,9 +591,6 @@ function ringkasBatch(p: Product): string {
                   <dt class="text-[var(--color-teks-lembut)]">Merek</dt>
                   <dd>{p.brand_name ?? '—'}</dd>
 
-                  <dt class="text-[var(--color-teks-lembut)]">Lokasi</dt>
-                  <dd>{lokasiProduk(batches) || '—'}</dd>
-
                   <dt class="text-[var(--color-teks-lembut)]">Stok</dt>
                   <dd class="tabular-nums">
                     {p.stock_qty} · {batches.length} batch
@@ -630,8 +621,12 @@ function ringkasBatch(p: Product): string {
                         <input type="hidden" name="batch_id" value={b.id} />
 
                         <label class="min-h-11 min-w-0 flex-1 cursor-pointer text-xs" for={`qty-${p.id}-${b.id}`}>
+                          {/* Lokasi milik batch (migrasi 0016), jadi ditulis di baris batchnya agar kasir tahu rak tiap kiriman. */}
                           <span class="block truncate font-medium">
                             {b.batch_number ?? 'Tanpa nomor'}
+                            {b.storage_location && (
+                              <span class="font-normal text-[var(--color-teks-lembut)]"> · {b.storage_location}</span>
+                            )}
                           </span>
                           <span
                             class:list={[

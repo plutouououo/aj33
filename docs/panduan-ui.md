@@ -62,6 +62,7 @@ lolos WCAG AA, sekaligus jelas berbeda dari merah peringatan yang terang.
 | `--lebar-sidebar` | `15rem` (ciut `4.25rem`) | Lebar sidebar dan margin kolom isi |
 | `--tinggi-topbar` | `4.5rem` | Tinggi topbar yang menempel di atas (`z-[15]`, di bawah tirai/laci z-20/30). Tinggi tetap, bukan mengikuti isi, karena elemen sticky lain (`.bilah-tab`, pencarian dan panel kasir, `scroll-margin` anchor) bergeser sebesar ini agar tak tertutup |
 | `--tinggi-bilah-tab` | `3.25rem` | Tinggi `.bilah-tab` sekaligus `scroll-margin` tiap bagian — satu angka supaya lompatan `#anchor` tidak berhenti di balik bilahnya |
+| `--tinggi-tab-bawah` | `0` (ponsel `3.5rem`) | Tinggi bilah tab bawah ponsel. Bilah menempel di dasar (`.bilah-aksi`, `.bilah-bawah`, `.bilah-bayar`) memakai `bottom: var(--tinggi-tab-bawah)` dan `<main>` menambah padding bawah sebesar ini, supaya tak tertutup bilah tab |
 | `--lebar-borang` | `34rem` | Lebar maksimum satu kolom isian |
 
 Latar aplikasi sengaja abu sangat muda supaya kartu putih punya tepi tanpa
@@ -109,6 +110,12 @@ digitnya sejajar dan selisih besaran terlihat dari panjangnya.
   halaman punya dua judul.
 - **Menu dikelompokkan**: *Bisnis* untuk yang ditata sekali lalu jarang
   disentuh, *Operasional* untuk yang dibuka tiap hari.
+  Pengaturan bukan grup sendiri: ikon geriginya ada di dasar sidebar di
+  samping identitas pengguna (di layar lebar identitas tidak diulang di topbar).
+- **Jejak klik**: skrip AppShell mencatat klik `a`, `button`, `summary`,
+  `label` ke tabel `jejak_ui` lewat `/jejak` (sendBeacon saat halaman
+  ditinggalkan). Nama target diambil dari `data-jejak`, lalu `aria-label`,
+  `title`, teks; areanya dari `data-jejak-area` terdekat.
 - **Menu disaring per peran**, sama persis dengan pembatasan di backend.
   Menu yang tampil tapi ditolak server adalah jebakan.
 - **Sidebar bisa diciutkan** jadi 4,25rem (ikon saja). Pilihannya disimpan di
@@ -135,6 +142,12 @@ desktop akan ikut terbawa dan menghasilkan menu ikon tanpa teks.
 Padding `<main>` turun jadi `px-4 py-4`. **Semua bilah menempel ikut berubah**
 — margin negatifnya harus cocok dengan padding itu, lihat bagian Bilah
 menempel.
+
+**Bilah tab bawah** (`.tab-bawah`) menempel di dasar layar dengan Dasbor,
+Kasir, Tiket, Produk (disaring per peran seperti sidebar) plus "Lainnya".
+"Lainnya" adalah `<label>` ke checkbox laci yang sama dengan hamburger, jadi
+tetap jalan tanpa JS. Z-index-nya `z-[15]` seperti topbar, di bawah tirai dan
+laci.
 
 Aksi utama di bilah bawah dibuat selebar penuh di layar sempit (`flex-1`,
 `w-full`) supaya bisa ditekan tanpa membidik.

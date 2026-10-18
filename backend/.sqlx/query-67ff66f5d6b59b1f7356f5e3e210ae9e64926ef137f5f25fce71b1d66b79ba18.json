@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO jejak_ui (user_id, halaman, area, target)\n        SELECT $1, h, NULLIF(a, ''), t\n        FROM UNNEST($2::text[], $3::text[], $4::text[]) AS j(h, a, t)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "67ff66f5d6b59b1f7356f5e3e210ae9e64926ef137f5f25fce71b1d66b79ba18"
+}

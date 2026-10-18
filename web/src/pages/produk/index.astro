@@ -273,7 +273,14 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
           name="cari"
           value={cari}
           placeholder="Cari nama atau SKU..."
+          enterkeyhint="search"
         />
+        {/* Tombol kirim pertama di form sehingga jadi tujuan Enter; tanpanya Enter di ponsel tak mengirim apa pun karena "Terapkan" tersembunyi di saringan yang terlipat. */}
+        <button class="tombol-halus shrink-0 px-3" type="submit" aria-label="Cari" title="Cari">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true">
+            <path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4" />
+          </svg>
+        </button>
         <label for="buka-saringan" class="tombol-halus shrink-0 cursor-pointer md:hidden">Filter</label>
       </div>
     </div>

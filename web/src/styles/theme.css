@@ -39,6 +39,9 @@
   /* Tinggi bilah tab dipakai bilahnya dan scroll-margin bagian, satu angka agar lompatan #anchor tak berhenti di balik bilah. */
   --tinggi-bilah-tab: 3.25rem;
 
+  /* Tinggi bilah tab bawah ponsel, nol di layar lebar; bilah menempel di dasar (`.bilah-aksi`, `.bilah-bawah`, `.bilah-bayar`) naik sebesar ini agar tak tertutup. */
+  --tinggi-tab-bawah: 0px;
+
   /* Lebar maksimum kolom isian; 34rem kira-kira satu kalimat nyaman, lebih lebar justru sulit dibaca di monitor lebar. */
   --lebar-borang: 34rem;
 }
@@ -300,6 +303,17 @@
            font-semibold text-merah-700;
   }
 
+  /* --- Bilah tab bawah ponsel ------------------------------------------ */
+
+  /* Ikon di atas label, target sentuh setinggi bilah; aktif memakai merah merek seperti `.nav-tautan-aktif`. */
+  .tab-bawah {
+    @apply flex flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium
+           text-stone-500;
+  }
+  .tab-bawah-aktif {
+    @apply font-semibold text-merah-700;
+  }
+
   /* --- Remah roti ----------------------------------------------------- */
 
   /* Halaman dalam tidak punya nama induk di topbar, jadi jalan kembalinya ditulis di badan halaman. */
@@ -346,7 +360,7 @@
 
   /* Tombol simpan formulir panjang harus terjangkau dari bagian mana pun; `-mx-6 -mb-6` membatalkan padding `<main>` AppShell, jadi ikut rusak bila padding itu berubah. */
   .bilah-aksi {
-    @apply sticky bottom-0 z-10 -mx-4 -mb-4 mt-6 flex flex-wrap items-center
+    @apply sticky bottom-[var(--tinggi-tab-bawah)] z-10 -mx-4 -mb-4 mt-6 flex flex-wrap items-center
            justify-end gap-3 border-t border-[var(--color-garis)]
            bg-[var(--color-permukaan)] px-4 py-3.5
            md:-mx-6 md:-mb-6 md:px-6;
@@ -435,7 +449,7 @@
   }
   /* Tombol bayar menempel di dasar panel yang menggulung supaya selalu terjangkau walau isi panel lebih tinggi dari layar. */
   .bilah-bayar {
-    @apply sticky bottom-0 -mx-4 -mb-4 flex flex-col gap-2 border-t
+    @apply sticky bottom-[var(--tinggi-tab-bawah)] -mx-4 -mb-4 flex flex-col gap-2 border-t
            border-[var(--color-garis-lembut)] bg-[var(--color-permukaan)] px-4
            pb-3 pt-3;
   }
@@ -512,7 +526,7 @@
 
   /* Sama menempelnya dengan `.bilah-aksi`, tapi berisi ringkasan keranjang yang terbaca sekilas dan diberi bayangan agar terpisah dari daftar produk di belakangnya. */
   .bilah-bawah {
-    @apply sticky bottom-0 z-10 -mx-4 -mb-4 mt-6 flex flex-wrap items-center
+    @apply sticky bottom-[var(--tinggi-tab-bawah)] z-10 -mx-4 -mb-4 mt-6 flex flex-wrap items-center
            gap-3 border-t border-[var(--color-garis)]
            bg-[var(--color-permukaan)] px-4 py-3
            shadow-[0_-2px_8px_rgba(0,0,0,0.06)]
@@ -601,6 +615,9 @@
 
 /* Di bawah md sidebar jadi laci layar penuh, jadi lebar ciut yang tersimpan di localStorage dipaksa normal (tombol Ciutkan tersembunyi di layar kecil, keadaan itu tak bisa diubah). */
 @media (max-width: 47.9375rem) {
+  :root {
+    --tinggi-tab-bawah: 3.5rem;
+  }
   :root[data-sidebar='ciut'] {
     --lebar-sidebar: 15rem;
   }

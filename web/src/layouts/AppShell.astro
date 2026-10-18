@@ -36,12 +36,14 @@ const grup = [
       { href: '/tiket', label: 'Tiket Packing', ikon: 'papan' },
     ],
   },
-  {
-    judul: 'Profil',
-    menu: [
-      { href: '/pengaturan', label: 'Pengaturan', ikon: 'gerigi' },
-    ],
-  },
+];
+
+/** Bilah tab bawah ponsel: halaman yang paling sering dibuka, sisanya lewat "Lainnya" yang membuka laci menu. */
+const TAB_BAWAH = [
+  { href: '/dasbor', label: 'Dasbor', ikon: 'kisi' },
+  { href: '/kasir', label: 'Kasir', ikon: 'keranjang' },
+  { href: '/tiket', label: 'Tiket', ikon: 'papan' },
+  { href: '/produk', label: 'Produk', ikon: 'kotak' },
 ];
 
 /** Ikon garis, 20px, stroke mengikuti warna teks induknya. */
@@ -61,6 +63,11 @@ const grupTampil = user
       .map((g) => ({ ...g, menu: g.menu.filter((m) => bolehAkses(user.role, m.href)) }))
       .filter((g) => g.menu.length > 0)
   : [];
+
+const tabTampil = user ? TAB_BAWAH.filter((m) => bolehAkses(user.role, m.href)) : [];
+const bolehPengaturan = user ? bolehAkses(user.role, '/pengaturan') : false;
+
+const aktif = (href: string) => path === href || path.startsWith(`${href}/`);
 
 const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
 ---
@@ -139,18 +146,17 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
               </span>
             </div>
 
-            <nav class="flex-1 overflow-y-auto px-2 pb-4">
+            <nav class="flex-1 overflow-y-auto px-2 pb-4" data-jejak-area="sidebar">
               {grupTampil.map((g) => (
                 <>
                   <p class="nav-judul teks-sidebar">{g.judul}</p>
                   {g.menu.map((m) => {
-                    const aktif = path === m.href || path.startsWith(`${m.href}/`);
                     return (
                       <a
                         href={m.href}
                         title={m.label}
-                        aria-current={aktif ? 'page' : undefined}
-                        class={aktif ? 'nav-tautan-aktif' : 'nav-tautan'}
+                        aria-current={aktif(m.href) ? 'page' : undefined}
+                        class={aktif(m.href) ? 'nav-tautan-aktif' : 'nav-tautan'}
                       >
                         <svg
                           class="h-5 w-5 shrink-0"
@@ -172,6 +178,39 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
               ))}
             </nav>
 
+            {/* Identitas pengguna dan Pengaturan berdampingan di dasar sidebar, bukan grup menu berisi satu tautan; saat ciut hanya ikon geriginya yang tersisa. */}
+            <div class="flex items-center gap-2 border-t border-[var(--color-garis)] px-2 py-2" data-jejak-area="sidebar">
+              <span class="teks-sidebar ml-2 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-merah-600 text-sm font-bold text-white">
+                {inisial}
+              </span>
+              <span class="teks-sidebar min-w-0 flex-1 text-sm leading-tight">
+                <span class="block truncate font-semibold">{user.name}</span>
+                <span class="block text-xs capitalize text-[var(--color-teks-lembut)]">{user.role}</span>
+              </span>
+              {bolehPengaturan && (
+                <a
+                  href="/pengaturan"
+                  title="Pengaturan"
+                  aria-label="Pengaturan"
+                  aria-current={aktif('/pengaturan') ? 'page' : undefined}
+                  class={aktif('/pengaturan') ? 'nav-tautan-aktif' : 'nav-tautan'}
+                >
+                  <svg
+                    class="h-5 w-5 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d={IKON.gerigi} />
+                  </svg>
+                </a>
+              )}
+            </div>
+
             {/* Hanya di layar lebar; di ponsel laci sudah selebar penuh, jadi menciutkannya tidak menambah ruang. */}
             <button
               id="ciutkan"
@@ -189,7 +228,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
 
           <div class="flex min-w-0 flex-1 flex-col transition-[margin] md:ml-[var(--lebar-sidebar)]">
             {/* Menempel di atas dengan z-[15]: di atas elemen sticky konten (z-10) tapi di bawah tirai dan laci menu (z-20/30). */}
-            <header class="sticky top-0 z-[15] flex h-[var(--tinggi-topbar)] items-center justify-between gap-3 border-b border-[var(--color-garis)] bg-white px-4 md:gap-4 md:px-6">
+            <header data-jejak-area="topbar" class="sticky top-0 z-[15] flex h-[var(--tinggi-topbar)] items-center justify-between gap-3 border-b border-[var(--color-garis)] bg-white px-4 md:gap-4 md:px-6">
               <div class="flex min-w-0 items-center gap-2">
                 {/* Pemicu laci berupa `<label>`, bukan `<button>`, karena yang menggerakkannya adalah checkbox di atas. */}
                 <label
@@ -213,11 +252,12 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
                 <h1 class="truncate text-xl font-bold tracking-tight md:text-2xl">{judul}</h1>
               </div>
 
+              {/* Di layar lebar identitas sudah tampil di dasar sidebar. */}
               <div class="flex shrink-0 items-center gap-3">
-                <span class="grid h-9 w-9 place-items-center rounded-full bg-merah-600 text-sm font-bold text-white">
+                <span class="grid h-9 w-9 place-items-center rounded-full bg-merah-600 text-sm font-bold text-white md:hidden">
                   {inisial}
                 </span>
-                <span class="hidden text-sm leading-tight sm:block">
+                <span class="hidden text-sm leading-tight sm:block md:hidden">
                   <span class="block font-semibold">{user.name}</span>
                   <span class="block text-xs capitalize text-[var(--color-teks-lembut)]">
                     {user.role}
@@ -230,10 +270,49 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             </header>
 
             {/* Padding lebih rapat di ponsel; bilah menempel (.bilah-tab, .bilah-aksi, .bilah-bawah) membatalkannya dengan margin negatif, jadi keduanya harus berubah bersamaan (lihat theme.css). */}
-            <main class="flex-1 px-4 py-4 md:px-6 md:py-6">
+            <main class="flex-1 px-4 pt-4 pb-[calc(1rem+var(--tinggi-tab-bawah))] md:px-6 md:py-6">
               <slot />
             </main>
           </div>
+
+          {/* Di bawah tirai dan laci (z-20/30) seperti topbar, jadi laci yang dibuka "Lainnya" menutupinya. */}
+          <nav
+            aria-label="Navigasi cepat"
+            data-jejak-area="tab-bawah"
+            class="fixed inset-x-0 bottom-0 z-[15] grid h-[var(--tinggi-tab-bawah)] auto-cols-fr grid-flow-col
+                   border-t border-[var(--color-garis)] bg-white md:hidden"
+          >
+            {tabTampil.map((m) => (
+              <a
+                href={m.href}
+                aria-current={aktif(m.href) ? 'page' : undefined}
+                class:list={['tab-bawah', aktif(m.href) && 'tab-bawah-aktif']}
+              >
+                <svg
+                  class="h-5 w-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d={IKON[m.ikon]} />
+                </svg>
+                {m.label}
+              </a>
+            ))}
+            {/* `<label>` ke checkbox laci yang sama dengan hamburger, jadi tetap jalan tanpa JS. */}
+            <label for="buka-menu" class="tab-bawah cursor-pointer">
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.75" />
+                <circle cx="12" cy="12" r="1.75" />
+                <circle cx="19" cy="12" r="1.75" />
+              </svg>
+              Lainnya
+            </label>
+          </nav>
         </div>
       ) : (
         <main class="mx-auto max-w-6xl px-4 py-8">
@@ -283,6 +362,51 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
 
       window.addEventListener('popstate', () => {
         if (document.querySelector('[data-daftar]')) ganti(location.pathname + location.search, false);
+      });
+    </script>
+
+    <script>
+      // Jejak klik ditampung lalu dikirim sekaligus saat halaman ditinggalkan, supaya tidak menambah request di tengah kerja kasir.
+      const antre: { halaman: string; area: string | null; target: string }[] = [];
+
+      function kirim() {
+        if (antre.length === 0) return;
+        // `text/plain` karena sendBeacon menolak tipe konten di luar daftar aman CORS; `/jejak` tetap mem-parse-nya sebagai JSON.
+        navigator.sendBeacon('/jejak', new Blob([JSON.stringify(antre.splice(0))], { type: 'text/plain' }));
+      }
+
+      document.addEventListener(
+        'click',
+        (e) => {
+          const asal = e.target as Element;
+          // Klik pada `<label>` memicu klik kedua di isiannya; yang kedua dibuang agar tidak terhitung dua kali.
+          if (asal.closest('input, select, textarea')) return;
+          const el = asal.closest<HTMLElement>('a, button, summary, label');
+          if (!el) return;
+          const teks = (
+            el.dataset.jejak ??
+            el.getAttribute('aria-label') ??
+            el.getAttribute('title') ??
+            el.textContent ??
+            ''
+          )
+            .replace(/\s+/g, ' ')
+            .trim();
+          const target = (teks || el.getAttribute('href') || el.tagName.toLowerCase()).slice(0, 80);
+          antre.push({
+            // Id di path diseragamkan agar klik di halaman produk mana pun terkumpul jadi satu baris.
+            halaman: location.pathname.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id'),
+            area: el.closest<HTMLElement>('[data-jejak-area]')?.dataset.jejakArea ?? null,
+            target,
+          });
+          if (antre.length >= 100) kirim();
+        },
+        { capture: true },
+      );
+
+      addEventListener('pagehide', kirim);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') kirim();
       });
     </script>
 

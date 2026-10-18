@@ -43,13 +43,14 @@ export function berandaUntuk(role: Role): string {
   }
 }
 
-/** Halaman yang wajib terbuka bagi semua pengguna login; publik ikut agar yang sudah login tak dipantulkan dari `/login`, dan `/foto` agar kartu produk kasir tak rusak. */
+/** Halaman yang wajib terbuka bagi semua pengguna login; publik ikut agar yang sudah login tak dipantulkan dari `/login`, `/foto` agar kartu produk kasir tak rusak, dan `/jejak` karena klik semua peran yang diukur. */
 const HALAMAN_UMUM = [
   '/',
   '/logout',
   '/ganti-password',
   '/pengaturan/akun',
   '/foto',
+  '/jejak',
   ...HALAMAN_PUBLIK,
 ];
 

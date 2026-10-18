@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n        FROM customers c\n        WHERE ($1::text IS NULL\n               OR NOT EXISTS (\n                   SELECT 1 FROM unnest(regexp_split_to_array(btrim($1), '\\s+')) AS kata\n                   WHERE NOT (c.name ILIKE '%' || kata || '%' OR c.phone ILIKE '%' || kata || '%')))\n          AND ($2::text IS NULL\n               OR ($2 = 'belanja' AND EXISTS (\n                   SELECT 1 FROM transactions t\n                   WHERE t.customer_id = c.id AND t.status = 'completed'))\n               OR c.source = $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ca179618a3d0ade12c40ae74d92d7f9b9e58b525066b0c95b3728bd337a5dd0a"
+}

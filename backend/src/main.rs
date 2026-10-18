@@ -5,6 +5,7 @@ mod customers;
 mod db;
 mod error;
 mod import;
+mod jejak;
 mod marketplace;
 mod orders;
 mod pos;
@@ -83,6 +84,7 @@ async fn main() {
         .nest("/api", catalog::router())
         .nest("/api", customers::router())
         .nest("/api", import::router())
+        .nest("/api", jejak::router())
         .nest("/api", orders::router())
         .nest("/api", pos::router())
         .nest("/api", reports::router())
