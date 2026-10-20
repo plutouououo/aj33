@@ -24,6 +24,7 @@ const TAB = [
 type Tab = (typeof TAB)[number]['nilai'];
 
 const URUT = [
+  { nilai: 'relevan', label: 'Paling relevan' },
   { nilai: 'terbaru', label: 'Terbaru diubah' },
   { nilai: 'stok-terendah', label: 'Stok terendah' },
   { nilai: 'harga-tertinggi', label: 'Harga tertinggi' },
@@ -102,7 +103,7 @@ const params = Astro.url.searchParams;
 const cari = params.get('cari')?.trim() ?? '';
 const kategoriDipilih = params.get('kategori') ?? '';
 const tab = (TAB.find((t) => t.nilai === params.get('tab'))?.nilai ?? 'semua') as Tab;
-const urut = (URUT.find((u) => u.nilai === params.get('urut'))?.nilai ?? 'terbaru') as Urut;
+const urut = (URUT.find((u) => u.nilai === params.get('urut'))?.nilai ?? 'relevan') as Urut;
 const hanyaMenipis = params.get('hanya_menipis') === '1';
 const PER_HALAMAN = [10, 25, 50, 100];
 const limit = PER_HALAMAN.includes(Number(params.get('per'))) ? Number(params.get('per')) : 25;
@@ -126,7 +127,7 @@ function saringan(ke: number, override: Partial<{ tab: Tab }> = {}): string {
   if (kategoriDipilih) p.set('kategori', kategoriDipilih);
   const tabEfektif = override.tab ?? tab;
   if (tabEfektif !== 'semua') p.set('tab', tabEfektif);
-  if (urut !== 'terbaru') p.set('urut', urut);
+  if (urut !== 'relevan') p.set('urut', urut);
   if (hanyaMenipis) p.set('hanya_menipis', '1');
   if (limit !== 25) p.set('per', String(limit));
   if (ke !== 1) p.set('halaman', String(ke));
@@ -200,7 +201,8 @@ terlihat = terlihat.slice();
 if (urut === 'stok-terendah') terlihat.sort((a, b) => a.stock_qty - b.stock_qty);
 else if (urut === 'harga-tertinggi') terlihat.sort((a, b) => b.price - a.price);
 else if (urut === 'nama') terlihat.sort((a, b) => a.name.localeCompare(b.name, 'id'));
-else terlihat.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+// Backend sudah mengurutkan hasil pencarian menurut kemiripan; tanpa kata kunci "relevan" tak bermakna, jadi jatuh ke terbaru diubah.
+else if (urut === 'terbaru' || !cari) terlihat.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
 const total = terlihat.length;
 const halamanTerakhir = Math.max(1, Math.ceil(total / limit));
@@ -259,7 +261,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
       type="checkbox"
       id="buka-saringan"
       class="peer sr-only md:hidden"
-      checked={Boolean(kategoriDipilih) || hanyaMenipis || urut !== 'terbaru' || limit !== 25}
+      checked={Boolean(kategoriDipilih) || hanyaMenipis || urut !== 'relevan' || limit !== 25}
       aria-label="Tampilkan saringan"
     />
 
@@ -272,7 +274,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
           type="search"
           name="cari"
           value={cari}
-          placeholder="Cari nama atau SKU..."
+          placeholder="Cari nama, nama SEO, atau SKU..."
           enterkeyhint="search"
         />
         {/* Tombol kirim pertama di form sehingga jadi tujuan Enter; tanpanya Enter di ponsel tak mengirim apa pun karena "Terapkan" tersembunyi di saringan yang terlipat. */}

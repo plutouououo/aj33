@@ -147,9 +147,10 @@ pub async fn list_products(
         LEFT JOIN categories c ON c.id = p.category_id
         WHERE ($1::text IS NULL
                OR NOT EXISTS (
-                   SELECT 1 FROM unnest(regexp_split_to_array(btrim($1), '\s+')) AS kata
-                   WHERE NOT (p.name ILIKE '%' || kata || '%'
-                              OR p.seo_name ILIKE '%' || kata || '%'
+                   SELECT 1 FROM regexp_split_to_table($1, '[^[:alnum:]]+') AS kata
+                   WHERE kata <> ''
+                     AND NOT (p.name ILIKE '%' || kata || '%'
+                              OR coalesce(p.seo_name, '') ILIKE '%' || kata || '%'
                               OR p.sku ILIKE '%' || kata || '%')))
           AND ($2::uuid IS NULL OR p.category_id = $2)
           AND (NOT $3::bool OR p.is_active)
@@ -158,8 +159,12 @@ pub async fn list_products(
                OR ($5 = 'induk' AND p.parent_id IS NULL)
                OR ($5 = 'terjual'
                    AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))
+        -- Saat mencari, yang paling mirip seluruh kueri naik ke atas (nama SEO tempelan dari marketplace jadi nomor satu); trigram mengabaikan tanda baca.
+        ORDER BY CASE WHEN $1::text IS NULL THEN 0
+                      ELSE greatest(similarity(p.name, $1), similarity(coalesce(p.seo_name, ''), $1),
+                                    similarity(p.sku, $1)) END DESC,
         -- `p.id` pemutus urutan: nama produk boleh kembar dan tanpanya baris kembar bisa bertukar antar kueri (muncul dua kali di daftar berhalaman).
-        ORDER BY p.name, p.id
+                 p.name, p.id
         LIMIT $6 OFFSET $7
         "#,
         filter.search.as_deref(),
@@ -178,9 +183,10 @@ pub async fn list_products(
         FROM products p
         WHERE ($1::text IS NULL
                OR NOT EXISTS (
-                   SELECT 1 FROM unnest(regexp_split_to_array(btrim($1), '\s+')) AS kata
-                   WHERE NOT (p.name ILIKE '%' || kata || '%'
-                              OR p.seo_name ILIKE '%' || kata || '%'
+                   SELECT 1 FROM regexp_split_to_table($1, '[^[:alnum:]]+') AS kata
+                   WHERE kata <> ''
+                     AND NOT (p.name ILIKE '%' || kata || '%'
+                              OR coalesce(p.seo_name, '') ILIKE '%' || kata || '%'
                               OR p.sku ILIKE '%' || kata || '%')))
           AND ($2::uuid IS NULL OR p.category_id = $2)
           AND (NOT $3::bool OR p.is_active)
