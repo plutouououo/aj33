@@ -164,6 +164,8 @@ export interface PaginatedProducts {
   page: number;
   limit: number;
   total: number;
+  /** Tak ada produk yang memuat semua kata kunci; `data` berisi yang paling mirip. */
+  approximate: boolean;
 }
 
 export interface Category {

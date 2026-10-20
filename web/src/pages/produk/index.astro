@@ -340,6 +340,12 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
     </div>
   </form>
 
+  {semuaProduk.approximate && halamanIni.length > 0 && (
+    <p class="mb-3 text-sm text-[var(--color-teks-lembut)]">
+      Tidak ada produk yang memuat semua kata "{cari}". Menampilkan produk yang paling mirip.
+    </p>
+  )}
+
   {terpotong && (
     <p class="mb-3 text-xs text-[var(--color-teks-lembut)]">
       Menampilkan 200 baris pertama (induk dan varian tercampur). Pakai pencarian atau kategori

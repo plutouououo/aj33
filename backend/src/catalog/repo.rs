@@ -123,9 +123,38 @@ pub struct ProductFilter {
     pub offset: i64,
 }
 
-pub async fn list_products(
+/// Hasil `list_products`; `approximate` berarti tak ada produk yang memuat semua kata kunci, jadi yang dikembalikan adalah yang paling mirip.
+pub struct DaftarProduk {
+    pub rows: Vec<Product>,
+    pub total: i64,
+    pub approximate: bool,
+}
+
+/// Ambang skor kemiripan pencarian longgar; di bawah ini hasilnya diukur pada katalog produksi sudah tak berkaitan dengan kueri.
+const SKOR_MIRIP_MIN: f64 = 0.3;
+
+pub async fn list_products(pool: &PgPool, filter: &ProductFilter) -> AppResult<DaftarProduk> {
+    let (rows, total) = cari_produk(pool, filter, false).await?;
+    // Judul SEO tempelan dari marketplace sering memuat kata yang tak ada di data ("express", "990 gram"); daripada kosong, tampilkan yang paling mirip.
+    if total == 0 && filter.search.is_some() {
+        let (rows, total) = cari_produk(pool, filter, true).await?;
+        return Ok(DaftarProduk {
+            rows,
+            total,
+            approximate: true,
+        });
+    }
+    Ok(DaftarProduk {
+        rows,
+        total,
+        approximate: false,
+    })
+}
+
+async fn cari_produk(
     pool: &PgPool,
     filter: &ProductFilter,
+    longgar: bool,
 ) -> AppResult<(Vec<Product>, i64)> {
     // `$1 IS NULL OR ...` membuat satu query melayani semua kombinasi filter, tanpa merangkai SQL string yang menutup pemeriksaan saat compile.
     let baris = sqlx::query_as!(
@@ -145,13 +174,23 @@ pub async fn list_products(
             p.created_at AS "created_at!", p.updated_at AS "updated_at!"
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
+        -- Rata-rata dua ukuran: `word_similarity` mengangkat nama SEO pendek yang termuat utuh di kueri panjang, `similarity` mengangkat yang mirip keseluruhan.
+        CROSS JOIN LATERAL (
+            SELECT greatest(
+                (word_similarity(p.name, $1) + similarity(p.name, $1)) / 2,
+                (word_similarity(coalesce(p.seo_name, ''), $1) + similarity(coalesce(p.seo_name, ''), $1)) / 2,
+                (word_similarity(coalesce(p.sku, ''), $1) + similarity(coalesce(p.sku, ''), $1)) / 2
+            ) AS nilai
+        ) skor
         WHERE ($1::text IS NULL
-               OR NOT EXISTS (
+               OR ($8::bool AND skor.nilai >= $9)
+               OR (NOT $8::bool AND NOT EXISTS (
                    SELECT 1 FROM regexp_split_to_table($1, '[^[:alnum:]]+') AS kata
                    WHERE kata <> ''
-                     AND NOT (p.name ILIKE '%' || kata || '%'
-                              OR coalesce(p.seo_name, '') ILIKE '%' || kata || '%'
-                              OR p.sku ILIKE '%' || kata || '%')))
+                     -- `IS NOT TRUE`, bukan `NOT`: seo_name/sku boleh NULL, dan `NOT (NULL)` bernilai NULL sehingga kata yang tak ada tak terhitung hilang dan produk itu cocok dengan pencarian apa pun.
+                     AND (p.name ILIKE '%' || kata || '%'
+                          OR p.seo_name ILIKE '%' || kata || '%'
+                          OR p.sku ILIKE '%' || kata || '%') IS NOT TRUE)))
           AND ($2::uuid IS NULL OR p.category_id = $2)
           AND (NOT $3::bool OR p.is_active)
           AND ($4::uuid IS NULL OR p.parent_id = $4)
@@ -160,9 +199,7 @@ pub async fn list_products(
                OR ($5 = 'terjual'
                    AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))
         -- Saat mencari, yang paling mirip seluruh kueri naik ke atas (nama SEO tempelan dari marketplace jadi nomor satu); trigram mengabaikan tanda baca.
-        ORDER BY CASE WHEN $1::text IS NULL THEN 0
-                      ELSE greatest(similarity(p.name, $1), similarity(coalesce(p.seo_name, ''), $1),
-                                    similarity(p.sku, $1)) END DESC,
+        ORDER BY CASE WHEN $1::text IS NULL THEN 0 ELSE skor.nilai END DESC,
         -- `p.id` pemutus urutan: nama produk boleh kembar dan tanpanya baris kembar bisa bertukar antar kueri (muncul dua kali di daftar berhalaman).
                  p.name, p.id
         LIMIT $6 OFFSET $7
@@ -173,7 +210,9 @@ pub async fn list_products(
         filter.parent_id,
         filter.scope.as_str(),
         filter.limit,
-        filter.offset
+        filter.offset,
+        longgar,
+        SKOR_MIRIP_MIN
     )
     .fetch_all(pool);
 
@@ -181,13 +220,23 @@ pub async fn list_products(
         r#"
         SELECT count(*) AS "count!"
         FROM products p
+        -- Rata-rata dua ukuran: `word_similarity` mengangkat nama SEO pendek yang termuat utuh di kueri panjang, `similarity` mengangkat yang mirip keseluruhan.
+        CROSS JOIN LATERAL (
+            SELECT greatest(
+                (word_similarity(p.name, $1) + similarity(p.name, $1)) / 2,
+                (word_similarity(coalesce(p.seo_name, ''), $1) + similarity(coalesce(p.seo_name, ''), $1)) / 2,
+                (word_similarity(coalesce(p.sku, ''), $1) + similarity(coalesce(p.sku, ''), $1)) / 2
+            ) AS nilai
+        ) skor
         WHERE ($1::text IS NULL
-               OR NOT EXISTS (
+               OR ($6::bool AND skor.nilai >= $7)
+               OR (NOT $6::bool AND NOT EXISTS (
                    SELECT 1 FROM regexp_split_to_table($1, '[^[:alnum:]]+') AS kata
                    WHERE kata <> ''
-                     AND NOT (p.name ILIKE '%' || kata || '%'
-                              OR coalesce(p.seo_name, '') ILIKE '%' || kata || '%'
-                              OR p.sku ILIKE '%' || kata || '%')))
+                     -- `IS NOT TRUE`, bukan `NOT`: seo_name/sku boleh NULL, dan `NOT (NULL)` bernilai NULL sehingga kata yang tak ada tak terhitung hilang dan produk itu cocok dengan pencarian apa pun.
+                     AND (p.name ILIKE '%' || kata || '%'
+                          OR p.seo_name ILIKE '%' || kata || '%'
+                          OR p.sku ILIKE '%' || kata || '%') IS NOT TRUE)))
           AND ($2::uuid IS NULL OR p.category_id = $2)
           AND (NOT $3::bool OR p.is_active)
           AND ($4::uuid IS NULL OR p.parent_id = $4)
@@ -200,7 +249,9 @@ pub async fn list_products(
         filter.category_id,
         filter.only_active,
         filter.parent_id,
-        filter.scope.as_str()
+        filter.scope.as_str(),
+        longgar,
+        SKOR_MIRIP_MIN
     )
     .fetch_one(pool);
 

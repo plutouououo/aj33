@@ -67,6 +67,8 @@ struct PaginatedProducts {
     page: i64,
     limit: i64,
     total: i64,
+    /// Tak ada produk yang memuat semua kata kunci; `data` berisi yang paling mirip.
+    approximate: bool,
 }
 
 /// Batas atas agar satu request tak menarik seluruh tabel dan menghabiskan memori.
@@ -101,13 +103,14 @@ async fn list_products(
         offset: (page - 1) * limit,
     };
 
-    let (data, total) = repo::list_products(&state.pool, &filter).await?;
+    let hasil = repo::list_products(&state.pool, &filter).await?;
 
     Ok(Json(PaginatedProducts {
-        data,
+        data: hasil.rows,
         page,
         limit,
-        total,
+        total: hasil.total,
+        approximate: hasil.approximate,
     }))
 }
 

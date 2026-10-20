@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n        FROM products p\n        -- Rata-rata dua ukuran: `word_similarity` mengangkat nama SEO pendek yang termuat utuh di kueri panjang, `similarity` mengangkat yang mirip keseluruhan.\n        CROSS JOIN LATERAL (\n            SELECT greatest(\n                (word_similarity(p.name, $1) + similarity(p.name, $1)) / 2,\n                (word_similarity(coalesce(p.seo_name, ''), $1) + similarity(coalesce(p.seo_name, ''), $1)) / 2,\n                (word_similarity(coalesce(p.sku, ''), $1) + similarity(coalesce(p.sku, ''), $1)) / 2\n            ) AS nilai\n        ) skor\n        WHERE ($1::text IS NULL\n               OR ($6::bool AND skor.nilai >= $7)\n               OR (NOT $6::bool AND NOT EXISTS (\n                   SELECT 1 FROM regexp_split_to_table($1, '[^[:alnum:]]+') AS kata\n                   WHERE kata <> ''\n                     -- `IS NOT TRUE`, bukan `NOT`: seo_name/sku boleh NULL, dan `NOT (NULL)` bernilai NULL sehingga kata yang tak ada tak terhitung hilang dan produk itu cocok dengan pencarian apa pun.\n                     AND (p.name ILIKE '%' || kata || '%'\n                          OR p.seo_name ILIKE '%' || kata || '%'\n                          OR p.sku ILIKE '%' || kata || '%') IS NOT TRUE)))\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n          AND ($4::uuid IS NULL OR p.parent_id = $4)\n          AND ($5::text IS NULL\n               OR ($5 = 'induk' AND p.parent_id IS NULL)\n               OR ($5 = 'terjual'\n                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Bool",
+        "Uuid",
+        "Text",
+        "Bool",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "eb6c031895cf922f8ddb0c2469e3f318f90a09200b004945f4a1e0528e31a1d9"
+}
