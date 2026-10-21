@@ -83,7 +83,7 @@ const teksWa = tiket
 
 <AppShell judul={tiket?.order_ref ?? 'Tiket'} user={user}>
   <a
-    class="text-sm text-stone-500 underline-offset-2 hover:text-merah-700 hover:underline"
+    class="-my-2 inline-flex min-h-11 items-center text-sm text-stone-500 underline-offset-2 hover:text-merah-700 hover:underline"
     href="/tiket"
   >
     ← Antrean tiket
@@ -124,7 +124,10 @@ const teksWa = tiket
 
             <ul class="divide-y divide-[var(--color-garis)]">
               {tiket.items.map((it) => (
-                <li class="flex items-center gap-3 py-3">
+                <li
+                  class="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 scroll-mt-[calc(var(--tinggi-topbar)+1rem)]"
+                  id={`barang-${it.id}`}
+                >
                   <span
                     class:list={[
                       'grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold',
@@ -161,12 +164,13 @@ const teksWa = tiket
                   </div>
 
                   {/* Centang hanya bisa diubah saat tiket dikemas; setelah `packed`, pemeriksaan "semua barang sudah dikemas" tak boleh dibatalkan. */}
+                  {/* `action` berjangkar ke barangnya: redirect 303 mewarisi fragmen itu, jadi di ponsel layar kembali ke barang yang baru dicentang, bukan ke atas halaman. */}
                   {boleh && tiket.status === 'packing' && (
-                    <form method="POST">
+                    <form method="POST" action={`#barang-${it.id}`} class="max-sm:w-full max-sm:pl-9">
                       <input type="hidden" name="aksi" value="item" />
                       <input type="hidden" name="item_id" value={it.id} />
                       <input type="hidden" name="is_packed" value={it.is_packed ? '0' : '1'} />
-                      <button class="tombol-halus" type="submit">
+                      <button class="tombol-halus max-sm:w-full" type="submit">
                         {it.is_packed ? 'Batalkan' : 'Sudah diambil'}
                       </button>
                     </form>
@@ -195,7 +199,7 @@ const teksWa = tiket
             </p>
 
             {bisaDiambil && (
-              <form method="POST" class="mb-3">
+              <form method="POST" class:list={['mb-3', !lanjut && 'max-lg:hidden']}>
                 <input type="hidden" name="aksi" value="ambil" />
                 <button
                   class:list={[lanjut ? 'tombol-halus' : 'tombol-utama', 'w-full']}
@@ -229,7 +233,7 @@ const teksWa = tiket
             )}
 
             {lanjut && (
-              <form method="POST">
+              <form method="POST" class="max-lg:hidden">
                 <input type="hidden" name="aksi" value="status" />
                 <input type="hidden" name="status" value={lanjut.status} />
                 <button class="tombol-utama w-full" type="submit">
@@ -250,6 +254,28 @@ const teksWa = tiket
             )}
           </div>
         </div>
+
+        {/* Di ponsel kartu Pengerjaan ada di bawah daftar barang, jadi aksi utamanya diulang di bilah yang menempel di dasar layar. */}
+        {(lanjut || bisaDiambil) && (
+          <form method="POST" class="bilah-aksi lg:hidden">
+            {lanjut ? (
+              <>
+                <input type="hidden" name="aksi" value="status" />
+                <input type="hidden" name="status" value={lanjut.status} />
+                <button class="tombol-utama w-full" type="submit">
+                  {lanjut.label}
+                </button>
+              </>
+            ) : (
+              <>
+                <input type="hidden" name="aksi" value="ambil" />
+                <button class="tombol-utama w-full" type="submit">
+                  {tiket.assigned_to_user_id ? 'Ambil alih' : 'Ambil tiket'}
+                </button>
+              </>
+            )}
+          </form>
+        )}
       </>
     )
   }

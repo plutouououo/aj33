@@ -305,7 +305,7 @@ dari ratusan baris di bawahnya, tanpa perlu garis tebal.
 tiap `<td>` `data-label="Nama kolom"`; di bawah `md` kepala tabel disembunyikan
 dan tiap baris menjadi kartu berisi pasangan label kiri / nilai kanan. Sel
 ber-`data-judul` (tanpa label) jadi judul kartu. Kolom yang kurang penting di
-ponsel cukup diberi `max-md:hidden`. Dipakai di `/laporan`.
+ponsel cukup diberi `max-md:hidden`. Dipakai di `/laporan` dan `/tiket`.
 
 **Kartu angka `.ringkasan`.** Pembungkus `.kartu-angka` yang di ponsel (<`sm`)
 berjajar dua: kartu pertama (dan terakhir bila ganjil) selebar penuh, sisanya
