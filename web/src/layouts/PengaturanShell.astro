@@ -1,5 +1,5 @@
 ---
-/** Kerangka halaman Pengaturan: sub-navigasi (Akun, Platform, Harga, Kamus SKU) khusus di sini, difilter `bolehAkses` supaya kasir/pengepak tidak melihat tautan yang ditolak middleware. */
+/** Kerangka halaman Pengaturan: sub-navigasi (Akun, Platform, Harga, Kamus SKU, Shortcut iPhone) khusus di sini, difilter `bolehAkses` supaya kasir/pengepak tidak melihat tautan yang ditolak middleware. */
 import AppShell from './AppShell.astro';
 import type { User } from '../lib/api';
 import { bolehAkses } from '../lib/session';
@@ -17,6 +17,7 @@ const MENU = [
   { href: '/pengaturan/platform', label: 'Platform' },
   { href: '/pengaturan/harga', label: 'Harga' },
   { href: '/pengaturan/sku', label: 'Kamus SKU' },
+  { href: '/pengaturan/shortcut', label: 'Shortcut iPhone' },
 ];
 
 const menuTampil = MENU.filter((m) => bolehAkses(user.role, m.href));

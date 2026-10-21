@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE label_upload_tokens t\n        SET last_used_at = now()\n        FROM users u\n        WHERE t.token_hash = $1 AND u.id = t.user_id AND u.is_active AND u.role = 'owner'\n        RETURNING t.user_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6bfb0ffc2758a81b197c61e6670686afb0985ff2a0f318def8f3983ab00ed260"
+}

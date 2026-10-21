@@ -52,3 +52,9 @@ pub struct CurrentUser {
     pub id: Uuid,
     pub role: Role,
 }
+
+/// Pemegang token unggah label (Shortcut iPhone); tipe tersendiri, bukan `CurrentUser`, agar token itu hanya diterima handler yang memintanya secara khusus.
+#[derive(Debug, Clone, Copy)]
+pub struct PengunggahLabel {
+    pub id: Uuid,
+}

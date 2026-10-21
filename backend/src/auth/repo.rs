@@ -1,6 +1,7 @@
-//! Akses tabel `users`, hanya membaca dan menulis baris tanpa aturan bisnis.
+//! Akses tabel `users` dan `label_upload_tokens`, hanya membaca dan menulis baris tanpa aturan bisnis.
 
 use crate::error::AppResult;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -93,4 +94,76 @@ pub async fn list_aktif(pool: &PgPool, role: Option<&str>) -> AppResult<Vec<Peng
     .await?;
 
     Ok(rows)
+}
+
+#[derive(Debug, Serialize)]
+pub struct TokenLabel {
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+pub async fn token_label(pool: &PgPool, user_id: Uuid) -> AppResult<Option<TokenLabel>> {
+    let row = sqlx::query_as!(
+        TokenLabel,
+        "SELECT created_at, last_used_at FROM label_upload_tokens WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn simpan_token_label(
+    pool: &PgPool,
+    user_id: Uuid,
+    token_hash: &str,
+) -> AppResult<TokenLabel> {
+    let row = sqlx::query_as!(
+        TokenLabel,
+        r#"
+        INSERT INTO label_upload_tokens (user_id, token_hash)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id) DO UPDATE SET
+            token_hash = EXCLUDED.token_hash,
+            created_at = now(),
+            last_used_at = NULL
+        RETURNING created_at, last_used_at
+        "#,
+        user_id,
+        token_hash
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn hapus_token_label(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
+    sqlx::query!(
+        "DELETE FROM label_upload_tokens WHERE user_id = $1",
+        user_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Pemilik token yang masih owner aktif, sekaligus mencatat waktu pakainya; akun yang dinonaktifkan atau berganti peran otomatis kehilangan aksesnya.
+pub async fn pakai_token_label(pool: &PgPool, token_hash: &str) -> AppResult<Option<Uuid>> {
+    let id = sqlx::query_scalar!(
+        r#"
+        UPDATE label_upload_tokens t
+        SET last_used_at = now()
+        FROM users u
+        WHERE t.token_hash = $1 AND u.id = t.user_id AND u.is_active AND u.role = 'owner'
+        RETURNING t.user_id
+        "#,
+        token_hash
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(id)
 }

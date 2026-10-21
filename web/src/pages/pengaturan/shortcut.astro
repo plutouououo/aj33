@@ -1,0 +1,121 @@
+---
+/** Token unggah label untuk Shortcut iPhone beserta cara memasangnya; token hanya bisa mencatat label Shopee, bukan membuka bagian lain aplikasi. */
+import Galat from '../../components/Galat.astro';
+import PengaturanShell from '../../layouts/PengaturanShell.astro';
+import { api, ApiRequestError, type TokenLabel } from '../../lib/api';
+import { waktu } from '../../lib/format';
+import { pesanDari, sesudahAksi } from '../../lib/pesan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+let galat: string | null = null;
+let tokenBaru: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = String(form.get('aksi') ?? '');
+
+  try {
+    if (aksi === 'buat') {
+      // Token ditampilkan langsung, bukan lewat redirect, karena teksnya hanya ada di jawaban ini dan tak boleh masuk URL.
+      tokenBaru = (await api<{ token: string }>('/auth/label-token', { method: 'POST', token })).token;
+    } else if (aksi === 'cabut') {
+      await api('/auth/label-token', { method: 'DELETE', token });
+      return Astro.redirect(sesudahAksi(Astro.url, 'cabut'), 303);
+    } else {
+      galat = 'Aksi tidak dikenal.';
+    }
+  } catch (err) {
+    galat = err instanceof ApiRequestError ? err.message : 'Gagal mengubah token unggah.';
+  }
+}
+
+const sukses = galat ? null : pesanDari(Astro.url, { cabut: 'Token dicabut. Shortcut yang memakainya tidak bisa mengunggah lagi.' });
+
+const info = await api<TokenLabel | null>('/auth/label-token', { token });
+const alamat = `${Astro.url.origin}/unggah-label`;
+---
+
+<PengaturanShell judul="Shortcut iPhone" user={user}>
+  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
+    iPhone tidak bisa membagikan berkas langsung ke aplikasi ini, jadi PDF label Shopee dikirim lewat
+    Shortcut. Shortcut memakai token unggah yang <strong>hanya bisa mencatat label</strong>; pesanan
+    yang tercatat muncul di Pesanan Masuk untuk dikirim ke pengepak seperti biasa.
+  </p>
+
+  <Galat pesan={galat} class="mb-4" />
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+
+  <section class="kartu mb-6 max-w-prose">
+    <h2 class="mb-2 font-semibold">Token unggah</h2>
+
+    {
+      tokenBaru ? (
+        <div class="space-y-2">
+          <p class="text-sm">
+            Salin token ini ke Shortcut sekarang. <strong>Token tidak akan ditampilkan lagi</strong>;
+            kalau hilang, buat token baru.
+          </p>
+          <input
+            class="kolom font-mono text-sm"
+            readonly
+            value={tokenBaru}
+            aria-label="Token unggah"
+            onfocus="this.select()"
+          />
+        </div>
+      ) : info ? (
+        <p class="text-sm text-[var(--color-teks-lembut)]">
+          Aktif sejak {waktu(info.created_at)} ·{' '}
+          {info.last_used_at ? `terakhir dipakai ${waktu(info.last_used_at)}` : 'belum pernah dipakai'}
+        </p>
+      ) : (
+        <p class="text-sm text-[var(--color-teks-lembut)]">Belum ada token.</p>
+      )
+    }
+
+    <div class="mt-4 flex flex-wrap gap-2">
+      <form method="POST">
+        <input type="hidden" name="aksi" value="buat" />
+        <button class="tombol-utama" type="submit">
+          {info || tokenBaru ? 'Buat token baru (yang lama berhenti berlaku)' : 'Buat token'}
+        </button>
+      </form>
+      {
+        (info || tokenBaru) && (
+          <form method="POST">
+            <input type="hidden" name="aksi" value="cabut" />
+            <button class="aksi-baris" type="submit">Cabut token</button>
+          </form>
+        )
+      }
+    </div>
+  </section>
+
+  <section class="kartu max-w-prose">
+    <h2 class="mb-2 font-semibold">Memasang Shortcut</h2>
+    <ol class="list-decimal space-y-2 pl-5 text-sm">
+      <li>Buka app <strong>Shortcuts</strong>, ketuk <strong>+</strong>, beri nama mis. "Kirim ke Toko Ayam".</li>
+      <li>
+        Ketuk ikon <strong>ⓘ</strong>, nyalakan <strong>Show in Share Sheet</strong>, lalu di
+        <em>Receive</em> pilih <strong>PDFs</strong> saja.
+      </li>
+      <li>
+        Tambah aksi <strong>Get Contents of URL</strong>:
+        <ul class="mt-1 list-disc space-y-1 pl-5">
+          <li>URL: <code class="break-all">{alamat}</code></li>
+          <li>Method: <strong>POST</strong></li>
+          <li>Headers: <code>Authorization</code> = <code>Bearer </code> diikuti token di atas (ada spasi setelah Bearer)</li>
+          <li>Request Body: <strong>File</strong>, isinya <strong>Shortcut Input</strong></li>
+        </ul>
+      </li>
+      <li>Tambah aksi <strong>Get Dictionary Value</strong>: key <code>pesan</code>, dari <em>Contents of URL</em>.</li>
+      <li>Tambah aksi <strong>Show Notification</strong> berisi <em>Dictionary Value</em>.</li>
+    </ol>
+    <p class="mt-3 text-sm text-[var(--color-teks-lembut)]">
+      Pakainya: buka PDF label, ketuk Share, pilih Shortcut tadi. Notifikasi menyebut berapa pesanan
+      tercatat; kirim tiketnya dari Pesanan Masuk.
+    </p>
+  </section>
+</PengaturanShell>

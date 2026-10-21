@@ -2,7 +2,7 @@
 
 use super::repo::{self, Mapping, Order, PlatformStatus};
 use super::service::{self, HasilLabel, LabelShopee};
-use crate::auth::{CurrentUser, Role};
+use crate::auth::{CurrentUser, PengunggahLabel, Role};
 use crate::error::{AppError, AppResult};
 use crate::marketplace::tiktok::{self, NAMA_PLATFORM};
 use crate::marketplace::{klasifikasi_sla, shopee, tenggat_sla, NormalizedOrder};
@@ -30,6 +30,10 @@ pub fn router() -> Router<AppState> {
         .route("/webhooks/tiktok", post(webhook))
         .route("/orders", get(list_orders))
         .route("/orders/labels", post(catat_label))
+        .route(
+            "/orders/labels/shortcut",
+            get(periksa_token_label).post(catat_label_shortcut),
+        )
         .route("/orders/{id}", get(get_order))
         .route(
             "/products/{id}/mappings",
@@ -428,6 +432,21 @@ async fn catat_label(
     Json(body): Json<LabelRequest>,
 ) -> AppResult<Json<Vec<HasilLabel>>> {
     user.require(&[Role::Owner])?;
+    Ok(Json(service::catat_label(&state.pool, body.labels).await?))
+}
+
+/// Astro memeriksa token di sini sebelum membaca PDF, agar pemanggil tanpa token sah tak bisa membebani server dengan PDF besar.
+async fn periksa_token_label(_pengunggah: PengunggahLabel) -> axum::http::StatusCode {
+    axum::http::StatusCode::NO_CONTENT
+}
+
+/// Sama dengan `catat_label`, untuk Shortcut iPhone yang memakai token unggah label alih-alih sesi login.
+async fn catat_label_shortcut(
+    State(state): State<AppState>,
+    pengunggah: PengunggahLabel,
+    Json(body): Json<LabelRequest>,
+) -> AppResult<Json<Vec<HasilLabel>>> {
+    tracing::info!(user_id = %pengunggah.id, jumlah = body.labels.len(), "label dicatat lewat Shortcut");
     Ok(Json(service::catat_label(&state.pool, body.labels).await?))
 }
 

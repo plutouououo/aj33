@@ -24,8 +24,8 @@ export function ambilToken(cookies: AstroCookies): string | undefined {
   return cookies.get(COOKIE_SESI)?.value;
 }
 
-/** Halaman yang boleh dibuka tanpa login. */
-export const HALAMAN_PUBLIK = ['/login', '/offline'];
+/** Halaman yang boleh dibuka tanpa login; `/unggah-label` memeriksa token unggahnya sendiri karena Shortcut iPhone tak membawa cookie sesi. */
+export const HALAMAN_PUBLIK = ['/login', '/offline', '/unggah-label'];
 
 export function bolehTanpaLogin(pathname: string): boolean {
   return HALAMAN_PUBLIK.includes(pathname);

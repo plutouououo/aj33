@@ -1,8 +1,8 @@
 //! Endpoint auth dan extractor untuk semua modul; backend hanya mengenal `Authorization: Bearer`, urusan cookie milik Astro, sehingga hanya ada satu cara autentikasi yang dijaga.
 
-use super::repo;
+use super::repo::{self, TokenLabel};
 use super::service::{self, PublicUser};
-use super::{CurrentUser, Role};
+use super::{CurrentUser, PengunggahLabel, Role};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::extract::{FromRequestParts, State};
@@ -18,6 +18,12 @@ pub fn router() -> Router<AppState> {
         .route("/auth/me", get(me))
         .route("/auth/password", post(change_password))
         .route("/users", get(list_users))
+        .route(
+            "/auth/label-token",
+            get(lihat_token_label)
+                .post(buat_token_label)
+                .delete(cabut_token_label),
+        )
 }
 
 impl CurrentUser {
@@ -52,6 +58,26 @@ impl FromRequestParts<AppState> for CurrentUser {
             .ok_or_else(|| AppError::unauthorized("Harus login dulu."))?;
 
         service::baca_token(&state.config.jwt_secret, token)
+    }
+}
+
+/// Header sama dengan sesi (`Authorization: Bearer`), tapi isinya token unggah label yang dicocokkan ke database, bukan JWT.
+impl FromRequestParts<AppState> for PengunggahLabel {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let token = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .filter(|t| !t.trim().is_empty())
+            .ok_or_else(|| AppError::unauthorized("Token unggah belum dipasang."))?;
+
+        service::baca_token_label(&state.pool, token).await
     }
 }
 
@@ -139,4 +165,37 @@ async fn list_users(
     };
 
     Ok(Json(repo::list_aktif(&state.pool, role).await?))
+}
+
+async fn lihat_token_label(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<Json<Option<TokenLabel>>> {
+    user.require(&[Role::Owner])?;
+    Ok(Json(repo::token_label(&state.pool, user.id).await?))
+}
+
+#[derive(Debug, Serialize)]
+struct TokenLabelBaru {
+    token: String,
+    #[serde(flatten)]
+    info: TokenLabel,
+}
+
+async fn buat_token_label(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<Json<TokenLabelBaru>> {
+    user.require(&[Role::Owner])?;
+    let (token, info) = service::buat_token_label(&state.pool, user.id).await?;
+    Ok(Json(TokenLabelBaru { token, info }))
+}
+
+async fn cabut_token_label(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<axum::http::StatusCode> {
+    user.require(&[Role::Owner])?;
+    repo::hapus_token_label(&state.pool, user.id).await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }

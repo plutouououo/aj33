@@ -306,6 +306,29 @@ WhatsApp owner, owner ACC di WhatsApp (di luar aplikasi) → pengepak
 - **Pelanggan** punya `city` (kabupaten/kota) dan `district` (kecamatan),
   terisi otomatis dari label dan bisa disunting di halaman pelanggan.
 
+### Unggah label dari Shortcut iPhone (migrasi 0029)
+
+iOS tak mendukung Web Share Target (bug WebKit 194593), jadi PWA tak bisa
+muncul di menu Share iPhone. Gantinya Shortcut iPhone yang mengirim PDF
+mentah (`Request Body: File`, bukan Form) ke `POST /unggah-label` di Astro.
+Cara memasangnya tertulis di Pengaturan › Shortcut iPhone.
+
+- **Token unggah, bukan sesi.** Shortcut tak membawa cookie, dan JWT sesi
+  memberi akses owner penuh selama 30 hari. Owner membuat token di
+  Pengaturan; yang disimpan hanya SHA-256-nya (`label_upload_tokens`, satu per
+  pengguna, membuat baru = yang lama mati, bisa dicabut). Token hanya diterima
+  extractor `PengunggahLabel`, dipakai `GET`/`POST /orders/labels/shortcut`;
+  handler yang meminta `CurrentUser` menolaknya, begitu pula sebaliknya. Akun
+  yang nonaktif atau bukan owner lagi otomatis kehilangan aksesnya.
+- **Token diperiksa sebelum PDF dibaca** (`GET /orders/labels/shortcut`)
+  karena pdfjs berat; pemanggil tanpa token sah tak bisa membebani server.
+- **Badan mentah, bukan multipart:** `security.checkOrigin` Astro memeriksa
+  header `Origin` pada POST berjenis form, dan Shortcut tak mengirimnya; badan
+  `application/pdf` tak tersentuh pemeriksaan itu. `/unggah-label` ada di
+  `HALAMAN_PUBLIK` karena ia memeriksa tokennya sendiri.
+- Jawabannya selalu `{ pesan }` untuk ditampilkan notifikasi Shortcut.
+  Pesanan yang tercatat menunggu di `/pesanan` seperti hasil unggah biasa.
+
 ---
 
 ## Jebakan yang sudah memakan waktu

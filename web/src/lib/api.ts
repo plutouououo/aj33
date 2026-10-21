@@ -372,6 +372,12 @@ export interface HasilLabel {
   message: string | null;
 }
 
+/** Token unggah label milik owner (`GET /auth/label-token`); teks tokennya sendiri hanya ada di jawaban `POST`. */
+export interface TokenLabel {
+  created_at: string;
+  last_used_at: string | null;
+}
+
 /** Pengguna aktif dari `GET /users`, untuk memilih pengepak. */
 export interface Pengguna {
   id: string;

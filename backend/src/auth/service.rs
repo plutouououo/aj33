@@ -1,12 +1,14 @@
 //! Aturan autentikasi (siapa boleh masuk, token dibuat dan dibaca); tanpa SQL, itu urusan `repo.rs`.
 
-use super::repo::{self, UserRow};
+use super::repo::{self, TokenLabel, UserRow};
 use super::throttle::Throttle;
-use super::{CurrentUser, Role};
+use super::{CurrentUser, PengunggahLabel, Role};
 use crate::error::{AppError, AppResult};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -208,6 +210,27 @@ pub fn baca_token(secret: &str, token: &str) -> AppResult<CurrentUser> {
     Ok(CurrentUser { id, role })
 }
 
+/// Token unggah label baru menggantikan yang lama; teks aslinya hanya dikembalikan sekali ini karena yang disimpan hash-nya.
+pub async fn buat_token_label(pool: &PgPool, user_id: Uuid) -> AppResult<(String, TokenLabel)> {
+    let mut acak = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut acak);
+    let token = hex::encode(acak);
+
+    let info = repo::simpan_token_label(pool, user_id, &hash_token_label(&token)).await?;
+    Ok((token, info))
+}
+
+pub async fn baca_token_label(pool: &PgPool, token: &str) -> AppResult<PengunggahLabel> {
+    repo::pakai_token_label(pool, &hash_token_label(token.trim()))
+        .await?
+        .map(|id| PengunggahLabel { id })
+        .ok_or_else(|| AppError::unauthorized("Token unggah tidak valid atau sudah dicabut."))
+}
+
+fn hash_token_label(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +268,13 @@ mod tests {
         .unwrap();
 
         assert!(baca_token(SECRET, &token).is_err());
+    }
+
+    #[test]
+    fn hash_token_label_tetap_dan_berbeda_per_token() {
+        assert_eq!(hash_token_label("abc"), hash_token_label("abc"));
+        assert_ne!(hash_token_label("abc"), hash_token_label("abd"));
+        assert_eq!(hash_token_label("abc").len(), 64);
     }
 
     #[test]
