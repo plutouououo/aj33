@@ -7,7 +7,41 @@ const BATAS_BYTE = 10 * 1024 * 1024;
 
 const jawab = (status: number, pesan: string) => Response.json({ pesan }, { status });
 
-export const POST: APIRoute = async ({ request }) => {
+// Galat tak terduga tetap dijawab JSON, karena halaman galat HTML membuat Shortcut gagal membaca `pesan` tanpa keterangan apa pun.
+export const POST: APIRoute = async (context) => {
+  try {
+    return await terima(context.request);
+  } catch (err) {
+    console.error('unggah-label gagal', err);
+    return jawab(500, 'Server sedang bermasalah. Coba lagi sebentar lagi.');
+  }
+};
+
+/** Badan dibaca sampai `BATAS_BYTE`; `null` bila lebih, tanpa menunggu sisanya. */
+async function bacaBadan(request: Request): Promise<Uint8Array | null> {
+  if (Number(request.headers.get('content-length') ?? 0) > BATAS_BYTE) return null;
+  if (!request.body) return new Uint8Array();
+  const potongan: Uint8Array[] = [];
+  let panjang = 0;
+  for await (const p of request.body) {
+    panjang += p.length;
+    if (panjang > BATAS_BYTE) return null;
+    potongan.push(p);
+  }
+  const data = new Uint8Array(panjang);
+  let posisi = 0;
+  for (const p of potongan) {
+    data.set(p, posisi);
+    posisi += p.length;
+  }
+  return data;
+}
+
+async function terima(request: Request): Promise<Response> {
+  // Badan dihabiskan sebelum menjawab galat apa pun, karena iOS menampilkan jawaban yang datang di tengah unggahan sebagai "The network connection was lost".
+  const data = await bacaBadan(request);
+  if (!data) return jawab(413, `Ukuran PDF maksimal ${BATAS_BYTE / (1024 * 1024)} MB.`);
+
   const token = request.headers.get('authorization')?.match(/^Bearer\s+(\S+)$/)?.[1];
   if (!token) return jawab(401, 'Token unggah belum dipasang di Shortcut.');
 
@@ -19,13 +53,6 @@ export const POST: APIRoute = async ({ request }) => {
     throw err;
   }
 
-  if (Number(request.headers.get('content-length') ?? 0) > BATAS_BYTE) {
-    return jawab(413, `Ukuran PDF maksimal ${BATAS_BYTE / (1024 * 1024)} MB.`);
-  }
-  const data = new Uint8Array(await request.arrayBuffer());
-  if (data.length > BATAS_BYTE) {
-    return jawab(413, `Ukuran PDF maksimal ${BATAS_BYTE / (1024 * 1024)} MB.`);
-  }
   // Isian Shortcut yang keliru (Form, bukan File) mengirim multipart; tanda tangan `%PDF` memberi pesan yang menunjuk ke sana.
   if (new TextDecoder().decode(data.subarray(0, 5)) !== '%PDF-') {
     return jawab(400, 'Yang terkirim bukan PDF. Pastikan Request Body di Shortcut bertipe File.');
@@ -74,4 +101,4 @@ export const POST: APIRoute = async ({ request }) => {
     .join(' ');
 
   return jawab(200, pesan);
-};
+}

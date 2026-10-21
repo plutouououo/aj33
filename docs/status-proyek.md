@@ -322,6 +322,9 @@ Cara memasangnya tertulis di Pengaturan › Shortcut iPhone.
   yang nonaktif atau bukan owner lagi otomatis kehilangan aksesnya.
 - **Token diperiksa sebelum PDF dibaca** (`GET /orders/labels/shortcut`)
   karena pdfjs berat; pemanggil tanpa token sah tak bisa membebani server.
+  Badannya (maks. 10 MB) tetap dihabiskan dulu sebelum menjawab galat apa pun:
+  jawaban 401/400 yang datang saat iPhone masih mengunggah ditampilkan
+  Shortcut sebagai "The network connection was lost", bukan `pesan`-nya.
 - **Badan mentah, bukan multipart:** `security.checkOrigin` Astro memeriksa
   header `Origin` pada POST berjenis form, dan Shortcut tak mengirimnya; badan
   `application/pdf` tak tersentuh pemeriksaan itu. `/unggah-label` ada di
