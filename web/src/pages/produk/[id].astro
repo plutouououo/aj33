@@ -1,5 +1,6 @@
 ---
 import Galat from '../../components/Galat.astro';
+import IsianHarga from '../../components/IsianHarga.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import {
   api,
@@ -88,6 +89,9 @@ if (Astro.request.method === 'POST') {
           price_wholesale: angka(form, 'price_wholesale'),
           price_shopee: angka(form, 'price_shopee'),
           price_tiktok: angka(form, 'price_tiktok'),
+          price_shopee_wholesale: angka(form, 'price_shopee_wholesale'),
+          price_tiktok_wholesale: angka(form, 'price_tiktok_wholesale'),
+          wholesale_threshold_kg: angka(form, 'wholesale_threshold_kg'),
           low_stock_threshold: angka(form, 'low_stock_threshold') ?? 5,
           image_url,
           is_active: form.get('is_active') === '1',
@@ -126,6 +130,9 @@ if (Astro.request.method === 'POST') {
           price_wholesale: angka(form, 'price_wholesale') ?? undefined,
           price_shopee: angka(form, 'price_shopee'),
           price_tiktok: angka(form, 'price_tiktok'),
+          price_shopee_wholesale: angka(form, 'price_shopee_wholesale') ?? undefined,
+          price_tiktok_wholesale: angka(form, 'price_tiktok_wholesale') ?? undefined,
+          wholesale_threshold_kg: angka(form, 'wholesale_threshold_kg') ?? undefined,
           purchase_price: angka(form, 'purchase_price'),
           stock_qty: angka(form, 'stock_qty') ?? 0,
           batch_number: teks(form, 'batch_number'),
@@ -389,60 +396,18 @@ const DEKAT_KEDALUWARSA = 30;
                 <input type="hidden" name="sku_lama" value={produk.sku ?? ''} />
               </div>
 
-              <div class="isian isian-pendek">
-                <label class="label" for="price">Harga ecer (Rp)</label>
-                <input
-                  class="kolom"
-                  id="price"
-                  name="price"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={produk.price}
-                  required
-                />
-              </div>
-
-              <div class="isian isian-pendek">
-                <label class="label" for="price_wholesale">Harga grosir (Rp)</label>
-                <input
-                  class="kolom"
-                  id="price_wholesale"
-                  name="price_wholesale"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={produk.price_wholesale ?? ''}
-                  placeholder="ikut harga ecer"
-                />
-                
-              </div>
-
-              <div class="isian isian-pendek">
-                <label class="label" for="price_shopee">Harga Shopee (Rp)</label>
-                <input
-                  class="kolom"
-                  id="price_shopee"
-                  name="price_shopee"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={produk.price_shopee ?? ''}
-                  placeholder="ikut harga ecer"
-                />
-              </div>
-
-              <div class="isian isian-pendek">
-                <label class="label" for="price_tiktok">Harga Tokopedia / TikTok (Rp)</label>
-                <input
-                  class="kolom"
-                  id="price_tiktok"
-                  name="price_tiktok"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={produk.price_tiktok ?? ''}
-                  placeholder="ikut harga ecer"
+              <div class="isian max-w-none">
+                <IsianHarga
+                  pengaturan={pengaturanHarga}
+                  nilai={{
+                    price: produk.price,
+                    price_wholesale: produk.price_wholesale,
+                    price_shopee: produk.price_shopee,
+                    price_shopee_wholesale: produk.price_shopee_wholesale,
+                    price_tiktok: produk.price_tiktok,
+                    price_tiktok_wholesale: produk.price_tiktok_wholesale,
+      wholesale_threshold_kg: produk.wholesale_threshold_kg,
+                  }}
                 />
               </div>
 
@@ -582,57 +547,8 @@ const DEKAT_KEDALUWARSA = 30;
                     dibedakan dengan nomor urut saja.
                   </p>
 
-                  <div class="isian isian-pendek">
-                    <label class="label" for="v_price">Harga ecer (Rp)</label>
-                    <input
-                      class="kolom"
-                      id="v_price"
-                      name="price"
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={produk.price}
-                      required
-                    />
-                  </div>
-
-                  <div class="isian isian-pendek">
-                    <label class="label" for="v_grosir">Harga grosir (Rp)</label>
-                    <input
-                      class="kolom"
-                      id="v_grosir"
-                      name="price_wholesale"
-                      type="number"
-                      min="0"
-                      step="1"
-                      placeholder="ikut harga ecer"
-                    />
-                  </div>
-
-                  <div class="isian isian-pendek">
-                    <label class="label" for="v_shopee">Harga Shopee (Rp)</label>
-                    <input
-                      class="kolom"
-                      id="v_shopee"
-                      name="price_shopee"
-                      type="number"
-                      min="0"
-                      step="1"
-                      placeholder="ikut harga ecer"
-                    />
-                  </div>
-
-                  <div class="isian isian-pendek">
-                    <label class="label" for="v_tiktok">Harga Tokopedia / TikTok (Rp)</label>
-                    <input
-                      class="kolom"
-                      id="v_tiktok"
-                      name="price_tiktok"
-                      type="number"
-                      min="0"
-                      step="1"
-                      placeholder="ikut harga ecer"
-                    />
+                  <div class="isian max-w-none">
+                    <IsianHarga pengaturan={pengaturanHarga} awalan="v_" nilai={{ price: produk.price }} />
                   </div>
 
                   <div class="isian isian-pendek">

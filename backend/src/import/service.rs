@@ -77,6 +77,18 @@ pub async fn upload(
                 parse::Field::VariantGrade => row.variant_grade = Some(nilai.to_string()),
                 parse::Field::VariantSize => row.variant_size = Some(nilai.to_string()),
                 parse::Field::LowestPrice => row.lowest_price = parse::parse_money(nilai),
+                parse::Field::PriceWholesale => row.price_wholesale = parse::parse_money(nilai),
+                parse::Field::PriceShopee => row.price_shopee = parse::parse_money(nilai),
+                parse::Field::PriceShopeeWholesale => {
+                    row.price_shopee_wholesale = parse::parse_money(nilai)
+                }
+                parse::Field::PriceTiktok => row.price_tiktok = parse::parse_money(nilai),
+                parse::Field::PriceTiktokWholesale => {
+                    row.price_tiktok_wholesale = parse::parse_money(nilai)
+                }
+                parse::Field::WholesaleThreshold => {
+                    row.wholesale_threshold = Some(nilai.to_string())
+                }
                 parse::Field::Cost => row.cost = parse::parse_money(nilai),
                 parse::Field::Margin => row.margin_pct = parse::parse_percent(nilai),
                 parse::Field::Stock => row.stock = parse::parse_int(nilai),
@@ -158,6 +170,12 @@ pub async fn upload(
             variant_size: row.variant_size.clone(),
             category_id,
             lowest_price: row.lowest_price,
+            price_wholesale: row.price_wholesale,
+            price_shopee: row.price_shopee,
+            price_shopee_wholesale: row.price_shopee_wholesale,
+            price_tiktok: row.price_tiktok,
+            price_tiktok_wholesale: row.price_tiktok_wholesale,
+            wholesale_threshold: row.wholesale_threshold.clone(),
             cost: row.cost,
             margin_pct: row.margin_pct,
             stock: row.stock,
@@ -369,6 +387,11 @@ async fn proses_baris(
     row: &ImportRowUntukCommit,
 ) -> AppResult<Uuid> {
     let (harga, _) = parse::harga_efektif(row.lowest_price, row.cost, row.margin_pct);
+    // Tak terbaca sudah jadi WARN saat review; diperlakukan sama dengan kosong.
+    let batas_grosir = row
+        .wholesale_threshold
+        .as_deref()
+        .and_then(parse::parse_ukuran_kg);
 
     match row.action.as_str() {
         "create" => {
@@ -391,9 +414,12 @@ async fn proses_baris(
                     parent_id: None,
                     category_id: row.category_id,
                     price: harga.unwrap_or(Decimal::ZERO),
-                    price_wholesale: None,
-                    price_shopee: None,
-                    price_tiktok: None,
+                    price_wholesale: row.price_wholesale,
+                    price_shopee: row.price_shopee,
+                    price_tiktok: row.price_tiktok,
+                    price_shopee_wholesale: row.price_shopee_wholesale,
+                    price_tiktok_wholesale: row.price_tiktok_wholesale,
+                    wholesale_threshold_kg: batas_grosir,
                     cost_price: row.cost,
                     is_active,
                     low_stock_threshold: None,
@@ -425,6 +451,13 @@ async fn proses_baris(
                 ProductPatch {
                     // `harga` dari rumus/eksplisit; `None` (harga, modal, margin kosong) berarti jangan ubah harga, beda dari create yang jatuh ke 0.
                     price: harga,
+                    // Kolom harga kanal yang kosong di berkas tak mengosongkan harga produk, sama dengan harga ecer.
+                    price_wholesale: row.price_wholesale.map(Some),
+                    price_shopee: row.price_shopee.map(Some),
+                    price_shopee_wholesale: row.price_shopee_wholesale.map(Some),
+                    price_tiktok: row.price_tiktok.map(Some),
+                    price_tiktok_wholesale: row.price_tiktok_wholesale.map(Some),
+                    wholesale_threshold_kg: batas_grosir.map(Some),
                     cost_price: row.cost.map(Some),
                     category_id: row.category_id.map(Some),
                     is_active,

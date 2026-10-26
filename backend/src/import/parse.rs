@@ -21,6 +21,12 @@ pub enum Field {
     VariantGrade,
     VariantSize,
     LowestPrice,
+    PriceWholesale,
+    PriceShopee,
+    PriceShopeeWholesale,
+    PriceTiktok,
+    PriceTiktokWholesale,
+    WholesaleThreshold,
     Cost,
     Margin,
     Stock,
@@ -38,6 +44,21 @@ pub fn map_header(header: &str) -> Option<Field> {
         "grade" | "variant_grade" => Some(Field::VariantGrade),
         "ukuran" | "size" | "variant_size" => Some(Field::VariantSize),
         "harga" | "lowest_price" => Some(Field::LowestPrice),
+        "harga grosir" | "grosir" | "price_wholesale" => Some(Field::PriceWholesale),
+        "harga shopee" | "shopee" | "price_shopee" => Some(Field::PriceShopee),
+        "grosir shopee" | "harga grosir shopee" | "price_shopee_wholesale" => {
+            Some(Field::PriceShopeeWholesale)
+        }
+        "harga tokopedia" | "tokopedia" | "harga tiktok" | "price_tiktok" => {
+            Some(Field::PriceTiktok)
+        }
+        "grosir tokopedia"
+        | "harga grosir tokopedia"
+        | "grosir tiktok"
+        | "price_tiktok_wholesale" => Some(Field::PriceTiktokWholesale),
+        "batas grosir" | "wholesale_threshold" | "wholesale_threshold_kg" => {
+            Some(Field::WholesaleThreshold)
+        }
         "modal" | "cost" => Some(Field::Cost),
         "margin" | "margin_pct" => Some(Field::Margin),
         "stok" | "stock" => Some(Field::Stock),
@@ -201,6 +222,13 @@ pub struct ParsedRow {
     pub variant_grade: Option<String>,
     pub variant_size: Option<String>,
     pub lowest_price: Option<Decimal>,
+    pub price_wholesale: Option<Decimal>,
+    pub price_shopee: Option<Decimal>,
+    pub price_shopee_wholesale: Option<Decimal>,
+    pub price_tiktok: Option<Decimal>,
+    pub price_tiktok_wholesale: Option<Decimal>,
+    /// Teks bebas seperti `variant_size` ("20", "20 kg"), diurai dengan `parse_ukuran_kg` saat commit.
+    pub wholesale_threshold: Option<String>,
     pub cost: Option<Decimal>,
     pub margin_pct: Option<Decimal>,
     pub stock: Option<i32>,
@@ -238,6 +266,48 @@ pub fn harga_efektif(
     }
 }
 
+/// Harga kanal yang terisi: tak boleh negatif dan grosir tak boleh melebihi ecer kanalnya, aturan yang sama dengan `catalog::service::periksa_harga` agar ketahuan saat review, bukan gagal saat commit.
+fn periksa_harga_kanal(row: &ParsedRow, isu: &mut Vec<Issue>) {
+    for (kolom, nilai) in [
+        ("price_wholesale", row.price_wholesale),
+        ("price_shopee", row.price_shopee),
+        ("price_shopee_wholesale", row.price_shopee_wholesale),
+        ("price_tiktok", row.price_tiktok),
+        ("price_tiktok_wholesale", row.price_tiktok_wholesale),
+    ] {
+        if nilai.is_some_and(|h| h.is_sign_negative()) {
+            isu.push(error(kolom, "Harga tidak boleh negatif."));
+        }
+    }
+
+    // Ecer yang kosong di berkas tak diketahui di sini (produk lama memakai harga tersimpannya), jadi hanya pasangan yang sama-sama terisi yang dibandingkan.
+    let (ecer_toko, _) = harga_efektif(row.lowest_price, row.cost, row.margin_pct);
+    for (kolom, grosir, ecer, kanal) in [
+        ("price_wholesale", row.price_wholesale, ecer_toko, "walk in"),
+        (
+            "price_shopee_wholesale",
+            row.price_shopee_wholesale,
+            row.price_shopee.or(ecer_toko),
+            "Shopee",
+        ),
+        (
+            "price_tiktok_wholesale",
+            row.price_tiktok_wholesale,
+            row.price_tiktok.or(ecer_toko),
+            "Tokopedia",
+        ),
+    ] {
+        if let (Some(g), Some(e)) = (grosir, ecer) {
+            if g > e {
+                isu.push(error(
+                    kolom,
+                    format!("Harga grosir {kanal} ({g}) lebih tinggi dari harga ecernya ({e})."),
+                ));
+            }
+        }
+    }
+}
+
 /// Semua pemeriksaan tanpa database; resolusi kategori (butuh query) sudah dilakukan pemanggil, `kategori_dikenal` hanya mengabarkan hasilnya (`true` juga bila tak ada `category_text`).
 pub fn validate_row(row: &ParsedRow, sku_duplikat: bool, kategori_dikenal: bool) -> Vec<Issue> {
     let mut isu = Vec::new();
@@ -259,6 +329,7 @@ pub fn validate_row(row: &ParsedRow, sku_duplikat: bool, kategori_dikenal: bool)
     if row.margin_pct.is_some_and(|p| p.is_sign_negative()) {
         isu.push(error("margin_pct", "Margin tidak boleh negatif."));
     }
+    periksa_harga_kanal(row, &mut isu);
     if sku_duplikat {
         isu.push(error(
             "sku",
@@ -289,6 +360,17 @@ pub fn validate_row(row: &ParsedRow, sku_duplikat: bool, kategori_dikenal: bool)
         isu.push(warn(
             "variant_size",
             "Ukuran tidak terbaca sebagai angka kg (mis. \"2 kg\") -- ukuran dikosongkan.",
+        ));
+    }
+
+    if row
+        .wholesale_threshold
+        .as_deref()
+        .is_some_and(|b| parse_ukuran_kg(b).is_none())
+    {
+        isu.push(warn(
+            "wholesale_threshold",
+            "Batas grosir tidak terbaca sebagai angka kg (mis. \"20 kg\") -- memakai batas bawaan.",
         ));
     }
 
@@ -329,6 +411,18 @@ mod tests {
         assert_eq!(map_header("stock"), Some(Field::Stock));
         assert_eq!(map_header("Terbit"), Some(Field::Published));
         assert_eq!(map_header("published"), Some(Field::Published));
+        assert_eq!(map_header("Harga Grosir"), Some(Field::PriceWholesale));
+        assert_eq!(map_header("Harga Shopee"), Some(Field::PriceShopee));
+        assert_eq!(
+            map_header("Grosir Shopee"),
+            Some(Field::PriceShopeeWholesale)
+        );
+        assert_eq!(map_header("Harga Tokopedia"), Some(Field::PriceTiktok));
+        assert_eq!(
+            map_header("grosir tiktok"),
+            Some(Field::PriceTiktokWholesale)
+        );
+        assert_eq!(map_header("Batas Grosir"), Some(Field::WholesaleThreshold));
     }
 
     #[test]
@@ -602,6 +696,37 @@ mod tests {
     #[test]
     fn validate_row_baris_bersih_tidak_ada_error() {
         let isu = validate_row(&baris_valid(), false, true);
+        assert!(isu.iter().all(|i| i.level != Level::Error));
+    }
+
+    #[test]
+    fn validate_row_grosir_melebihi_ecer_kanalnya_adalah_error() {
+        // Ecer Shopee kosong dibandingkan dengan ecer walk in, sama dengan aturan kasir.
+        let row = ParsedRow {
+            price_wholesale: Some(Decimal::new(11000, 0)),
+            price_shopee_wholesale: Some(Decimal::new(10500, 0)),
+            price_tiktok: Some(Decimal::new(12000, 0)),
+            price_tiktok_wholesale: Some(Decimal::new(11500, 0)),
+            ..baris_valid()
+        };
+        let isu = validate_row(&row, false, true);
+        let salah: Vec<&str> = isu
+            .iter()
+            .filter(|i| i.level == Level::Error)
+            .map(|i| i.field.as_str())
+            .collect();
+        assert_eq!(salah, ["price_wholesale", "price_shopee_wholesale"]);
+    }
+
+    #[test]
+    fn validate_row_grosir_tanpa_ecer_di_berkas_tidak_dibandingkan() {
+        // Produk lama boleh hanya mengisi grosir; ecernya ada di database dan diperiksa saat commit.
+        let row = ParsedRow {
+            lowest_price: None,
+            price_wholesale: Some(Decimal::new(9000, 0)),
+            ..baris_valid()
+        };
+        let isu = validate_row(&row, false, true);
         assert!(isu.iter().all(|i| i.level != Level::Error));
     }
 }

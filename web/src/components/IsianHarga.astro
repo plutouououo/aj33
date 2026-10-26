@@ -1,0 +1,98 @@
+---
+/** Enam isian harga jual (ecer dan grosir untuk walk in, Shopee, Tokopedia) plus batas grosir produk, dipakai form tambah produk, sunting produk, dan tambah varian; `awalan` membedakan id bila dua form ada di satu halaman. */
+import type { PricingSettings, Product } from '../lib/api';
+import { kg } from '../lib/format';
+
+type KolomHarga = keyof Pick<
+  Product,
+  'price' | 'price_wholesale' | 'price_shopee' | 'price_shopee_wholesale' | 'price_tiktok' |
+    'price_tiktok_wholesale' | 'wholesale_threshold_kg'
+>;
+
+interface Props {
+  nilai: Partial<Record<KolomHarga, number | string | null>>;
+  pengaturan: PricingSettings;
+  awalan?: string;
+}
+
+const { nilai, pengaturan, awalan = '' } = Astro.props;
+
+/** Placeholder menyebut harga yang dipakai kasir bila isian dibiarkan kosong, sama dengan `SalesChannel::harga` di backend. */
+const KANAL = [
+  { label: 'Walk in', ecer: 'price', grosir: 'price_wholesale', ikutEcer: null, ikutGrosir: 'ikut ecer' },
+  {
+    label: 'Shopee',
+    ecer: 'price_shopee',
+    grosir: 'price_shopee_wholesale',
+    ikutEcer: 'ikut walk in',
+    ikutGrosir: 'ikut ecer Shopee',
+  },
+  {
+    label: 'Tokopedia / TikTok',
+    ecer: 'price_tiktok',
+    grosir: 'price_tiktok_wholesale',
+    ikutEcer: 'ikut walk in',
+    ikutGrosir: 'ikut ecer Tokopedia',
+  },
+] as const;
+
+const isi = (kolom: KolomHarga): string => String(nilai[kolom] ?? '');
+---
+
+<div class="flex flex-col gap-4">
+  <div class="grid gap-3 sm:grid-cols-3">
+    {KANAL.map((k) => (
+      <fieldset class="min-w-0 rounded-lg border border-[var(--color-garis)] p-3">
+        <legend class="px-1 text-sm font-semibold">{k.label}</legend>
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-1">
+          <div>
+            <label class="label" for={`${awalan}${k.ecer}`}>Ecer (Rp)</label>
+            <input
+              class="kolom"
+              id={`${awalan}${k.ecer}`}
+              name={k.ecer}
+              type="number"
+              min="0"
+              step="1"
+              value={isi(k.ecer)}
+              placeholder={k.ikutEcer ?? undefined}
+              required={k.ikutEcer === null}
+            />
+          </div>
+          <div>
+            <label class="label" for={`${awalan}${k.grosir}`}>Grosir (Rp)</label>
+            <input
+              class="kolom"
+              id={`${awalan}${k.grosir}`}
+              name={k.grosir}
+              type="number"
+              min="0"
+              step="1"
+              value={isi(k.grosir)}
+              placeholder={k.ikutGrosir}
+            />
+          </div>
+        </div>
+      </fieldset>
+    ))}
+  </div>
+
+  <div class="isian-pendek">
+    <label class="label" for={`${awalan}wholesale_threshold_kg`}>Batas grosir (kg)</label>
+    <input
+      class="kolom"
+      id={`${awalan}wholesale_threshold_kg`}
+      name="wholesale_threshold_kg"
+      type="number"
+      min="0.001"
+      step="any"
+      inputmode="decimal"
+      value={isi('wholesale_threshold_kg')}
+      placeholder={`bawaan ${kg(pengaturan.wholesale_threshold_kg)}`}
+    />
+    <p class="isian-bantu">
+      Grosir dipakai di semua kanal bila berat satu baris (jumlah × ukuran) lebih dari angka ini. Kosongkan
+      untuk memakai batas bawaan di Pengaturan › Harga.
+    </p>
+  </div>
+</div>

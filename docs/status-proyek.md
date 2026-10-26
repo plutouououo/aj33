@@ -243,10 +243,19 @@ Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 
 - `products.variant_size` kini `NUMERIC(8,3)` berisi **kg per pack** (boleh pecahan). Teks lama dikonversi angkanya ("2 kg" jadi 2, "500 gr" jadi 0,5); yang tak berangka (mis. "Besar") menjadi NULL. SKU lama tidak berubah.
 - `products.price` kini berarti **harga ecer**; `products.price_wholesale` (nullable) adalah harga grosir. Penjualan tetap per pack.
-- Aturan di `pos/service.rs::harga_toko`: kanal **toko** memakai grosir bila `qty × variant_size` per produk (batch digabung) **lebih dari** `pricing_settings.wholesale_threshold_kg`; tepat di batas masih ecer. Ukuran atau grosir kosong berarti ecer. Shopee/TikTok tidak memakai grosir.
+- Aturan di `pos/service.rs::SalesChannel::harga`: kanal **toko** memakai grosir bila `qty × variant_size` per produk (batch digabung) **lebih dari** `pricing_settings.wholesale_threshold_kg`; tepat di batas masih ecer. Ukuran atau grosir kosong berarti ecer. Sejak migrasi 0031 Shopee/Tokopedia juga punya grosir, dan batasnya bisa diatur per produk (bagian berikut).
 - Batas (bawaan 20 kg) diubah owner di Pengaturan › Harga (`GET/PATCH /api/settings/pricing`; GET terbuka untuk semua peran login).
 - Layar kasir menghitung ulang harga baris di klien (`terapkanGrosir` di `kasir.astro`, gram bulat agar tak meleset) dan di server saat render; keduanya harus sama dengan backend.
-- Impor massal: kolom "ukuran" tetap teks bebas, diurai jadi kg saat produk dibuat (peringatan bila tak terbaca); harga grosir belum bisa diimpor, diisi dari halaman produk.
+- Impor massal: kolom "ukuran" tetap teks bebas, diurai jadi kg saat produk dibuat (peringatan bila tak terbaca); harga grosir dan harga kanal ikut diimpor sejak migrasi 0032 (lihat bagian harga grosir per kanal).
+
+### Harga grosir per kanal dan batas grosir per produk (migrasi 0031)
+
+- Tiap kanal punya ecer dan grosir sendiri: toko `price`/`price_wholesale`, Shopee `price_shopee`/`price_shopee_wholesale`, Tokopedia/TikTok `price_tiktok`/`price_tiktok_wholesale`.
+- Batas grosir **per produk**: `products.wholesale_threshold_kg` (nullable), satu angka untuk ketiga kanal. NULL berarti memakai batas bawaan `pricing_settings.wholesale_threshold_kg`, jadi produk lama tak berubah saat deploy. Batas bawaan tetap diatur di Pengaturan › Harga.
+- Harga kosong: ecer marketplace kosong jatuh ke ecer toko (seperti sebelumnya); grosir kanal kosong jatuh ke ecer **kanal itu**, sengaja tidak ke grosir toko supaya harga marketplace tak turun tanpa diatur.
+- Validasi `catalog/service.rs::periksa_harga`: grosir tak boleh lebih tinggi dari ecer kanal yang sama (ecer marketplace kosong dibandingkan dengan ecer toko). Saat menyunting, kolom yang tak dikirim dinilai dengan nilai tersimpannya.
+- Impor massal (migrasi 0032) mengenali kolom `harga grosir`, `harga shopee`, `grosir shopee`, `harga tokopedia`, `grosir tokopedia`, `batas grosir` (lihat `import/parse.rs::map_header` untuk sinonimnya). Batas grosir berupa teks kg ("10 kg") seperti ukuran; yang tak terbaca jadi WARN dan diperlakukan kosong. Kolom kosong: produk baru memakai harga bawaan (ecer marketplace ikut walk in, grosir tidak ada), produk lama tidak diubah. Grosir yang melebihi ecer kanalnya jadi ERROR saat review bila keduanya terisi di berkas; selebihnya diperiksa `periksa_harga` saat commit.
+- Isian harga di form tambah/sunting produk dan tambah varian adalah satu komponen, `web/src/components/IsianHarga.astro`. Hitungan kasir (`hargaKanal`/`pakaiGrosir` di frontmatter dan `terapkanGrosir` di skrip `kasir.astro`) harus tetap sama dengan backend.
 
 ### Diskon ongkir menggantikan diskon umum (migrasi 0023)
 

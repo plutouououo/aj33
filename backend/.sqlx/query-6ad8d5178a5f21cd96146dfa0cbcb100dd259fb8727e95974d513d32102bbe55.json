@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO products\n            (name, seo_name, sku, brand_name, product_type, variant_grade, variant_size,\n             parent_id, category_id, price, price_wholesale, price_shopee, price_tiktok,\n             price_shopee_wholesale, price_tiktok_wholesale, wholesale_threshold_kg,\n             cost_price, stock_qty, low_stock_threshold, image_url, is_active, created_by)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 0,\n                $18, $19, $20, $21)\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Numeric",
+        "Uuid",
+        "Uuid",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Int4",
+        "Varchar",
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6ad8d5178a5f21cd96146dfa0cbcb100dd259fb8727e95974d513d32102bbe55"
+}

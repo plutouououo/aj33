@@ -119,12 +119,17 @@ export interface Product {
   variant_count: number;
   /** Harga ecer per pack: yang dipakai kasir bila berat baris tak melebihi batas grosir, sekaligus rujukan saat harga kanal kosong. */
   price: number;
-  /** Harga grosir per pack, hanya kanal toko. `null` berarti belum diatur -- kasir tetap memakai harga ecer. */
+  /** Harga grosir per pack kanal toko (walk in). `null` berarti belum diatur -- kasir tetap memakai harga ecer. */
   price_wholesale: number | null;
-  /** `null` berarti belum diatur -- bukan gratis. */
+  /** `null` berarti belum diatur -- bukan gratis; kasir memakai harga ecer toko. */
   price_shopee: number | null;
   /** Mencakup Tokopedia; satu kanal dengan TikTok Shop. */
   price_tiktok: number | null;
+  /** Grosir per kanal marketplace; `null` berarti kasir memakai harga ecer kanal itu, bukan grosir toko. */
+  price_shopee_wholesale: number | null;
+  price_tiktok_wholesale: number | null;
+  /** Batas grosir produk ini (kg), semua kanal; `null` berarti batas bawaan di pengaturan. */
+  wholesale_threshold_kg: number | null;
   cost_price: number | null;
   stock_qty: number;
   low_stock_threshold: number;
@@ -173,7 +178,7 @@ export interface Category {
   name: string;
 }
 
-/** Pengaturan harga: batas grosir (baris kanal toko dihargai grosir bila berat baris, jumlah × ukuran pack, LEBIH dari angka ini) dan persen biaya Shopee bawaan. */
+/** Pengaturan harga: batas grosir bawaan (baris dihargai grosir bila berat baris, jumlah × ukuran pack, LEBIH dari angka ini) untuk produk yang tak mengatur batasnya sendiri, dan persen biaya Shopee bawaan. */
 export interface PricingSettings {
   wholesale_threshold_kg: number;
   /** Pecahan (0,1725 = 17,25%), bukan persen. */
@@ -612,6 +617,14 @@ export interface ImportRow {
   variant_size: string | null;
   category_id: string | null;
   lowest_price: number | null;
+  /** Harga grosir dan harga kanal dari berkas; `null` = kolom kosong (produk lama tak diubah). */
+  price_wholesale: number | null;
+  price_shopee: number | null;
+  price_shopee_wholesale: number | null;
+  price_tiktok: number | null;
+  price_tiktok_wholesale: number | null;
+  /** Teks batas grosir apa adanya dari berkas (mis. "20 kg"). */
+  wholesale_threshold: string | null;
   cost: number | null;
   margin_pct: number | null;
   stock: number | null;

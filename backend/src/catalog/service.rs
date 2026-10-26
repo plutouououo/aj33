@@ -25,6 +25,9 @@ pub struct CreateProductInput {
     pub price_wholesale: Option<Decimal>,
     pub price_shopee: Option<Decimal>,
     pub price_tiktok: Option<Decimal>,
+    pub price_shopee_wholesale: Option<Decimal>,
+    pub price_tiktok_wholesale: Option<Decimal>,
+    pub wholesale_threshold_kg: Option<Decimal>,
     pub cost_price: Option<Decimal>,
     pub is_active: bool,
     pub low_stock_threshold: Option<i32>,
@@ -46,13 +49,16 @@ pub(crate) async fn create_product(
     if name.is_empty() {
         return Err(AppError::bad_request("Nama produk wajib diisi."));
     }
-    periksa_harga(
-        input.price,
-        input.price_wholesale,
-        input.price_shopee,
-        input.price_tiktok,
-    )?;
+    periksa_harga(&DaftarHarga {
+        price: input.price,
+        price_wholesale: input.price_wholesale,
+        price_shopee: input.price_shopee,
+        price_shopee_wholesale: input.price_shopee_wholesale,
+        price_tiktok: input.price_tiktok,
+        price_tiktok_wholesale: input.price_tiktok_wholesale,
+    })?;
     periksa_ukuran(input.variant_size)?;
+    periksa_batas_grosir(input.wholesale_threshold_kg)?;
     if input.stock_qty < 0 {
         return Err(AppError::bad_request("Stok awal tidak boleh negatif."));
     }
@@ -108,6 +114,9 @@ pub(crate) async fn create_product(
             price_wholesale: input.price_wholesale,
             price_shopee: input.price_shopee,
             price_tiktok: input.price_tiktok,
+            price_shopee_wholesale: input.price_shopee_wholesale,
+            price_tiktok_wholesale: input.price_tiktok_wholesale,
+            wholesale_threshold_kg: input.wholesale_threshold_kg,
             cost_price: input.cost_price,
             is_active: input.is_active,
             low_stock_threshold: input.low_stock_threshold.unwrap_or(5),
@@ -145,13 +154,21 @@ pub(crate) async fn update_product(
 ) -> AppResult<bool> {
     let sekarang = ambil_produk(state, id).await?;
 
-    periksa_harga(
-        patch.price.unwrap_or(sekarang.price),
-        patch.price_wholesale.unwrap_or(sekarang.price_wholesale),
-        patch.price_shopee.flatten(),
-        patch.price_tiktok.flatten(),
-    )?;
+    // Kolom yang tak disebut dinilai dengan nilai tersimpannya, karena grosir dibandingkan dengan ecer kanal yang sama.
+    periksa_harga(&DaftarHarga {
+        price: patch.price.unwrap_or(sekarang.price),
+        price_wholesale: patch.price_wholesale.unwrap_or(sekarang.price_wholesale),
+        price_shopee: patch.price_shopee.unwrap_or(sekarang.price_shopee),
+        price_shopee_wholesale: patch
+            .price_shopee_wholesale
+            .unwrap_or(sekarang.price_shopee_wholesale),
+        price_tiktok: patch.price_tiktok.unwrap_or(sekarang.price_tiktok),
+        price_tiktok_wholesale: patch
+            .price_tiktok_wholesale
+            .unwrap_or(sekarang.price_tiktok_wholesale),
+    })?;
     periksa_ukuran(patch.variant_size.flatten())?;
+    periksa_batas_grosir(patch.wholesale_threshold_kg.flatten())?;
 
     if let Some(Some(category_id)) = patch.category_id {
         if !repo::category_ada(&state.pool, category_id).await? {
@@ -168,32 +185,57 @@ pub(crate) async fn ambil_produk(state: &AppState, id: Uuid) -> AppResult<Produc
         .ok_or_else(|| AppError::not_found("Produk tidak ditemukan."))
 }
 
-/// Harga diperiksa di sini agar pesannya menyebut marketplace mana yang salah; CHECK di database tetap jaring terakhir.
-pub(crate) fn periksa_harga(
-    price: Decimal,
-    price_wholesale: Option<Decimal>,
-    price_shopee: Option<Decimal>,
-    price_tiktok: Option<Decimal>,
-) -> AppResult<()> {
-    if price.is_sign_negative() {
-        return Err(AppError::bad_request("Harga ecer tidak boleh negatif."));
-    }
-    if price_wholesale.is_some_and(|h| h.is_sign_negative()) {
-        return Err(AppError::bad_request("Harga grosir tidak boleh negatif."));
-    }
-    // Grosir yang lebih mahal dari ecer hampir pasti tertukar ketik, dan akibatnya pembeli besar membayar lebih.
-    if price_wholesale.is_some_and(|h| h > price) {
+/// Batas atas mengikuti NUMERIC(8,3) di kolomnya; lebih dari itu galat database yang tak terbaca pemilik.
+const BATAS_GROSIR_MAKS_KG: Decimal = Decimal::from_parts(99_999_999, 0, 0, false, 3);
+
+fn periksa_batas_grosir(batas: Option<Decimal>) -> AppResult<()> {
+    if batas.is_some_and(|b| b <= Decimal::ZERO || b > BATAS_GROSIR_MAKS_KG) {
         return Err(AppError::bad_request(
-            "Harga grosir tidak boleh lebih tinggi dari harga ecer.",
+            "Batas grosir harus lebih dari 0 dan paling banyak 99.999,999 kg.",
         ));
     }
-    if price_shopee.is_some_and(|h| h.is_sign_negative()) {
-        return Err(AppError::bad_request("Harga Shopee tidak boleh negatif."));
-    }
-    if price_tiktok.is_some_and(|h| h.is_sign_negative()) {
-        return Err(AppError::bad_request(
-            "Harga Tokopedia/TikTok Shop tidak boleh negatif.",
-        ));
+    Ok(())
+}
+
+/// Enam harga jual satu produk; `None` = belum diatur (ecer marketplace jatuh ke `price`, grosir jatuh ke ecer kanalnya).
+pub(crate) struct DaftarHarga {
+    pub price: Decimal,
+    pub price_wholesale: Option<Decimal>,
+    pub price_shopee: Option<Decimal>,
+    pub price_shopee_wholesale: Option<Decimal>,
+    pub price_tiktok: Option<Decimal>,
+    pub price_tiktok_wholesale: Option<Decimal>,
+}
+
+/// Harga diperiksa di sini agar pesannya menyebut kanal mana yang salah; CHECK di database tetap jaring terakhir.
+pub(crate) fn periksa_harga(harga: &DaftarHarga) -> AppResult<()> {
+    let shopee = harga.price_shopee.unwrap_or(harga.price);
+    let tiktok = harga.price_tiktok.unwrap_or(harga.price);
+    for (ecer, grosir, kanal) in [
+        (harga.price, harga.price_wholesale, "walk in"),
+        (shopee, harga.price_shopee_wholesale, "Shopee"),
+        (
+            tiktok,
+            harga.price_tiktok_wholesale,
+            "Tokopedia/TikTok Shop",
+        ),
+    ] {
+        if ecer.is_sign_negative() {
+            return Err(AppError::bad_request(format!(
+                "Harga ecer {kanal} tidak boleh negatif."
+            )));
+        }
+        if grosir.is_some_and(|h| h.is_sign_negative()) {
+            return Err(AppError::bad_request(format!(
+                "Harga grosir {kanal} tidak boleh negatif."
+            )));
+        }
+        // Grosir yang lebih mahal dari ecer kanal yang sama hampir pasti tertukar ketik, dan akibatnya pembeli besar membayar lebih.
+        if grosir.is_some_and(|h| h > ecer) {
+            return Err(AppError::bad_request(format!(
+                "Harga grosir {kanal} tidak boleh lebih tinggi dari harga ecernya."
+            )));
+        }
     }
     Ok(())
 }

@@ -1,5 +1,6 @@
 ---
 import Galat from '../../components/Galat.astro';
+import IsianHarga from '../../components/IsianHarga.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import { api, ApiRequestError, type Category, type PricingSettings, type Product } from '../../lib/api';
 import { kg } from '../../lib/format';
@@ -38,6 +39,9 @@ if (Astro.request.method === 'POST') {
   const hargaGrosir = angkaOpsional('price_wholesale');
   const hargaShopee = angkaOpsional('price_shopee');
   const hargaTiktok = angkaOpsional('price_tiktok');
+  const hargaGrosirShopee = angkaOpsional('price_shopee_wholesale');
+  const hargaGrosirTiktok = angkaOpsional('price_tiktok_wholesale');
+  const batasGrosir = angkaOpsional('wholesale_threshold_kg');
   const hargaBeliBatch = angkaOpsional('purchase_price');
   const ukuranKg = angkaOpsional('variant_size');
 
@@ -49,10 +53,12 @@ if (Astro.request.method === 'POST') {
     galat = 'Nama produk wajib diisi.';
   } else if (!Number.isFinite(harga) || harga < 0) {
     galat = 'Harga ecer harus berupa angka yang tidak negatif.';
-  } else if ((hargaGrosir ?? 0) < 0) {
+  } else if ((hargaGrosir ?? 0) < 0 || (hargaGrosirShopee ?? 0) < 0 || (hargaGrosirTiktok ?? 0) < 0) {
     galat = 'Harga grosir tidak boleh negatif.';
   } else if ((hargaShopee ?? 0) < 0 || (hargaTiktok ?? 0) < 0) {
     galat = 'Harga marketplace tidak boleh negatif.';
+  } else if (batasGrosir !== undefined && batasGrosir <= 0) {
+    galat = 'Batas grosir harus lebih dari 0 kg.';
   } else if (ukuranKg !== undefined && ukuranKg <= 0) {
     galat = 'Ukuran harus lebih dari 0 kg.';
   } else {
@@ -76,6 +82,9 @@ if (Astro.request.method === 'POST') {
           price_wholesale: hargaGrosir,
           price_shopee: hargaShopee,
           price_tiktok: hargaTiktok,
+          price_shopee_wholesale: hargaGrosirShopee,
+          price_tiktok_wholesale: hargaGrosirTiktok,
+          wholesale_threshold_kg: batasGrosir,
           purchase_price: hargaBeliBatch,
           stock_qty: Number.isFinite(stok) ? stok : 0,
           batch_number: teks('batch_number'),
@@ -220,62 +229,18 @@ const BAGIAN = [
       <h2 id="j-penjualan" class="mb-4 font-semibold">Informasi Penjualan</h2>
 
       <div class="borang-tegak">
-        <div class="isian isian-pendek">
-          <label class="label" for="price">Harga ecer (Rp)</label>
-          <input
-            class="kolom"
-            id="price"
-            name="price"
-            type="number"
-            min="0"
-            step="1"
-            value={isi('price')}
-            required
-          />
-        </div>
-
-        <div class="isian isian-pendek">
-          <label class="label" for="price_wholesale">Harga grosir (Rp)</label>
-          <input
-            class="kolom"
-            id="price_wholesale"
-            name="price_wholesale"
-            type="number"
-            min="0"
-            step="1"
-            value={isi('price_wholesale')}
-            placeholder="ikut harga ecer"
-          />
-          
-        </div>
-
-        <div class="isian isian-pendek">
-          <label class="label" for="price_shopee">Harga Shopee (Rp)</label>
-          <input
-            class="kolom"
-            id="price_shopee"
-            name="price_shopee"
-            type="number"
-            min="0"
-            step="1"
-            value={isi('price_shopee')}
-            placeholder="ikut harga ecer"
-          />
-        </div>
-
-        <div class="isian isian-pendek">
-          <label class="label" for="price_tiktok">Harga Tokopedia / TikTok (Rp)</label>
-          <input
-            class="kolom"
-            id="price_tiktok"
-            name="price_tiktok"
-            type="number"
-            min="0"
-            step="1"
-            value={isi('price_tiktok')}
-            placeholder="ikut harga ecer"
-          />
-        </div>
+        <IsianHarga
+          pengaturan={pengaturanHarga}
+          nilai={{
+            price: isi('price'),
+            price_wholesale: isi('price_wholesale'),
+            price_shopee: isi('price_shopee'),
+            price_shopee_wholesale: isi('price_shopee_wholesale'),
+            price_tiktok: isi('price_tiktok'),
+            price_tiktok_wholesale: isi('price_tiktok_wholesale'),
+    wholesale_threshold_kg: isi('wholesale_threshold_kg'),
+          }}
+        />
       </div>
     </section>
 

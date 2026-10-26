@@ -67,21 +67,24 @@ impl SalesChannel {
         !matches!(self, Self::Toko)
     }
 
-    /// Harga kanal yang `None` jatuh ke harga ecer, bukan nol (menjual nol adalah kerugian), lihat migrasi 0005; grosir hanya milik kanal toko.
-    fn harga(self, produk: &stock::LockedProduct, qty: i32, batas_grosir_kg: Decimal) -> Decimal {
-        match self {
-            Self::Toko => harga_toko(produk, qty, batas_grosir_kg),
-            Self::Shopee => produk.price_shopee.unwrap_or(produk.price),
-            Self::Tiktok => produk.price_tiktok.unwrap_or(produk.price),
+    /// Grosir bila berat baris (qty x ukuran pack) LEBIH dari batas produk, atau batas bawaan bila produk tak mengaturnya (tepat di batas masih ecer); ukuran atau grosir kanal yang kosong berarti ecer kanal itu, dan ecer marketplace yang kosong jatuh ke ecer toko, bukan nol (migrasi 0005, 0031).
+    fn harga(self, produk: &stock::LockedProduct, qty: i32, batas_bawaan_kg: Decimal) -> Decimal {
+        let (ecer, grosir) = match self {
+            Self::Toko => (produk.price, produk.price_wholesale),
+            Self::Shopee => (
+                produk.price_shopee.unwrap_or(produk.price),
+                produk.price_shopee_wholesale,
+            ),
+            Self::Tiktok => (
+                produk.price_tiktok.unwrap_or(produk.price),
+                produk.price_tiktok_wholesale,
+            ),
+        };
+        let batas_kg = produk.wholesale_threshold_kg.unwrap_or(batas_bawaan_kg);
+        match (produk.variant_size, grosir) {
+            (Some(ukuran), Some(grosir)) if ukuran * Decimal::from(qty) > batas_kg => grosir,
+            _ => ecer,
         }
-    }
-}
-
-/// Grosir bila berat baris (qty x ukuran pack) LEBIH dari batas (tepat di batas masih ecer); ukuran atau harga grosir yang kosong berarti ecer.
-fn harga_toko(produk: &stock::LockedProduct, qty: i32, batas_grosir_kg: Decimal) -> Decimal {
-    match (produk.variant_size, produk.price_wholesale) {
-        (Some(ukuran), Some(grosir)) if ukuran * Decimal::from(qty) > batas_grosir_kg => grosir,
-        _ => produk.price,
     }
 }
 
@@ -700,7 +703,7 @@ mod tests {
         assert_ne!(sidik_jari(&bahan(&items)), sidik_jari(&shopee));
     }
 
-    /// Pack 2 kg, ecer Rp25.000 dan grosir Rp22.000; tiap pengujian mengubah satu hal.
+    /// Pack 2 kg tanpa batas sendiri: toko ecer Rp25.000 grosir Rp22.000, Shopee ecer Rp28.000 grosir Rp26.000, Tokopedia belum diatur; tiap pengujian mengubah satu hal.
     fn pack_dua_kg() -> stock::LockedProduct {
         stock::LockedProduct {
             id: produk(1),
@@ -710,10 +713,14 @@ mod tests {
             price_wholesale: Some(Decimal::new(22000, 0)),
             price_shopee: Some(Decimal::new(28000, 0)),
             price_tiktok: None,
+            price_shopee_wholesale: Some(Decimal::new(26000, 0)),
+            price_tiktok_wholesale: None,
+            wholesale_threshold_kg: None,
             stock_qty: 100,
         }
     }
 
+    /// Batas bawaan di pengaturan; produk yang tak mengatur batasnya sendiri memakai angka ini.
     fn batas() -> Decimal {
         Decimal::new(20, 0)
     }
@@ -793,17 +800,55 @@ mod tests {
     }
 
     #[test]
-    fn marketplace_tak_memakai_harga_grosir() {
-        // Harga Shopee/TikTok sudah memuat strategi kanalnya sendiri; berat besar tidak boleh menurunkannya.
+    fn batas_produk_menggantikan_batas_bawaan_di_semua_kanal() {
+        // Batas produk 10 kg: 5 pack = 10 kg tepat di batas (ecer), 6 pack = 12 kg (grosir) padahal batas bawaan 20 kg.
+        let produk = stock::LockedProduct {
+            wholesale_threshold_kg: Some(Decimal::new(10, 0)),
+            ..pack_dua_kg()
+        };
+
+        assert_eq!(
+            SalesChannel::Toko.harga(&produk, 5, batas()),
+            Decimal::new(25000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Toko.harga(&produk, 6, batas()),
+            Decimal::new(22000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Shopee.harga(&produk, 6, batas()),
+            Decimal::new(26000, 0)
+        );
+        // Tanpa batas produk, 6 pack masih di bawah batas bawaan 20 kg.
+        assert_eq!(
+            SalesChannel::Shopee.harga(&pack_dua_kg(), 6, batas()),
+            Decimal::new(28000, 0)
+        );
+    }
+
+    #[test]
+    fn grosir_marketplace_kosong_tidak_memakai_grosir_toko() {
+        // Grosir toko bukan rujukan marketplace: harga kanal yang belum diatur tetap ecer kanal itu, berapa pun beratnya.
         let produk = pack_dua_kg();
 
         assert_eq!(
-            SalesChannel::Shopee.harga(&produk, 50, batas()),
-            Decimal::new(28000, 0)
-        );
-        assert_eq!(
             SalesChannel::Tiktok.harga(&produk, 50, batas()),
             Decimal::new(25000, 0)
+        );
+
+        let tiktok_diatur = stock::LockedProduct {
+            price_tiktok: Some(Decimal::new(27000, 0)),
+            price_tiktok_wholesale: Some(Decimal::new(24000, 0)),
+            ..pack_dua_kg()
+        };
+        // 10 pack = 20 kg tepat di batas bawaan; 11 pack = 22 kg melewatinya.
+        assert_eq!(
+            SalesChannel::Tiktok.harga(&tiktok_diatur, 10, batas()),
+            Decimal::new(27000, 0)
+        );
+        assert_eq!(
+            SalesChannel::Tiktok.harga(&tiktok_diatur, 11, batas()),
+            Decimal::new(24000, 0)
         );
     }
 }

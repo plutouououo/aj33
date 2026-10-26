@@ -172,6 +172,12 @@ function stokInduk(p: Product, varian: Product[]): { menipis: boolean; habis: bo
   }
   return { menipis: p.stock_qty > 0 && p.stock_qty <= p.low_stock_threshold, habis: p.stock_qty <= 0 };
 }
+/** Ecer dan grosir per kanal (walk in, Shopee, Tokopedia) untuk kolom daftar; `null` ditampilkan "—" agar harga yang belum diatur kelihatan. */
+const hargaKolom = (p: Product): { ecer: number | null; grosir: number | null }[] => [
+  { ecer: p.price, grosir: p.price_wholesale },
+  { ecer: p.price_shopee, grosir: p.price_shopee_wholesale },
+  { ecer: p.price_tiktok, grosir: p.price_tiktok_wholesale },
+];
 function kanalKosong(p: Product, varian: Product[]): boolean {
   if (varian.length > 0) return varian.some((v) => v.price_shopee === null || v.price_tiktok === null);
   return p.price_shopee === null || p.price_tiktok === null;
@@ -402,8 +408,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
             </th>
           )}
           <th>Produk</th>
-          <th class="text-right">Harga ecer</th>
-          <th class="text-right">Grosir</th>
+          <th class="text-right">Walk in</th>
           <th class="text-right">Shopee</th>
           <th class="text-right">Tokopedia / TikTok</th>
           <th class="text-right">Stok</th>
@@ -470,22 +475,18 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
                 </td>
 
                 {punyaVarian ? (
-                  <td class="sel-angka text-xs text-[var(--color-teks-samar)]" colspan={4}>
+                  <td class="sel-angka text-xs text-[var(--color-teks-samar)]" colspan={3}>
                     Harga per varian
                   </td>
                 ) : (
-                  <Fragment>
-                    <td class="sel-angka">{rupiah(p.price)}</td>
-                    <td class="sel-angka text-xs text-[var(--color-teks-lembut)]">
-                      {p.price_wholesale === null ? '—' : rupiah(p.price_wholesale)}
+                  hargaKolom(p).map((h) => (
+                    <td class="sel-angka">
+                      {h.ecer === null ? <span class="text-[var(--color-teks-samar)]">—</span> : rupiah(h.ecer)}
+                      {h.grosir !== null && (
+                        <span class="block text-xs text-[var(--color-teks-lembut)]">grosir {rupiah(h.grosir)}</span>
+                      )}
                     </td>
-                    <td class="sel-angka text-xs text-[var(--color-teks-lembut)]">
-                      {p.price_shopee === null ? '—' : rupiah(p.price_shopee)}
-                    </td>
-                    <td class="sel-angka text-xs text-[var(--color-teks-lembut)]">
-                      {p.price_tiktok === null ? '—' : rupiah(p.price_tiktok)}
-                    </td>
-                  </Fragment>
+                  ))
                 )}
 
                 <td class="sel-angka">
@@ -546,16 +547,14 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
                       <span class="block font-mono text-xs text-[var(--color-teks-samar)]">{v.sku ?? '—'}</span>
                       {vAtribut && <span class="block text-xs text-[var(--color-teks-lembut)]">{vAtribut}</span>}
                     </td>
-                    <td class="sel-angka">{rupiah(v.price)}</td>
-                    <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
-                      {v.price_wholesale === null ? '—' : rupiah(v.price_wholesale)}
-                    </td>
-                    <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
-                      {v.price_shopee === null ? '—' : rupiah(v.price_shopee)}
-                    </td>
-                    <td class="sel-angka text-xs text-[var(--color-teks-samar)]">
-                      {v.price_tiktok === null ? '—' : rupiah(v.price_tiktok)}
-                    </td>
+                    {hargaKolom(v).map((h) => (
+                      <td class="sel-angka">
+                        {h.ecer === null ? <span class="text-[var(--color-teks-samar)]">—</span> : rupiah(h.ecer)}
+                        {h.grosir !== null && (
+                          <span class="block text-xs text-[var(--color-teks-lembut)]">grosir {rupiah(h.grosir)}</span>
+                        )}
+                      </td>
+                    ))}
                     <td class="sel-angka">
                       <span class={vHabis || vMenipis ? 'font-semibold text-red-600' : ''}>{v.stock_qty}</span>
                     </td>

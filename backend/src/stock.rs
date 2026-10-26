@@ -55,7 +55,7 @@ pub struct StockLine {
 pub struct LockedProduct {
     pub id: Uuid,
     pub name: String,
-    /// Isi satu pack dalam kg; bersama `price_wholesale` menentukan ecer atau grosir di kanal toko.
+    /// Isi satu pack dalam kg; bersama harga grosir kanal menentukan ecer atau grosir.
     pub variant_size: Option<Decimal>,
     pub price: Decimal,
     /// `None` = grosir belum diatur, kasir tetap memakai `price`.
@@ -64,6 +64,11 @@ pub struct LockedProduct {
     pub price_shopee: Option<Decimal>,
     /// Mencakup Tokopedia; satu kanal dengan TikTok Shop.
     pub price_tiktok: Option<Decimal>,
+    /// `None` = grosir kanal itu belum diatur, kasir memakai harga ecer kanal itu.
+    pub price_shopee_wholesale: Option<Decimal>,
+    pub price_tiktok_wholesale: Option<Decimal>,
+    /// `None` = produk memakai batas grosir bawaan di `pricing_settings`.
+    pub wholesale_threshold_kg: Option<Decimal>,
     pub stock_qty: i32,
 }
 
@@ -134,7 +139,8 @@ pub async fn kunci_produk(
     let rows = sqlx::query_as!(
         LockedProduct,
         r#"
-        SELECT id, name, variant_size, price, price_wholesale, price_shopee, price_tiktok, stock_qty
+        SELECT id, name, variant_size, price, price_wholesale, price_shopee, price_tiktok,
+               price_shopee_wholesale, price_tiktok_wholesale, wholesale_threshold_kg, stock_qty
         FROM products
         WHERE id = ANY($1)
         ORDER BY id

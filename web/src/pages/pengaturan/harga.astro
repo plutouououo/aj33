@@ -1,5 +1,5 @@
 ---
-/** Pengaturan harga: batas grosir kanal toko (berat baris lebih dari batas memakai harga grosir) dan persen komisi/layanan Shopee yang jadi bawaan kasir. */
+/** Pengaturan harga: batas grosir bawaan untuk produk yang tak mengatur batasnya sendiri (berat baris lebih dari batas memakai harga grosir kanalnya) dan persen komisi/layanan Shopee yang jadi bawaan kasir. */
 import Galat from '../../components/Galat.astro';
 import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type PricingSettings } from '../../lib/api';
@@ -86,7 +86,10 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
   {sukses && <p class="sukses mb-4">{sukses}</p>}
 
   <form method="POST" class="kartu borang-tegak mb-6">
-    <h2 class="font-semibold">Batas harga grosir</h2>
+    <h2 class="font-semibold">Batas grosir bawaan</h2>
+    <p class="text-sm text-[var(--color-teks-lembut)]">
+      Dipakai produk yang batas grosirnya dikosongkan. Batas tiap produk diatur di halaman produknya.
+    </p>
 
     <div class="isian isian-pendek">
       <label class="label" for="wholesale_threshold_kg">Grosir bila lebih dari (kg)</label>
