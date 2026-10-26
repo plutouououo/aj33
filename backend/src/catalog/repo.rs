@@ -556,7 +556,7 @@ pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static
     Ok(if row.varian {
         Some("masih punya varian")
     } else if row.tiket {
-        Some("tercatat di tiket packing")
+        Some("tercatat di tugas packing")
     } else if row.pesanan {
         Some("tercatat di pesanan marketplace")
     } else if row.listing {

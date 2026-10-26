@@ -179,7 +179,7 @@ async fn set_status(
     user.require(&[Role::Owner, Role::Pengepak])?;
 
     let tujuan = TicketStatus::parse(body.status.trim())
-        .map_err(|_| AppError::bad_request("Status tiket tidak dikenal."))?;
+        .map_err(|_| AppError::bad_request("Status tugas packing tidak dikenal."))?;
 
     service::pindah_status(&state.pool, id, tujuan, user).await?;
 
@@ -208,5 +208,5 @@ async fn set_item(
 async fn muat(state: &AppState, id: Uuid) -> AppResult<Ticket> {
     repo::find(&state.pool, id)
         .await?
-        .ok_or_else(|| AppError::not_found("Tiket tidak ditemukan."))
+        .ok_or_else(|| AppError::not_found("Tugas packing tidak ditemukan."))
 }

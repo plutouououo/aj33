@@ -28,6 +28,7 @@ pub struct Order {
     pub platform_id: Uuid,
     pub platform_name: String,
     pub external_order_id: String,
+    pub pickup_code: Option<String>,
     pub status: String,
     pub sla_type: String,
     pub sla_deadline: Option<DateTime<Utc>>,
@@ -50,6 +51,7 @@ struct OrderHead {
     platform_id: Uuid,
     platform_name: String,
     external_order_id: String,
+    pickup_code: Option<String>,
     status: String,
     sla_type: String,
     sla_deadline: Option<DateTime<Utc>>,
@@ -86,6 +88,7 @@ async fn lengkapi(pool: &PgPool, head: OrderHead) -> AppResult<Order> {
         platform_id: head.platform_id,
         platform_name: head.platform_name,
         external_order_id: head.external_order_id,
+        pickup_code: head.pickup_code,
         status: head.status,
         sla_type: head.sla_type,
         sla_deadline: head.sla_deadline,
@@ -103,7 +106,7 @@ async fn lengkapi(pool: &PgPool, head: OrderHead) -> AppResult<Order> {
     })
 }
 
-/// `tanpa_tiket` menyaring ke pesanan yang belum dikirim ke pengepak, antrean halaman Pesanan Masuk.
+/// `tanpa_tiket` menyaring ke pesanan yang belum dikirim ke pengepak, antrean halaman Pesanan Masuk; terbaru di atas karena owner mencari label yang baru diunggahnya.
 pub async fn list_orders(
     pool: &PgPool,
     status: Option<&str>,
@@ -113,7 +116,7 @@ pub async fn list_orders(
     let heads = sqlx::query_as!(
         OrderHead,
         r#"
-        SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id,
+        SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id, o.pickup_code,
                o.status, o.sla_type, o.sla_deadline, o.total_amount,
                o.shipping_carrier, o.payment_method, o.is_cod,
                o.received_at AS "received_at!",
@@ -132,7 +135,7 @@ pub async fn list_orders(
         ) a ON true
         WHERE ($1::text IS NULL OR o.status = $1)
           AND (NOT $2::bool OR t.id IS NULL)
-        ORDER BY CASE WHEN $2 THEN o.sla_deadline END ASC NULLS LAST, o.received_at DESC
+        ORDER BY o.received_at DESC, o.id
         LIMIT $3
         "#,
         status,
@@ -154,7 +157,7 @@ pub async fn find_order(pool: &PgPool, id: Uuid) -> AppResult<Option<Order>> {
     let head = sqlx::query_as!(
         OrderHead,
         r#"
-        SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id,
+        SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id, o.pickup_code,
                o.status, o.sla_type, o.sla_deadline, o.total_amount,
                o.shipping_carrier, o.payment_method, o.is_cod,
                o.received_at AS "received_at!",
@@ -462,6 +465,7 @@ pub struct LabelBaru<'a> {
     pub address: &'a str,
     pub city: &'a str,
     pub district: &'a str,
+    pub pickup_code: Option<&'a str>,
     pub raw_payload: serde_json::Value,
     pub items: &'a [LabelBarisBaru],
 }
@@ -474,8 +478,8 @@ pub async fn insert_pesanan_label(pool: &PgPool, label: &LabelBaru<'_>) -> AppRe
         r#"
         INSERT INTO external_orders
             (platform_id, external_order_id, status, sla_type, sla_deadline,
-             payment_method, is_cod, shipping_carrier, raw_payload)
-        VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8)
+             payment_method, is_cod, shipping_carrier, raw_payload, pickup_code)
+        VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (platform_id, external_order_id) DO NOTHING
         RETURNING id
         "#,
@@ -486,7 +490,8 @@ pub async fn insert_pesanan_label(pool: &PgPool, label: &LabelBaru<'_>) -> AppRe
         label.payment_label,
         label.is_cod,
         label.shipping_carrier,
-        label.raw_payload
+        label.raw_payload,
+        label.pickup_code
     )
     .fetch_optional(&mut *tx)
     .await?

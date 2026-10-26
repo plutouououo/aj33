@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.external_order_id, o.external_order_id AS order_ref,\n               pl.platform_name, o.sla_type, o.sla_deadline, t.status,\n               t.assigned_to_user_id, u.name AS \"assigned_to_name?\",\n               t.assigned_at, t.completed_at, t.notes\n        FROM tickets t\n        JOIN external_orders o ON o.id = t.external_order_id\n        JOIN platforms pl ON pl.id = o.platform_id\n        LEFT JOIN users u ON u.id = t.assigned_to_user_id\n        WHERE t.id = $1\n        ",
+  "query": "\n        SELECT t.id, t.external_order_id, o.external_order_id AS order_ref, o.pickup_code,\n               pl.platform_name, o.sla_type, o.sla_deadline, t.status,\n               t.assigned_to_user_id, u.name AS \"assigned_to_name?\",\n               t.assigned_at, t.completed_at, t.notes\n        FROM tickets t\n        JOIN external_orders o ON o.id = t.external_order_id\n        JOIN platforms pl ON pl.id = o.platform_id\n        LEFT JOIN users u ON u.id = t.assigned_to_user_id\n        WHERE t.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -20,46 +20,51 @@
       },
       {
         "ordinal": 3,
-        "name": "platform_name",
+        "name": "pickup_code",
         "type_info": "Varchar"
       },
       {
         "ordinal": 4,
-        "name": "sla_type",
+        "name": "platform_name",
         "type_info": "Varchar"
       },
       {
         "ordinal": 5,
+        "name": "sla_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
         "name": "sla_deadline",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "status",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "assigned_to_user_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "assigned_to_name?",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "assigned_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "completed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "notes",
         "type_info": "Text"
       }
@@ -73,6 +78,7 @@
       false,
       false,
       false,
+      true,
       false,
       false,
       true,
@@ -84,5 +90,5 @@
       true
     ]
   },
-  "hash": "c4e4f2385e6f25422de059ae647ec59fddc0924ed4ec21bb862da1122281db16"
+  "hash": "22693d8009ac542a9829eac535b2c584c23904efa5b60b9df3ad97353f4ed665"
 }

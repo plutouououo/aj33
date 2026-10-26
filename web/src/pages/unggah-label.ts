@@ -95,7 +95,7 @@ async function terima(request: Request): Promise<Response> {
   const pesan = [
     `${dibuat} pesanan baru tercatat${sudahAda > 0 ? `, ${sudahAda} sudah pernah dicatat` : ''}.`,
     gagal.length > 0 ? `Gagal: ${gagal.join(' ')}` : '',
-    dibuat > 0 ? 'Kirim tiketnya dari Pesanan Masuk.' : '',
+    dibuat > 0 ? 'Kirim tugas packing-nya dari Pesanan Masuk.' : '',
   ]
     .filter(Boolean)
     .join(' ');

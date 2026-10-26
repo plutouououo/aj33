@@ -37,7 +37,7 @@ impl TicketStatus {
             "packing" => Ok(Self::Packing),
             "packed" => Ok(Self::Packed),
             "handed_over" => Ok(Self::HandedOver),
-            _ => Err(AppError::conflict("Status tiket tidak dikenal.")),
+            _ => Err(AppError::conflict("Status tugas packing tidak dikenal.")),
         }
     }
 
@@ -59,7 +59,7 @@ impl TicketStatus {
         }
 
         Err(AppError::conflict(format!(
-            "Tiket berstatus \"{}\" tidak bisa dipindahkan ke \"{}\".",
+            "Tugas packing berstatus \"{}\" tidak bisa dipindahkan ke \"{}\".",
             self.as_str(),
             tujuan.as_str()
         )))

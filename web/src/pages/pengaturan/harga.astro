@@ -81,17 +81,6 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
 ---
 
 <PengaturanShell judul="Harga" user={user}>
-  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
-    Penjualan tetap per pack. Di kasir (kanal Toko), berat satu baris dihitung dari jumlah pack ×
-    ukuran pack (kg). Bila lebih dari batas di bawah, baris itu memakai <strong>harga grosir</strong>;
-    sama dengan batas atau kurang memakai <strong>harga ecer</strong>.
-  </p>
-
-  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
-    Produk tanpa ukuran atau tanpa harga grosir selalu memakai harga ecer. Kanal Shopee dan
-    Tokopedia / TikTok tidak terpengaruh. Perubahan batas tidak mengubah transaksi yang sudah
-    tersimpan.
-  </p>
 
   <Galat pesan={galat} class="mb-4" />
   {sukses && <p class="sukses mb-4">{sukses}</p>}
@@ -114,18 +103,12 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
       />
       <p class="isian-bantu">
         Saat ini: lebih dari {kg(pengaturan.wholesale_threshold_kg)} grosir, sampai
-        {kg(pengaturan.wholesale_threshold_kg)} ecer. Contoh pack 2 kg: ≤ {Math.floor(pengaturan.wholesale_threshold_kg / 2)} pack ecer.
+        {kg(pengaturan.wholesale_threshold_kg)} ecer.
       </p>
     </div>
 
     <button class="tombol-utama" type="submit">Simpan batas</button>
   </form>
-
-  <p class="mb-5 max-w-prose text-sm text-[var(--color-teks-lembut)]">
-    Potongan Shopee dihitung dari omzet barang. Komisi dan biaya layanan di bawah dipakai
-    otomatis tiap kasir mencatat pesanan Shopee; PPh 0,5% dan biaya proses pesanan Rp1.250 tetap.
-    Perubahan tidak mengubah transaksi yang sudah tersimpan.
-  </p>
 
   <form method="POST" class="kartu borang-tegak mb-6">
     <input type="hidden" name="aksi" value="biaya-shopee" />

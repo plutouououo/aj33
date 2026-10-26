@@ -3,7 +3,7 @@ import AppShell from '../../layouts/AppShell.astro';
 import { api, type Ticket } from '../../lib/api';
 import { waktu } from '../../lib/format';
 import { kunciPublikVapid } from '../../lib/push';
-import { LABEL_STATUS, URUTAN_STATUS, kelasLencana } from '../../lib/tiket';
+import { LABEL_PENGIRIMAN, LABEL_STATUS, URUTAN_STATUS, kelasLencana, kodeTampil } from '../../lib/tiket';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -11,8 +11,9 @@ const token = Astro.locals.token!;
 const params = Astro.url.searchParams;
 const status = params.get('status') ?? '';
 
-// Bawaan beda per peran (pengepak "pekerjaanku", owner seluruh antrean); nilainya selalu terkirim lewat `<select>` agar "semua" tak jatuh ke bawaan.
-const punyaku = params.has('punyaku') ? params.get('punyaku') === '1' : user.role === 'pengepak';
+// Pengepak hanya melihat tugasnya; owner memantau seluruh antrean kecuali memilih "Tugas saya", dan nilainya selalu terkirim lewat `<select>` agar "semua" tak jatuh ke bawaan.
+const owner = user.role === 'owner';
+const punyaku = !owner || params.get('punyaku') === '1';
 
 const kueri = new URLSearchParams();
 if (status) kueri.set('status', status);
@@ -24,13 +25,13 @@ const kunciVapid = kunciPublikVapid();
 const sekarang = Date.now();
 ---
 
-<AppShell judul="Tiket" user={user}>
+<AppShell judul="Tugas Packing" user={user}>
   {/* Langganan push butuh JavaScript; tanpa JS atau tanpa dukungan browser bagian ini tetap tersembunyi dan halaman bekerja seperti biasa. */}
   {
     kunciVapid && (
       <div class="kartu mb-5 flex flex-wrap items-center justify-between gap-3" data-notifikasi={kunciVapid} hidden>
         <p class="text-sm" data-notifikasi-teks>
-          Nyalakan notifikasi agar perangkat ini berbunyi saat ada tiket baru.
+          Nyalakan notifikasi agar perangkat ini berbunyi saat ada tugas packing baru.
         </p>
         <button class="tombol-utama" type="button" data-notifikasi-tombol>
           Aktifkan notifikasi
@@ -41,14 +42,18 @@ const sekarang = Date.now();
 
   <div class="mb-5 flex flex-wrap items-end justify-between gap-4">
     <p class="text-sm text-[var(--color-teks-lembut)]">
-      {daftar.length} tiket · yang paling mendesak di atas
+      {daftar.length} tugas
     </p>
 
     <form method="GET" class="grid w-full grid-cols-2 gap-2 md:flex md:w-auto">
-      <select class="kolom md:w-44" name="punyaku" aria-label="Cakupan tiket">
-        <option value="1" selected={punyaku}>Tiket saya</option>
-        <option value="0" selected={!punyaku}>Semua tiket</option>
-      </select>
+      {
+        owner && (
+          <select class="kolom md:w-44" name="punyaku" aria-label="Cakupan tugas packing">
+            <option value="0" selected={!punyaku}>Semua tugas</option>
+            <option value="1" selected={punyaku}>Tugas saya</option>
+          </select>
+        )
+      }
 
       <select class="kolom md:w-44" name="status" aria-label="Saring status">
         <option value="" selected={!status}>Semua status</option>
@@ -61,7 +66,7 @@ const sekarang = Date.now();
         }
       </select>
 
-      <button class="tombol-halus col-span-2" type="submit">Saring</button>
+      <button class:list={['tombol-halus', owner && 'col-span-2']} type="submit">Saring</button>
     </form>
   </div>
 
@@ -69,11 +74,11 @@ const sekarang = Date.now();
     <table class="tabel tabel-kartu">
       <thead>
         <tr>
-          <th>Pesanan</th>
-          <th>Platform</th>
+          <th>Kode</th>
+          <th>Pengiriman</th>
           <th>Tenggat</th>
           <th>Status</th>
-          <th>Pengepak</th>
+          {owner && <th>Pengepak</th>}
           <th><span class="sr-only">Aksi</span></th>
         </tr>
       </thead>
@@ -81,7 +86,7 @@ const sekarang = Date.now();
         {
           daftar.map((t) => {
             const dikemas = t.items.filter((it) => it.is_packed).length;
-            // Tenggat lewat hanya jadi peringatan selama tiket belum diserahkan; sesudah itu merah hanya kebisingan.
+            // Tenggat selalu merah agar terlihat; yang lewat ditebalkan selama tiket belum diserahkan.
             const telat =
               t.sla_deadline !== null &&
               t.status !== 'handed_over' &&
@@ -95,16 +100,18 @@ const sekarang = Date.now();
                     class="font-medium text-merah-700 hover:underline max-md:after:absolute max-md:after:inset-0"
                     href={`/tiket/${t.id}`}
                   >
-                    {t.order_ref}
+                    {kodeTampil(t.pickup_code, t.order_ref)}
                   </a>
                   <p class="text-xs font-normal text-[var(--color-teks-lembut)]">
-                    {dikemas}/{t.items.length} barang dikemas
+                    {dikemas}/{t.items.length} barang disiapkan
                   </p>
                 </td>
-                <td data-label="Platform" class="text-[var(--color-teks-lembut)]">{t.platform_name}</td>
+                <td data-label="Pengiriman" class="text-[var(--color-teks-lembut)]">
+                  {t.platform_name} · {LABEL_PENGIRIMAN[t.sla_type] ?? t.sla_type}
+                </td>
                 <td data-label="Tenggat" class="whitespace-nowrap">
                   {t.sla_deadline ? (
-                    <span class:list={['tabular-nums', telat ? 'font-semibold text-red-700' : 'text-stone-600']}>
+                    <span class:list={['tabular-nums', 'text-red-700', telat && 'font-semibold']}>
                       {waktu(t.sla_deadline)}
                       {telat && ' · lewat'}
                     </span>
@@ -115,7 +122,9 @@ const sekarang = Date.now();
                 <td data-label="Status">
                   <span class={kelasLencana(t.status)}>{LABEL_STATUS[t.status]}</span>
                 </td>
-                <td data-label="Pengepak" class="text-[var(--color-teks-lembut)]">{t.assigned_to_name ?? '—'}</td>
+                {owner && (
+                  <td data-label="Pengepak" class="text-[var(--color-teks-lembut)]">{t.assigned_to_name ?? '—'}</td>
+                )}
                 <td class="text-right max-md:hidden">
                   <a class="tombol-halus" href={`/tiket/${t.id}`}>Buka</a>
                 </td>
@@ -126,10 +135,12 @@ const sekarang = Date.now();
         {
           daftar.length === 0 && (
             <tr>
-              <td colspan="6" class="py-12 text-center text-[var(--color-teks-lembut)]">
-                {punyaku
-                  ? 'Belum ada tiket yang ditugaskan ke kamu. Pilih "Semua tiket" untuk melihat antrean.'
-                  : 'Belum ada tiket packing.'}
+              <td colspan={owner ? 6 : 5} class="py-12 text-center text-[var(--color-teks-lembut)]">
+                {!owner
+                  ? 'Belum ada tugas packing untukmu.'
+                  : punyaku
+                    ? 'Belum ada tugas packing yang ditugaskan ke kamu. Pilih "Semua tugas" untuk melihat antrean.'
+                    : 'Belum ada tugas packing.'}
               </td>
             </tr>
           )

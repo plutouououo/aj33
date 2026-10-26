@@ -57,6 +57,8 @@ pub struct LabelShopee {
     pub shipping: PengirimanLabel,
     #[serde(default)]
     pub ship_by: Option<NaiveDate>,
+    #[serde(default)]
+    pub pickup_code: Option<String>,
     pub items: Vec<BarisLabel>,
 }
 
@@ -141,6 +143,7 @@ pub async fn catat_label(pool: &PgPool, labels: Vec<LabelShopee>) -> AppResult<V
             address: &siap.address,
             city: &siap.city,
             district: &siap.district,
+            pickup_code: siap.pickup_code.as_deref(),
             raw_payload: raw,
             items: &baris,
         };
@@ -197,6 +200,7 @@ struct LabelSiap {
     is_cod: bool,
     shipping: PengirimanLabel,
     ship_by: Option<NaiveDate>,
+    pickup_code: Option<String>,
     items: Vec<BarisLabel>,
 }
 
@@ -249,6 +253,14 @@ fn periksa(label: &LabelShopee) -> Result<LabelSiap, String> {
         is_cod: label.is_cod,
         shipping: label.shipping,
         ship_by: label.ship_by,
+        pickup_code: match label
+            .pickup_code
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+        {
+            Some(v) => Some(teks(v, "Kode pengambilan", 20)?),
+            None => None,
+        },
         items,
     })
 }
@@ -269,6 +281,7 @@ mod tests {
             is_cod: false,
             shipping: PengirimanLabel::SameDay,
             ship_by: NaiveDate::from_ymd_opt(2026, 10, 19),
+            pickup_code: Some(" 9WPS ".into()),
             items: vec![BarisLabel {
                 name: "Ceker bersih kulit ada kuku".into(),
                 sku: "cbsb-afc-1".into(),
@@ -287,6 +300,7 @@ mod tests {
             "Jalan Ciptoning No. 40 b, RT.1/RW.1, DEPOK, KAB. SLEMAN, DI YOGYAKARTA"
         );
         assert_eq!(siap.items[0].sku, "CBSB-AFC-1");
+        assert_eq!(siap.pickup_code.as_deref(), Some("9WPS"));
     }
 
     #[test]
@@ -300,6 +314,15 @@ mod tests {
         let mut tanpa_sku = label();
         tanpa_sku.items[0].sku = "  ".into();
         assert!(periksa(&tanpa_sku).is_err());
+    }
+
+    #[test]
+    fn kode_pengambilan_kosong_tak_disimpan() {
+        let kosong = LabelShopee {
+            pickup_code: Some("  ".into()),
+            ..label()
+        };
+        assert_eq!(periksa(&kosong).unwrap().pickup_code, None);
     }
 
     #[test]

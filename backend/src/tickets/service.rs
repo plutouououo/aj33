@@ -41,7 +41,7 @@ pub async fn kirim(
 
     if !repo::bisa_mengepak(&mut tx, kepada).await? {
         return Err(AppError::bad_request(
-            "Tiket hanya bisa dikirim ke pengguna aktif berperan pengepak atau owner.",
+            "Tugas packing hanya bisa dikirim ke pengguna aktif berperan pengepak atau owner.",
         ));
     }
 
@@ -72,7 +72,7 @@ async fn buat_dalam(
     let baris = repo::baris_pesanan(tx, external_order_id).await?;
     if baris.is_empty() {
         return Err(AppError::conflict(
-            "Pesanan ini belum punya rincian barang, jadi tiket packing belum bisa dibuat.",
+            "Pesanan ini belum punya rincian barang, jadi tugas packing belum bisa dibuat.",
         ));
     }
 
@@ -119,7 +119,7 @@ async fn buat_dalam(
 
     let ticket_id = repo::insert_ticket(tx, external_order_id, notes)
         .await?
-        .ok_or_else(|| AppError::conflict("Pesanan ini sudah punya tiket packing."))?;
+        .ok_or_else(|| AppError::conflict("Pesanan ini sudah punya tugas packing."))?;
 
     for line in &lines {
         let nama_produk = nama
@@ -149,16 +149,16 @@ async fn buat_dalam(
     Ok(ticket_id)
 }
 
-/// Menugaskan tiket: Owner boleh siapa saja, pengepak hanya untuk dirinya agar tak melempar pekerjaan ke rekan yang tak tahu.
+/// Menugaskan tiket; hanya Owner yang membagi pekerjaan, pengepak tinggal mengerjakan yang diberikan kepadanya.
 pub async fn tugaskan(
     pool: &PgPool,
     ticket_id: Uuid,
     kepada: Uuid,
     oleh: CurrentUser,
 ) -> AppResult<()> {
-    if oleh.role != Role::Owner && kepada != oleh.id {
+    if oleh.role != Role::Owner {
         return Err(AppError::forbidden(
-            "Kamu hanya bisa mengambil tiket untuk dirimu sendiri.",
+            "Hanya owner yang bisa menugaskan tugas packing.",
         ));
     }
 
@@ -168,13 +168,13 @@ pub async fn tugaskan(
 
     if !status.masih_bisa_ditugaskan() {
         return Err(AppError::conflict(
-            "Tiket yang sudah selesai dikemas tidak bisa dipindahtangankan.",
+            "Tugas packing yang sudah selesai dikemas tidak bisa dipindahtangankan.",
         ));
     }
 
     if !repo::bisa_mengepak(&mut tx, kepada).await? {
         return Err(AppError::bad_request(
-            "Tiket hanya bisa ditugaskan ke pengguna aktif berperan pengepak atau owner.",
+            "Tugas packing hanya bisa ditugaskan ke pengguna aktif berperan pengepak atau owner.",
         ));
     }
 
@@ -191,6 +191,13 @@ pub async fn pindah_status(
     tujuan: TicketStatus,
     oleh: CurrentUser,
 ) -> AppResult<()> {
+    // ACC owner terjadi di WhatsApp, di luar aplikasi, jadi hanya owner yang tahu kapan barang boleh keluar.
+    if tujuan == TicketStatus::HandedOver && oleh.role != Role::Owner {
+        return Err(AppError::forbidden(
+            "Hanya owner yang bisa menyelesaikan tugas packing, setelah ACC di WhatsApp.",
+        ));
+    }
+
     let mut tx = pool.begin().await?;
     let tiket = ambil_terkunci(&mut tx, ticket_id).await?;
 
@@ -235,12 +242,14 @@ pub async fn tandai_item(
 
     if TicketStatus::parse(&tiket.status)? != TicketStatus::Packing {
         return Err(AppError::conflict(
-            "Centang barang hanya bisa diubah saat tiket sedang dikemas.",
+            "Centang barang hanya bisa diubah saat tugas packing sedang dikemas.",
         ));
     }
 
     if !repo::set_item_terkemas(&mut tx, ticket_id, item_id, is_packed).await? {
-        return Err(AppError::not_found("Barang tidak ada di tiket ini."));
+        return Err(AppError::not_found(
+            "Barang tidak ada di tugas packing ini.",
+        ));
     }
 
     tx.commit().await?;
@@ -306,7 +315,7 @@ async fn ambil_terkunci(
 ) -> AppResult<TiketTerkunci> {
     repo::kunci(tx, ticket_id)
         .await?
-        .ok_or_else(|| AppError::not_found("Tiket tidak ditemukan."))
+        .ok_or_else(|| AppError::not_found("Tugas packing tidak ditemukan."))
 }
 
 /// Yang boleh mengubah tiket hanya pengepak yang ditugaskan, dan Owner.
@@ -317,7 +326,7 @@ fn pastikan_boleh_mengerjakan(tiket: &TiketTerkunci, oleh: CurrentUser) -> AppRe
 
     // Dua sebab berbeda dan pengepak hanya bisa berbuat pada yang pertama, jadi pesannya dibedakan.
     Err(AppError::forbidden(match tiket.assigned_to_user_id {
-        None => "Ambil tiket ini dulu sebelum mengerjakannya.",
-        Some(_) => "Tiket ini ditugaskan ke orang lain.",
+        None => "Tugas packing ini belum ditugaskan ke siapa pun.",
+        Some(_) => "Tugas packing ini ditugaskan ke orang lain.",
     }))
 }

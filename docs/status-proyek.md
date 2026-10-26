@@ -267,10 +267,11 @@ API Shopee tidak bisa dipakai, jadi pesanan masuk lewat PDF label ("Cetak
 Label" di Seller Centre). Alurnya: owner unggah PDF di `/pesanan` → server
 Astro membaca PDF (`web/src/lib/label-shopee.ts`, pdfjs-dist) → backend
 mencatatnya (`POST /orders/labels`) → owner mencentang pesanan, memilih batch
-per barang dan pengepak → `POST /tickets/bulk` → notifikasi Web Push ke
-perangkat pengepak → pengepak ambil barang, kirim foto + isi tiket ke
-WhatsApp owner, owner ACC di WhatsApp (di luar aplikasi) → pengepak
-"Selesaikan tiket".
+per barang dan pengepak (atau dirinya sendiri) → `POST /tickets/bulk` →
+notifikasi Web Push ke perangkat pengepak → pengepak "Mulai packing", mencentang
+tiap barang, "Barang sudah disiapkan", lalu kirim foto + isi tugas ke WhatsApp
+owner → owner ACC di WhatsApp (di luar aplikasi) dan menekan "Selesaikan" di
+`/tiket/[id]`. Owner yang mengepak sendiri tak melapor lewat WhatsApp.
 
 - **Membaca label.** Satu label per halaman. Yang diambil: nomor pesanan,
   penerima, alamat, kabupaten dan kecamatan (kotak di bawah alamat), kotak
@@ -288,6 +289,15 @@ WhatsApp owner, owner ACC di WhatsApp (di luar aplikasi) → pengepak
   app; nama Shopee hanya disimpan di `item_name_snapshot`. Label dengan SKU
   kosong atau tak dikenal ditolak per label, label lain tetap tercatat.
   Nomor pesanan yang sudah ada dijawab "sudah ada", jadi unggah ulang aman.
+- **Hanya owner yang menugaskan dan menyelesaikan** (aturannya di
+  `tickets::service`): pengepak tak bisa mengambil tugas sendiri,
+  dan `packed` → `handed_over` ditolak untuk selain owner karena ACC terjadi
+  di WhatsApp. Di UI tugas packing disebut "Tugas Packing"; nama teknisnya
+  tetap `tickets`/`/tiket`.
+- **Kode pengambilan** (migrasi 0030, `external_orders.pickup_code`) dibaca
+  dari "Kode Pengambilan: 9WPS" di label dan menggantikan nomor pesanan di
+  layar packing dan Pesanan Masuk; nomor pesanan tetap disimpan untuk laporan.
+  Pesanan tanpa kode (label lama, TikTok) menampilkan nomor pesanannya.
 - **Batch pilihan owner** disimpan di `ticket_items.batch_id`; kosong = FEFO.
   Rak di tiket mengikuti batch pilihan itu.
 - **Penjualan baru tercatat saat tiket selesai** (`handed_over`): lewat

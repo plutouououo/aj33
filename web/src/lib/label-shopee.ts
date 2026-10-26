@@ -12,6 +12,7 @@ export interface LabelShopee {
   is_cod: boolean;
   shipping: 'instant' | 'same_day' | 'reguler';
   ship_by: string | null;
+  pickup_code: string | null;
   items: { name: string; sku: string; variation: string | null; qty: number }[];
 }
 
@@ -154,8 +155,9 @@ function cariTeks(teks: Teks[], pola: RegExp): Teks | undefined {
 function nilaiSetelah(baris: Teks[][], judul: Teks, pola: RegExp, batasKanan = Infinity): string {
   const sisa = judul.s.replace(pola, '');
   const sebaris = baris.find((b) => b.includes(judul)) ?? [];
+  // Patokannya titik tengah nilai, bukan tepi kirinya: lebar judul dari pdfjs bisa lebih panjang dari aslinya sehingga nilai pendek ("Tiaraaa") tampak menimpanya.
   const kanan = sebaris
-    .filter((t) => t !== judul && t.x0 >= judul.x1 - 1 && t.x0 < batasKanan - 1)
+    .filter((t) => t !== judul && (t.x0 + t.x1) / 2 >= judul.x1 && t.x0 < batasKanan - 1)
     .map((t) => t.s);
   return rapi([sisa, ...kanan].join(' '));
 }
@@ -306,6 +308,7 @@ export function bacaLabel(h: Halaman): LabelShopee {
   const is_cod = Number(nilaiCod.replace(/\D/g, '') || '0') > 0 || /\bCOD\b/.test(payment_label);
 
   const batas = cariTeks(h.teks, /^Batas Kirim:/);
+  const kode = cariTeks(h.teks, /^Kode Pengambilan:/);
 
   return {
     order_sn,
@@ -317,6 +320,7 @@ export function bacaLabel(h: Halaman): LabelShopee {
     is_cod,
     shipping: bacaPengiriman(h),
     ship_by: batas ? bacaTanggal(nilaiSetelah(baris, batas, /^Batas Kirim:/)) : null,
+    pickup_code: kode ? nilaiSetelah(baris, kode, /^Kode Pengambilan:/) || null : null,
     items: bacaBarang(baris),
   };
 }

@@ -320,6 +320,8 @@ export interface Ticket {
   id: string;
   external_order_id: string;
   order_ref: string;
+  /** Kode pengambilan dari label; `null` untuk pesanan tanpa label (lama atau TikTok). */
+  pickup_code: string | null;
   platform_name: string;
   sla_type: string;
   sla_deadline: string | null;
@@ -349,6 +351,7 @@ export interface Order {
   id: string;
   platform_name: string;
   external_order_id: string;
+  pickup_code: string | null;
   status: string;
   sla_type: 'instant' | 'same_day' | 'reguler';
   sla_deadline: string | null;

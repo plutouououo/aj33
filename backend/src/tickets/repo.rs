@@ -21,12 +21,14 @@ pub struct TicketItem {
     pub storage_location: Option<String>,
 }
 
-/// Tiket beserta secuil data pesanan (nomor, platform, tenggat SLA) karena antrean diurutkan berdasarkan itu, tanpa memanggil `/orders/{id}` per baris.
+/// Tiket beserta secuil data pesanan (nomor, kode pengambilan, platform, tenggat SLA) yang tampil di antrean, tanpa memanggil `/orders/{id}` per baris.
 #[derive(Debug, Serialize)]
 pub struct Ticket {
     pub id: Uuid,
     pub external_order_id: Uuid,
     pub order_ref: String,
+    /// Kode pengambilan dari label, yang dicari pengepak di tumpukan paket; `order_ref` tetap untuk laporan.
+    pub pickup_code: Option<String>,
     pub platform_name: String,
     pub sla_type: String,
     pub sla_deadline: Option<DateTime<Utc>>,
@@ -43,6 +45,7 @@ struct TicketHead {
     id: Uuid,
     external_order_id: Uuid,
     order_ref: String,
+    pickup_code: Option<String>,
     platform_name: String,
     sla_type: String,
     sla_deadline: Option<DateTime<Utc>>,
@@ -91,6 +94,7 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
         id: head.id,
         external_order_id: head.external_order_id,
         order_ref: head.order_ref,
+        pickup_code: head.pickup_code,
         platform_name: head.platform_name,
         sla_type: head.sla_type,
         sla_deadline: head.sla_deadline,
@@ -104,7 +108,7 @@ async fn lengkapi(pool: &PgPool, head: TicketHead) -> AppResult<Ticket> {
     })
 }
 
-/// Daftar tiket urut `sla_deadline` menaik (paling mendesak di atas, pertanyaan layar pengepak: mana dikerjakan sekarang); tanpa tenggat jatuh ke bawah.
+/// Daftar tiket terbaru di atas; tenggat tetap tampil per baris dan yang lewat ditandai di layar.
 pub async fn list(
     pool: &PgPool,
     status: Option<&str>,
@@ -113,7 +117,7 @@ pub async fn list(
     let heads = sqlx::query_as!(
         TicketHead,
         r#"
-        SELECT t.id, t.external_order_id, o.external_order_id AS order_ref,
+        SELECT t.id, t.external_order_id, o.external_order_id AS order_ref, o.pickup_code,
                pl.platform_name, o.sla_type, o.sla_deadline, t.status,
                t.assigned_to_user_id, u.name AS "assigned_to_name?",
                t.assigned_at, t.completed_at, t.notes
@@ -123,7 +127,7 @@ pub async fn list(
         LEFT JOIN users u ON u.id = t.assigned_to_user_id
         WHERE ($1::text IS NULL OR t.status = $1)
           AND ($2::uuid IS NULL OR t.assigned_to_user_id = $2)
-        ORDER BY o.sla_deadline ASC NULLS LAST, t.created_at ASC
+        ORDER BY t.created_at DESC, t.id
         LIMIT 100
         "#,
         status,
@@ -144,7 +148,7 @@ pub async fn find(pool: &PgPool, id: Uuid) -> AppResult<Option<Ticket>> {
     let head = sqlx::query_as!(
         TicketHead,
         r#"
-        SELECT t.id, t.external_order_id, o.external_order_id AS order_ref,
+        SELECT t.id, t.external_order_id, o.external_order_id AS order_ref, o.pickup_code,
                pl.platform_name, o.sla_type, o.sla_deadline, t.status,
                t.assigned_to_user_id, u.name AS "assigned_to_name?",
                t.assigned_at, t.completed_at, t.notes

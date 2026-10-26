@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id,\n               o.status, o.sla_type, o.sla_deadline, o.total_amount,\n               o.shipping_carrier, o.payment_method, o.is_cod,\n               o.received_at AS \"received_at!\",\n               t.id AS \"ticket_id?\",\n               a.recipient_name AS \"recipient_name?\", a.full_address AS \"recipient_address?\",\n               a.city AS \"recipient_city?\", a.district AS \"recipient_district?\"\n        FROM external_orders o\n        JOIN platforms pl ON pl.id = o.platform_id\n        LEFT JOIN tickets t ON t.external_order_id = o.id\n        LEFT JOIN LATERAL (\n            SELECT recipient_name, full_address, city, district\n            FROM order_shipping_address\n            WHERE external_order_id = o.id\n            ORDER BY created_at DESC\n            LIMIT 1\n        ) a ON true\n        WHERE ($1::text IS NULL OR o.status = $1)\n          AND (NOT $2::bool OR t.id IS NULL)\n        ORDER BY CASE WHEN $2 THEN o.sla_deadline END ASC NULLS LAST, o.received_at DESC\n        LIMIT $3\n        ",
+  "query": "\n        SELECT o.id, o.platform_id, pl.platform_name, o.external_order_id, o.pickup_code,\n               o.status, o.sla_type, o.sla_deadline, o.total_amount,\n               o.shipping_carrier, o.payment_method, o.is_cod,\n               o.received_at AS \"received_at!\",\n               t.id AS \"ticket_id?\",\n               a.recipient_name AS \"recipient_name?\", a.full_address AS \"recipient_address?\",\n               a.city AS \"recipient_city?\", a.district AS \"recipient_district?\"\n        FROM external_orders o\n        JOIN platforms pl ON pl.id = o.platform_id\n        LEFT JOIN tickets t ON t.external_order_id = o.id\n        LEFT JOIN LATERAL (\n            SELECT recipient_name, full_address, city, district\n            FROM order_shipping_address\n            WHERE external_order_id = o.id\n            ORDER BY created_at DESC\n            LIMIT 1\n        ) a ON true\n        WHERE o.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -25,75 +25,78 @@
       },
       {
         "ordinal": 4,
-        "name": "status",
+        "name": "pickup_code",
         "type_info": "Varchar"
       },
       {
         "ordinal": 5,
-        "name": "sla_type",
+        "name": "status",
         "type_info": "Varchar"
       },
       {
         "ordinal": 6,
+        "name": "sla_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
         "name": "sla_deadline",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "total_amount",
         "type_info": "Numeric"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "shipping_carrier",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "payment_method",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "is_cod",
         "type_info": "Bool"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "received_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "ticket_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "recipient_name?",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "recipient_address?",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "recipient_city?",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "recipient_district?",
         "type_info": "Varchar"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Bool",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -101,6 +104,7 @@
       false,
       false,
       false,
+      true,
       false,
       false,
       true,
@@ -116,5 +120,5 @@
       true
     ]
   },
-  "hash": "22eca34aedc51195217b173caba7191385f8a16e19f20b3d678bae4e14ca7c3c"
+  "hash": "fabc7ce79a2e0d46523a82c5d495bd8b0da82200c730edefd183a6f8090f8ff7"
 }

@@ -1,6 +1,5 @@
 ---
 import Galat from '../../components/Galat.astro';
-import Peringatan from '../../components/Peringatan.astro';
 import AppShell from '../../layouts/AppShell.astro';
 import {
   api,
@@ -14,6 +13,7 @@ import { tanggal, waktu } from '../../lib/format';
 import { bacaLabelPdf } from '../../lib/label-shopee';
 import { pesanDari, sesudahAksi } from '../../lib/pesan';
 import { kirimNotifikasi } from '../../lib/push';
+import { LABEL_PENGIRIMAN, kodeTampil } from '../../lib/tiket';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -63,7 +63,7 @@ if (Astro.request.method === 'POST') {
     const dipilih = form.getAll('pesanan').map(String);
 
     if (!pengepak) {
-      galat = 'Pilih pengepak tujuan.';
+      galat = 'Pilih tujuan tugas packing.';
     } else if (dipilih.length === 0) {
       galat = 'Centang minimal satu pesanan untuk dikirim.';
     } else {
@@ -81,14 +81,16 @@ if (Astro.request.method === 'POST') {
           token,
           body: { user_id: pengepak, orders },
         });
-        await kirimNotifikasi(token, pengepak, {
-          title: 'Tiket packing baru',
-          body: `${orders.length} pesanan menunggu diambil.`,
-          url: '/tiket',
-        });
+        if (pengepak !== user.id) {
+          await kirimNotifikasi(token, pengepak, {
+            title: 'Tugas packing baru',
+            body: `${orders.length} pesanan menunggu dipacking.`,
+            url: '/tiket',
+          });
+        }
         return Astro.redirect(sesudahAksi(Astro.url, 'terkirim'), 303);
       } catch (err) {
-        galat = err instanceof ApiRequestError ? err.message : 'Tiket gagal dikirim.';
+        galat = err instanceof ApiRequestError ? err.message : 'Tugas packing gagal dikirim.';
       }
     }
   } else {
@@ -96,7 +98,7 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const sukses = galat ? null : pesanDari(Astro.url, { terkirim: 'Tiket terkirim ke pengepak.' });
+const sukses = galat ? null : pesanDari(Astro.url, { terkirim: 'Tugas packing terkirim.' });
 
 if (hasilLabel) {
   const gagalCatat = hasilLabel.filter((h) => h.status === 'gagal');
@@ -132,12 +134,6 @@ function labelBatch(b: ProductBatch): string {
     .filter(Boolean)
     .join(' · ');
 }
-
-const PENGIRIMAN: Record<string, string> = {
-  instant: 'Instant',
-  same_day: 'Sameday',
-  reguler: 'Reguler',
-};
 ---
 
 <AppShell judul="Pesanan Masuk" user={user}>
@@ -173,23 +169,20 @@ const PENGIRIMAN: Record<string, string> = {
 
         <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
           <p class="text-sm text-[var(--color-teks-lembut)]">
-            {pesanan.length} pesanan menunggu · tenggat terdekat di atas
+            {pesanan.length} pesanan menunggu · terbaru di atas
           </p>
-          {pengepak.length === 0 ? (
-            <Peringatan>Belum ada akun pengepak aktif untuk dikirimi tiket.</Peringatan>
-          ) : (
-            <div class="flex flex-wrap items-end gap-2">
-              <div>
-                <label class="label" for="pengepak">Kirim ke</label>
-                <select class="kolom w-48" id="pengepak" name="pengepak" required>
-                  {pengepak.map((p) => (
-                    <option value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-              <button class="tombol-utama" type="submit">Kirim tiket terpilih</button>
+          <div class="flex flex-wrap items-end gap-2">
+            <div>
+              <label class="label" for="pengepak">Tugaskan ke</label>
+              <select class="kolom w-48" id="pengepak" name="pengepak" required>
+                {pengepak.map((p) => (
+                  <option value={p.id}>{p.name}</option>
+                ))}
+                <option value={user.id}>Saya sendiri</option>
+              </select>
             </div>
-          )}
+            <button class="tombol-utama" type="submit">Kirim tugas packing terpilih</button>
+          </div>
         </div>
 
         <ul class="flex flex-col gap-4">
@@ -199,9 +192,9 @@ const PENGIRIMAN: Record<string, string> = {
                 <input class="mt-1 h-4 w-4" type="checkbox" name="pesanan" value={o.id} checked />
                 <div class="min-w-0 flex-1">
                   <p class="font-semibold">
-                    {o.external_order_id}
+                    {kodeTampil(o.pickup_code, o.external_order_id)}
                     <span class="lencana-perlu-tindakan ml-2">
-                      {PENGIRIMAN[o.sla_type] ?? o.sla_type}
+                      {LABEL_PENGIRIMAN[o.sla_type] ?? o.sla_type}
                     </span>
                     {o.is_cod && <span class="lencana-berjalan ml-1">COD</span>}
                   </p>
@@ -216,7 +209,7 @@ const PENGIRIMAN: Record<string, string> = {
                 </div>
                 <div class="text-right text-xs text-stone-500">
                   {o.payment_method && <p>{o.payment_method}</p>}
-                  {o.sla_deadline && <p>Batas {waktu(o.sla_deadline)}</p>}
+                  {o.sla_deadline && <p class="font-semibold text-red-700">Tenggat {waktu(o.sla_deadline)}</p>}
                 </div>
               </label>
 

@@ -1,26 +1,38 @@
 ---
 import Galat from '../../components/Galat.astro';
 import AppShell from '../../layouts/AppShell.astro';
-import { api, ApiRequestError, type Ticket } from '../../lib/api';
+import { api, ApiRequestError, type Pengguna, type Ticket } from '../../lib/api';
 import { tanggal, waktu } from '../../lib/format';
-import { LABEL_STATUS, kelasLencana, langkahBerikutnya, masihBisaDiambil } from '../../lib/tiket';
+import {
+  LABEL_PENGIRIMAN,
+  LABEL_STATUS,
+  kelasLencana,
+  kodeTampil,
+  langkahBerikutnya,
+  masihBisaDitugaskan,
+} from '../../lib/tiket';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
+const owner = user.role === 'owner';
 
 const { id } = Astro.params;
 
 let galat: string | null = null;
 let tiket: Ticket | null = null;
 
-// Aksi berhasil dijawab redirect 303 ke tiket yang sama agar muat-ulang tak mengirim ulang aksinya (mis. "ambil tiket" kedua yang menampilkan galat).
+// Aksi berhasil dijawab redirect 303 ke tiket yang sama agar muat-ulang tak mengirim ulang aksinya (mis. "Mulai packing" kedua yang menampilkan galat).
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const aksi = String(form.get('aksi') ?? '');
 
   try {
-    if (aksi === 'ambil') {
-      await api<Ticket>(`/tickets/${id}/assign`, { method: 'POST', token, body: {} });
+    if (aksi === 'tugaskan') {
+      await api<Ticket>(`/tickets/${id}/assign`, {
+        method: 'POST',
+        token,
+        body: { user_id: String(form.get('user_id') ?? '') || null },
+      });
     } else if (aksi === 'status') {
       await api<Ticket>(`/tickets/${id}/status`, {
         method: 'PATCH',
@@ -56,51 +68,54 @@ if (!tiket) {
   }
 }
 
-// Owner boleh mengerjakan tiket mana pun, pengepak hanya miliknya, sama dengan `pastikan_boleh_mengerjakan` di backend.
-const boleh = tiket !== null && (user.role === 'owner' || tiket.assigned_to_user_id === user.id);
-const lanjut = tiket && boleh ? langkahBerikutnya(tiket.status) : null;
-const bisaDiambil =
-  tiket !== null && masihBisaDiambil(tiket.status) && tiket.assigned_to_user_id !== user.id;
+const pemegang = tiket !== null && tiket.assigned_to_user_id === user.id;
+const lanjut = tiket ? langkahBerikutnya(tiket.status, { owner, pemegang }) : null;
+const bisaDitugaskan = owner && tiket !== null && masihBisaDitugaskan(tiket.status);
+const pengepak = bisaDitugaskan ? await api<Pengguna[]>('/users?role=pengepak', { token }) : [];
 const dikemas = tiket?.items.filter((it) => it.is_packed).length ?? 0;
+const kode = tiket ? kodeTampil(tiket.pickup_code, tiket.order_ref) : null;
 
 const batchTeks = (it: Ticket['items'][number]) =>
   it.batch_expiry ? `exp ${tanggal(it.batch_expiry)}` : it.batch_number;
 
-// Foto barang dikirim pengepak ke WhatsApp owner bersama isi tiket; ACC owner terjadi di WhatsApp, di luar aplikasi.
-const teksWa = tiket
+// Foto barang dikirim pengepak ke WhatsApp owner bersama isi tiket; ACC owner terjadi di WhatsApp, di luar aplikasi, dan owner yang mengepak sendiri tak perlu melapor.
+const lapor = tiket !== null && !owner && pemegang && tiket.status === 'packed';
+const teksWa = lapor
   ? [
-      `Tiket ${tiket.order_ref} (${tiket.platform_name})`,
-      ...tiket.items.map(
+      `Tugas packing ${kode} (${tiket!.platform_name})`,
+      ...tiket!.items.map(
         (it) => `- ${it.product_name_snapshot} x${it.qty}${batchTeks(it) ? ` (${batchTeks(it)})` : ''}`,
       ),
-      tiket.assigned_to_name ? `Pengepak: ${tiket.assigned_to_name}` : '',
-      new URL(`/tiket/${tiket.id}`, Astro.url).href,
+      tiket!.assigned_to_name ? `Pengepak: ${tiket!.assigned_to_name}` : '',
+      new URL(`/tiket/${tiket!.id}`, Astro.url).href,
     ]
       .filter(Boolean)
       .join('\n')
   : '';
 ---
 
-<AppShell judul={tiket?.order_ref ?? 'Tiket'} user={user}>
+<AppShell judul={kode ?? 'Tugas Packing'} user={user}>
   <a
     class="-my-2 inline-flex min-h-11 items-center text-sm text-stone-500 underline-offset-2 hover:text-merah-700 hover:underline"
     href="/tiket"
   >
-    ← Antrean tiket
+    ← Antrean tugas packing
   </a>
 
   <Galat pesan={galat} class="mt-4" />
 
   {
     tiket === null ? (
-      <p class="mt-4 text-stone-500">Tiket tidak ditemukan.</p>
+      <p class="mt-4 text-stone-500">Tugas packing tidak ditemukan.</p>
     ) : (
       <>
         <div class="mb-6 mt-4 flex flex-wrap items-start justify-between gap-4">
           <div>
             <p class="text-sm text-[var(--color-teks-lembut)]">
-              {tiket.platform_name} · SLA {tiket.sla_type}
-              {tiket.sla_deadline && ` · tenggat ${waktu(tiket.sla_deadline)}`}
+              {tiket.platform_name} · {LABEL_PENGIRIMAN[tiket.sla_type] ?? tiket.sla_type}
+              {tiket.sla_deadline && (
+                <span class="font-semibold text-red-700"> · tenggat {waktu(tiket.sla_deadline)}</span>
+              )}
             </p>
           </div>
           <span class={kelasLencana(tiket.status)}>{LABEL_STATUS[tiket.status]}</span>
@@ -118,27 +133,56 @@ const teksWa = tiket
             <div class="mb-4 flex items-baseline justify-between gap-4">
               <h2 class="font-semibold">Barang</h2>
               <span class="text-sm tabular-nums text-stone-500">
-                {dikemas}/{tiket.items.length} dikemas
+                {dikemas}/{tiket.items.length} disiapkan
               </span>
             </div>
 
             <ul class="divide-y divide-[var(--color-garis)]">
               {tiket.items.map((it) => (
                 <li
-                  class="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 scroll-mt-[calc(var(--tinggi-topbar)+1rem)]"
+                  class="flex items-center gap-3 py-3 scroll-mt-[calc(var(--tinggi-topbar)+1rem)]"
                   id={`barang-${it.id}`}
                 >
-                  <span
-                    class:list={[
-                      'grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold',
-                      it.is_packed
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-stone-100 text-stone-400',
-                    ]}
-                    aria-hidden="true"
-                  >
-                    {it.is_packed ? '✓' : ''}
-                  </span>
+                  {/* Centang hanya bisa diubah pemegang saat tiket dikemas; setelah `packed`, pemeriksaan "semua barang sudah disiapkan" tak boleh dibatalkan. */}
+                  {/* `action` berjangkar ke barangnya: redirect 303 mewarisi fragmen itu, jadi di ponsel layar kembali ke barang yang baru dicentang, bukan ke atas halaman. */}
+                  {pemegang && tiket.status === 'packing' ? (
+                    <form method="POST" action={`#barang-${it.id}`} class="shrink-0">
+                      <input type="hidden" name="aksi" value="item" />
+                      <input type="hidden" name="item_id" value={it.id} />
+                      <input type="hidden" name="is_packed" value={it.is_packed ? '0' : '1'} />
+                      <button
+                        class="-m-2.5 grid h-11 w-11 place-items-center rounded-full"
+                        type="submit"
+                        role="checkbox"
+                        aria-checked={it.is_packed ? 'true' : 'false'}
+                        aria-label={it.product_name_snapshot}
+                      >
+                        <span
+                          class:list={[
+                            'grid h-6 w-6 place-items-center rounded-md border-2 text-xs font-bold',
+                            it.is_packed
+                              ? 'border-emerald-600 bg-emerald-600 text-white'
+                              : 'border-stone-400 bg-white text-transparent',
+                          ]}
+                          aria-hidden="true"
+                        >
+                          ✓
+                        </span>
+                      </button>
+                    </form>
+                  ) : (
+                    <span
+                      class:list={[
+                        'grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold',
+                        it.is_packed
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-stone-100 text-stone-400',
+                      ]}
+                      aria-hidden="true"
+                    >
+                      {it.is_packed ? '✓' : ''}
+                    </span>
+                  )}
 
                   <div class="min-w-0 flex-1">
                     <p
@@ -162,19 +206,6 @@ const teksWa = tiket
                       )}
                     </p>
                   </div>
-
-                  {/* Centang hanya bisa diubah saat tiket dikemas; setelah `packed`, pemeriksaan "semua barang sudah dikemas" tak boleh dibatalkan. */}
-                  {/* `action` berjangkar ke barangnya: redirect 303 mewarisi fragmen itu, jadi di ponsel layar kembali ke barang yang baru dicentang, bukan ke atas halaman. */}
-                  {boleh && tiket.status === 'packing' && (
-                    <form method="POST" action={`#barang-${it.id}`} class="max-sm:w-full max-sm:pl-9">
-                      <input type="hidden" name="aksi" value="item" />
-                      <input type="hidden" name="item_id" value={it.id} />
-                      <input type="hidden" name="is_packed" value={it.is_packed ? '0' : '1'} />
-                      <button class="tombol-halus max-sm:w-full" type="submit">
-                        {it.is_packed ? 'Batalkan' : 'Sudah diambil'}
-                      </button>
-                    </form>
-                  )}
                 </li>
               ))}
             </ul>
@@ -186,7 +217,10 @@ const teksWa = tiket
             <p class="mb-5 text-sm text-stone-600">
               {tiket.assigned_to_name ? (
                 <>
-                  Dipegang <span class="font-medium text-stone-900">{tiket.assigned_to_name}</span>
+                  Dipegang{' '}
+                  <span class="font-medium text-stone-900">
+                    {pemegang ? 'kamu' : tiket.assigned_to_name}
+                  </span>
                   {tiket.assigned_at && (
                     <span class="block text-xs text-stone-500">
                       sejak {waktu(tiket.assigned_at)}
@@ -194,33 +228,43 @@ const teksWa = tiket
                   )}
                 </>
               ) : (
-                'Belum ada yang mengambil tiket ini.'
+                'Belum ditugaskan ke siapa pun.'
               )}
             </p>
 
-            {bisaDiambil && (
-              <form method="POST" class:list={['mb-3', !lanjut && 'max-lg:hidden']}>
-                <input type="hidden" name="aksi" value="ambil" />
-                <button
-                  class:list={[lanjut ? 'tombol-halus' : 'tombol-utama', 'w-full']}
-                  type="submit"
-                >
-                  {tiket.assigned_to_user_id ? 'Ambil alih' : 'Ambil tiket'}
+            {bisaDitugaskan && (
+              <form method="POST" class="mb-4 flex flex-col gap-2">
+                <input type="hidden" name="aksi" value="tugaskan" />
+                <label class="label" for="tugaskan-ke">
+                  {tiket.assigned_to_user_id ? 'Pindahkan ke' : 'Tugaskan ke'}
+                </label>
+                <select class="kolom" id="tugaskan-ke" name="user_id" required>
+                  {pengepak.map((p) => (
+                    <option value={p.id} selected={p.id === tiket.assigned_to_user_id}>
+                      {p.name}
+                    </option>
+                  ))}
+                  <option value={user.id} selected={pemegang}>
+                    Saya sendiri
+                  </option>
+                </select>
+                <button class:list={[lanjut ? 'tombol-halus' : 'tombol-utama', 'w-full']} type="submit">
+                  {tiket.assigned_to_user_id ? 'Pindahkan' : 'Tugaskan'}
                 </button>
               </form>
             )}
 
-            {boleh && tiket.status === 'packed' && (
+            {lapor && (
               <div class="mb-4 flex flex-col gap-2" data-bagikan-wa>
                 <p class="text-sm text-stone-600">
-                  Kirim foto barang ke WhatsApp owner. Selesaikan tiket setelah owner ACC.
+                  Kirim foto barang ke WhatsApp owner, lalu tunggu owner menyelesaikan tugas ini setelah ACC.
                 </p>
                 <label class="tombol-halus w-full cursor-pointer text-center" data-foto-label hidden>
                   Ambil foto barang
                   <input class="sr-only" type="file" accept="image/*" capture="environment" data-foto />
                 </label>
                 <a
-                  class="tombol-halus w-full text-center"
+                  class="tombol-utama w-full text-center"
                   href={`https://wa.me/?text=${encodeURIComponent(teksWa)}`}
                   target="_blank"
                   rel="noopener"
@@ -230,6 +274,19 @@ const teksWa = tiket
                   Kirim ke WhatsApp
                 </a>
               </div>
+            )}
+
+            {owner && !pemegang && tiket.status === 'packed' && (
+              <p class="mb-4 text-sm text-stone-600">
+                Tunggu foto barang dari {tiket.assigned_to_name ?? 'pengepak'} di WhatsApp, lalu
+                selesaikan setelah ACC.
+              </p>
+            )}
+
+            {!owner && pemegang && tiket.status === 'packing' && (
+              <p class="mb-4 text-sm text-stone-600">
+                Centang tiap barang yang sudah disiapkan.
+              </p>
             )}
 
             {lanjut && (
@@ -249,31 +306,24 @@ const teksWa = tiket
               </p>
             )}
 
-            {!boleh && !bisaDiambil && tiket.status !== 'handed_over' && (
-              <p class="text-sm text-stone-500">Tiket ini dikerjakan orang lain.</p>
+            {!owner && !pemegang && tiket.status !== 'handed_over' && (
+              <p class="text-sm text-stone-500">
+                {tiket.assigned_to_user_id
+                  ? 'Tugas ini dikerjakan orang lain.'
+                  : 'Tugas ini belum ditugaskan. Tunggu owner menugaskannya.'}
+              </p>
             )}
           </div>
         </div>
 
         {/* Di ponsel kartu Pengerjaan ada di bawah daftar barang, jadi aksi utamanya diulang di bilah yang menempel di dasar layar. */}
-        {(lanjut || bisaDiambil) && (
+        {lanjut && (
           <form method="POST" class="bilah-aksi lg:hidden">
-            {lanjut ? (
-              <>
-                <input type="hidden" name="aksi" value="status" />
-                <input type="hidden" name="status" value={lanjut.status} />
-                <button class="tombol-utama w-full" type="submit">
-                  {lanjut.label}
-                </button>
-              </>
-            ) : (
-              <>
-                <input type="hidden" name="aksi" value="ambil" />
-                <button class="tombol-utama w-full" type="submit">
-                  {tiket.assigned_to_user_id ? 'Ambil alih' : 'Ambil tiket'}
-                </button>
-              </>
-            )}
+            <input type="hidden" name="aksi" value="status" />
+            <input type="hidden" name="status" value={lanjut.status} />
+            <button class="tombol-utama w-full" type="submit">
+              {lanjut.label}
+            </button>
           </form>
         )}
       </>
