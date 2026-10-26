@@ -208,20 +208,30 @@ const kueri = new URLSearchParams({ scope: 'terjual', limit: '200' });
 if (cariIsi) kueri.set('search', cariIsi);
 if (kategoriIsi) kueri.set('category_id', kategoriIsi);
 
+/** Semua halaman diambil sekaligus karena pop up pelanggan menyaring per huruf di browser; satu halaman 200 memotong nama di akhir alfabet. */
+async function semuaPelanggan(): Promise<Customer[]> {
+  const halaman = (p: number) =>
+    api<PaginatedCustomers>(`/customers?sort=nama&limit=200&page=${p}`, { token });
+  const pertama = await halaman(1);
+  const sisa = Math.max(0, Math.ceil(pertama.total / pertama.limit) - 1);
+  const lain = await Promise.all(Array.from({ length: sisa }, (_, i) => halaman(i + 2)));
+  return [pertama, ...lain].flatMap((h) => h.data);
+}
+
 const [produk, kategori, semuaBatch, pelanggan, pengaturanHarga] = await Promise.all([
   api<PaginatedProducts>(`/products?${kueri}`, { token }),
   api<Category[]>('/categories', { token }),
   // Satu permintaan untuk semua batch bersisa, bukan satu per produk (200 permintaan akan terasa sebelum barang pertama dipindai).
   api<ProductBatch[]>('/batches', { token }),
   bolehTransaksi
-    ? api<PaginatedCustomers>('/customers?limit=200', { token }).then((h) => h.data)
+    ? semuaPelanggan()
     : Promise.resolve([] as Customer[]),
   api<PricingSettings>('/settings/pricing', { token }),
 ]);
 
 const batasGrosirKg = pengaturanHarga.wholesale_threshold_kg;
 
-/** Nama pelanggan untuk nota dicari dari daftar yang sama; `undefined` bila tak termuat di 200 teratas, agar nota diberi label umum, bukan "Walk-in". */
+/** Nama pelanggan untuk nota dicari dari daftar yang sama; `undefined` bila tak termuat (mis. baru dihapus), agar nota diberi label umum, bukan "Walk-in". */
 const strukPelanggan = strukPelangganId
   ? pelanggan.find((c) => c.id === strukPelangganId)
   : null;
@@ -374,6 +384,7 @@ const NOMINAL = [50000, 100000, 200000, 500000];
 
 /** Nama yang bisa dibaca untuk pelanggan yang namanya kosong di database. */
 const namaPelanggan = (c: Customer): string => c.name ?? c.phone ?? '(tanpa nama)';
+const pelangganTerpilih = pelanggan.find((c) => c.id === pelangganDipilih);
 
 /** Sisa satu batch beserta peringatan kedaluwarsanya. */
 function sisaBatch(b: ProductBatch): { label: string; mepet: boolean } {
@@ -736,48 +747,100 @@ function ringkasBatch(p: Product): string {
             </span>
           </div>
 
-          {/* Pelanggan baru dibuat lewat POST ke halaman ini (bukan form terpisah) agar keranjang di form yang sama tidak perlu disalin; tombolnya checkbox `peer` (tanpa JS) dan nama tanpa `required` supaya tidak menahan "Selesaikan". */}
+          {/* Pelanggan baru dibuat lewat POST ke halaman ini (bukan form terpisah) agar keranjang di form yang sama tidak perlu disalin; tombolnya checkbox `peer` (tanpa JS), dengan JS dipindah skrip ke dalam pop up, dan nama tanpa `required` supaya tidak menahan "Selesaikan". */}
           <div class="flex flex-wrap items-center gap-2 border-b border-[var(--color-garis-lembut)] px-4 py-3">
             <label class="shrink-0 text-xs text-[var(--color-teks-lembut)]" for="customer_id">
               Pelanggan
             </label>
-            <select class="kolom min-w-0 flex-1" id="customer_id" name="customer_id">
+            {/* `<select>` tetap field yang terkirim; dengan JS ia disembunyikan dan pop up di bawah hanya mengisi nilainya. */}
+            <select class="kolom tanpa-js min-w-0 flex-1" id="customer_id" name="customer_id" data-pilih-pelanggan>
               <option value="" selected={!pelangganDipilih}>Tidak ada (Walk-in)</option>
               {pelanggan.map((c) => (
-                <option value={c.id} selected={pelangganDipilih === c.id}>
+                <option
+                  value={c.id}
+                  selected={pelangganDipilih === c.id}
+                  data-nama={namaPelanggan(c)}
+                  data-telepon={c.phone ?? ''}
+                >
                   {namaPelanggan(c)}
                   {c.phone ? ` · ${c.phone}` : ''}
                 </option>
               ))}
             </select>
-            <input type="checkbox" id="buka-pelanggan-baru" class="peer sr-only" />
-            <label
-              for="buka-pelanggan-baru"
-              class="tombol-halus shrink-0 cursor-pointer peer-checked:border-merah-600 peer-checked:bg-merah-50 peer-checked:text-merah-700 peer-focus-visible:ring-2 peer-focus-visible:ring-merah-600"
+            <button
+              type="button"
+              class="kolom hanya-js flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
+              aria-haspopup="dialog"
+              data-buka-pelanggan
             >
-              ＋ Baru
-              <span class="sr-only">pelanggan</span>
-            </label>
-            <div class="hidden w-full flex-col gap-2 rounded-lg border border-merah-200 bg-merah-50 p-2.5 peer-checked:flex">
+              <span class="truncate" data-nama-pelanggan>
+                {pelangganTerpilih ? namaPelanggan(pelangganTerpilih) : 'Tidak ada (Walk-in)'}
+              </span>
+              <span class="shrink-0 text-xs text-[var(--color-teks-lembut)]" aria-hidden="true">▾</span>
+            </button>
+            {/* `autofocus` di dialog sendiri agar `showModal()` tidak memfokuskan kolom cari dan memunculkan keyboard HP; ditutup lewat Esc atau ketuk di luar kotak. */}
+            <dialog
+              class="panel-pelanggan outline-none"
+              aria-labelledby="judul-pelanggan"
+              tabindex="-1"
+              autofocus
+              data-panel-pelanggan
+            >
+              <h2 class="text-base font-semibold" id="judul-pelanggan">Pilih pelanggan</h2>
+              {/* Tanpa `name` agar kata pencarian tidak ikut terkirim bersama transaksi. */}
               <input
-                class="kolom"
-                name="pelanggan_nama"
-                aria-label="Nama pelanggan baru"
-                placeholder="Nama pelanggan"
+                class="kolom w-full"
+                type="search"
+                placeholder="Cari nama atau no. telepon"
+                aria-label="Cari pelanggan"
+                autocomplete="off"
+                data-cari-pelanggan
               />
-              <input
-                class="kolom"
-                name="pelanggan_telepon"
-                type="tel"
-                aria-label="Nomor telepon pelanggan baru"
-                placeholder="No. telepon (opsional)"
-              />
-              <p class="text-xs text-[var(--color-teks-lembut)]">
-                Nomor yang sudah pernah dicatat memakai pelanggan lama, bukan dibuat ganda.
+              <div
+                class="pil-gulung flex shrink-0 gap-1.5 overflow-x-auto pb-1"
+                role="group"
+                aria-label="Saring huruf awal nama"
+                data-huruf-pelanggan
+              ></div>
+              <div class="tanpa-scrollbar min-h-0 flex-1 overflow-y-auto" data-daftar-pelanggan></div>
+              <p class="hidden py-4 text-center text-sm text-[var(--color-teks-lembut)]" data-kosong-pelanggan>
+                Tidak ada pelanggan yang cocok.
               </p>
-              <button class="tombol-halus" type="submit" name="aksi" value="pelanggan-baru">
-                Simpan pelanggan
-              </button>
+              <div
+                class="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--color-garis-lembut)] pt-3"
+                data-tempat-pelanggan-baru
+              ></div>
+            </dialog>
+            <div class="contents" data-pelanggan-baru>
+              <input type="checkbox" id="buka-pelanggan-baru" class="peer sr-only" />
+              <label
+                for="buka-pelanggan-baru"
+                class="tombol-halus shrink-0 cursor-pointer peer-checked:border-merah-600 peer-checked:bg-merah-50 peer-checked:text-merah-700 peer-focus-visible:ring-2 peer-focus-visible:ring-merah-600"
+              >
+                ＋ Baru
+                <span class="sr-only">pelanggan</span>
+              </label>
+              <div class="hidden w-full flex-col gap-2 rounded-lg border border-merah-200 bg-merah-50 p-2.5 peer-checked:flex">
+                <input
+                  class="kolom"
+                  name="pelanggan_nama"
+                  aria-label="Nama pelanggan baru"
+                  placeholder="Nama pelanggan"
+                />
+                <input
+                  class="kolom"
+                  name="pelanggan_telepon"
+                  type="tel"
+                  aria-label="Nomor telepon pelanggan baru"
+                  placeholder="No. telepon (opsional)"
+                />
+                <p class="text-xs text-[var(--color-teks-lembut)]">
+                  Nomor yang sudah pernah dicatat memakai pelanggan lama, bukan dibuat ganda.
+                </p>
+                <button class="tombol-halus" type="submit" name="aksi" value="pelanggan-baru" data-simpan-pelanggan>
+                  Simpan pelanggan
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1939,6 +2002,171 @@ function ringkasBatch(p: Product): string {
       });
 
       if (pesanKosong) pesanKosong.classList.toggle('hidden', terlihat > 0);
+    }
+
+    // Pop up pelanggan dibangun dari opsi `<select>` (satu sumber data, tak ada daftar ganda di HTML) dan memilih berarti mengisi nilai `<select>` itu.
+    var pilihPelanggan = borang.querySelector('[data-pilih-pelanggan]');
+    var panelPelanggan = borang.querySelector('[data-panel-pelanggan]');
+    if (pilihPelanggan && panelPelanggan) {
+      var cariPelanggan = panelPelanggan.querySelector('[data-cari-pelanggan]');
+      var barisHuruf = panelPelanggan.querySelector('[data-huruf-pelanggan]');
+      var daftarPelanggan = panelPelanggan.querySelector('[data-daftar-pelanggan]');
+      var kosongPelanggan = panelPelanggan.querySelector('[data-kosong-pelanggan]');
+      var namaTerpilih = borang.querySelector('[data-nama-pelanggan]');
+      var pelangganBaru = borang.querySelector('[data-pelanggan-baru]');
+      // Field-nya tetap di dalam form (dialog ada di dalam form), jadi memindahkannya tidak mengubah apa yang terkirim.
+      panelPelanggan.querySelector('[data-tempat-pelanggan-baru]').appendChild(pelangganBaru);
+      pelangganBaru.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' || e.target.tagName !== 'INPUT' || e.target.type === 'checkbox') return;
+        e.preventDefault();
+        pelangganBaru.querySelector('[data-simpan-pelanggan]').click();
+      });
+      var hurufAktif = '';
+
+      // Aksen dilepas agar "Élia" masuk huruf E; nama yang tak diawali huruf latin (angka, nomor telepon) dikumpulkan di "#".
+      function hurufAwal(nama) {
+        var h = nama.normalize('NFD').replace(/[̀-ͯ]/g, '').charAt(0).toUpperCase();
+        return h >= 'A' && h <= 'Z' ? h : '#';
+      }
+
+      var opsi = Array.prototype.slice
+        .call(pilihPelanggan.options)
+        .filter(function (o) {
+          return o.value;
+        })
+        .map(function (o) {
+          var nama = o.dataset.nama || '';
+          var telepon = o.dataset.telepon || '';
+          return {
+            id: o.value,
+            nama: nama,
+            telepon: telepon,
+            huruf: hurufAwal(nama),
+            cari: (nama + ' ' + telepon).toLowerCase(),
+          };
+        })
+        .sort(function (a, b) {
+          if ((a.huruf === '#') !== (b.huruf === '#')) return a.huruf === '#' ? 1 : -1;
+          return a.nama.localeCompare(b.nama, 'id', { sensitivity: 'base' });
+        });
+
+      function tombolOpsi(id, nama, telepon) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'opsi-pelanggan';
+        b.dataset.idPelanggan = id;
+        var n = document.createElement('span');
+        n.textContent = nama;
+        b.appendChild(n);
+        if (telepon) {
+          var t = document.createElement('span');
+          t.className = 'text-xs font-normal text-[var(--color-teks-lembut)]';
+          t.textContent = telepon;
+          b.appendChild(t);
+        }
+        return b;
+      }
+
+      var opsiWalkIn = tombolOpsi('', 'Tidak ada (Walk-in)', '');
+      daftarPelanggan.appendChild(opsiWalkIn);
+      var bagian = {};
+      opsi.forEach(function (o) {
+        if (!bagian[o.huruf]) {
+          var sekat = document.createElement('section');
+          var kepala = document.createElement('h3');
+          kepala.className = 'kepala-huruf';
+          kepala.textContent = o.huruf;
+          sekat.appendChild(kepala);
+          daftarPelanggan.appendChild(sekat);
+          bagian[o.huruf] = sekat;
+        }
+        o.el = tombolOpsi(o.id, o.nama, o.telepon);
+        bagian[o.huruf].appendChild(o.el);
+      });
+
+      // Huruf tanpa pelanggan tetap tampil tapi dimatikan, supaya urutan A–Z tidak bergeser dan kasir tahu memang kosong.
+      [''].concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('')).forEach(function (h) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.huruf = h;
+        b.textContent = h || 'Semua';
+        b.disabled = h !== '' && !bagian[h];
+        b.className = 'pil-diam shrink-0 disabled:cursor-not-allowed disabled:opacity-40';
+        barisHuruf.appendChild(b);
+      });
+
+      function saringPelanggan() {
+        var kata = cariPelanggan.value.trim().toLowerCase();
+        var ada = 0;
+        opsi.forEach(function (o) {
+          var tampil = (!hurufAktif || o.huruf === hurufAktif) && (!kata || o.cari.indexOf(kata) !== -1);
+          o.el.hidden = !tampil;
+          if (tampil) ada += 1;
+        });
+        Object.keys(bagian).forEach(function (h) {
+          bagian[h].hidden = !bagian[h].querySelector('.opsi-pelanggan:not([hidden])');
+        });
+        opsiWalkIn.hidden = !!(kata || hurufAktif);
+        Array.prototype.forEach.call(barisHuruf.children, function (b) {
+          var aktif = b.dataset.huruf === hurufAktif;
+          b.classList.toggle('pil-aktif', aktif);
+          b.classList.toggle('pil-diam', !aktif);
+          b.setAttribute('aria-pressed', aktif ? 'true' : 'false');
+        });
+        kosongPelanggan.classList.toggle('hidden', ada > 0 || !opsiWalkIn.hidden);
+      }
+
+      function pilih(id) {
+        pilihPelanggan.value = id;
+        var o = pilihPelanggan.selectedOptions[0];
+        namaTerpilih.textContent = id && o ? o.dataset.nama : 'Tidak ada (Walk-in)';
+        panelPelanggan.close();
+      }
+
+      borang.querySelector('[data-buka-pelanggan]').addEventListener('click', function () {
+        cariPelanggan.value = '';
+        hurufAktif = '';
+        saringPelanggan();
+        Array.prototype.forEach.call(daftarPelanggan.querySelectorAll('.opsi-pelanggan'), function (b) {
+          b.setAttribute('aria-current', b.dataset.idPelanggan === pilihPelanggan.value ? 'true' : 'false');
+        });
+        panelPelanggan.showModal();
+        // Di HP fokus otomatis memunculkan keyboard yang menutupi separuh daftar, jadi hanya layar bermouse yang langsung siap mengetik.
+        if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) cariPelanggan.focus();
+        var kini = daftarPelanggan.querySelector('[aria-current="true"]');
+        if (kini) kini.scrollIntoView({ block: 'center' });
+      });
+
+      panelPelanggan.addEventListener('click', function (e) {
+        if (e.target === panelPelanggan) {
+          var kotak = panelPelanggan.getBoundingClientRect();
+          if (e.clientX < kotak.left || e.clientX > kotak.right || e.clientY < kotak.top || e.clientY > kotak.bottom) {
+            panelPelanggan.close();
+          }
+          return;
+        }
+        var huruf = e.target.closest('[data-huruf]');
+        if (huruf) {
+          hurufAktif = huruf.dataset.huruf;
+          saringPelanggan();
+          daftarPelanggan.scrollTop = 0;
+          return;
+        }
+        var pilihan = e.target.closest('[data-id-pelanggan]');
+        if (pilihan) pilih(pilihan.dataset.idPelanggan);
+      });
+
+      cariPelanggan.addEventListener('input', saringPelanggan);
+      // Enter memilih hasil teratas, bukan men-submit transaksi lewat form yang membungkus dialog ini.
+      cariPelanggan.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        var teratas = opsi.filter(function (o) {
+          return !o.el.hidden;
+        })[0];
+        if (teratas) pilih(teratas.id);
+        else if (!opsiWalkIn.hidden) pilih('');
+      });
     }
 
     hitung();

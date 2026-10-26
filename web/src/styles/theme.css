@@ -484,8 +484,26 @@
            border-[var(--color-garis)] bg-[var(--color-permukaan)] p-4
            text-[var(--color-teks)] shadow-lg;
   }
-  .panel-batch::backdrop {
+  .panel-batch::backdrop,
+  .panel-pelanggan::backdrop {
     background: rgb(0 0 0 / 0.45);
+  }
+  /* Pop up pelanggan hanya ada dengan JS (tanpa JS `<select>` biasa yang dipakai); tinggi dibatasi agar daftar yang panjang menggulung di dalam, bukan halaman. */
+  .panel-pelanggan:modal {
+    @apply fixed m-auto flex h-[min(36rem,calc(100dvh-2rem))] w-[min(26rem,calc(100vw-2rem))]
+           flex-col gap-3 rounded-xl border border-[var(--color-garis)]
+           bg-[var(--color-permukaan)] p-4 text-[var(--color-teks)] shadow-lg;
+  }
+  .kepala-huruf {
+    @apply sticky top-0 bg-[var(--color-permukaan)] px-1 pb-1 pt-2 text-xs font-bold
+           text-merah-700;
+  }
+  .opsi-pelanggan {
+    @apply flex w-full flex-col items-start rounded-lg px-2.5 py-2 text-left text-sm
+           hover:bg-merah-50 focus-visible:outline-2 focus-visible:outline-merah-600;
+  }
+  .opsi-pelanggan[aria-current='true'] {
+    @apply bg-merah-50 font-semibold text-merah-700;
   }
   /* Baris pil menggulung mendatar: scrollbar disembunyikan, diganti tepi memudar (skrip mengatur --pudar-kiri/--pudar-kanan); tanpa JS tepi kanan tetap memudar. */
   /* `relative` karena radio `sr-only` di dalamnya `absolute`; tanpa penjangkar ia lolos dari pemotongan dan melebarkan dokumen (798 px di layar 412 px) sehingga dialog tampil di tengah layout itu. */
