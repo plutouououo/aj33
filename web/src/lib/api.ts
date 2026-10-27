@@ -647,3 +647,52 @@ export interface PaginatedImportRows {
   limit: number;
   total: number;
 }
+
+// --- Edit massal produk (xlsx) ---
+
+export type EditMassalKelompok = 'utama' | 'stok';
+export type EditMassalStatusBaris = 'baru' | 'edit' | 'tetap' | 'error';
+
+export interface EditMassalPerubahan {
+  kolom: string;
+  lama: string;
+  baru: string;
+}
+
+export interface EditMassalBaris {
+  /** Nomor baris di spreadsheet (header = 1). */
+  no: number;
+  label: string;
+  status: EditMassalStatusBaris;
+  perubahan: EditMassalPerubahan[];
+  galat: string[];
+}
+
+export interface EditMassalHasilBaris {
+  no: number;
+  ok: boolean;
+  pesan: string | null;
+}
+
+export interface EditMassalDetail {
+  id: string;
+  kelompok: EditMassalKelompok;
+  file_name: string;
+  status: 'pratinjau' | 'diterapkan';
+  created_at: string;
+  applied_at: string | null;
+  ringkasan: Record<EditMassalStatusBaris, number>;
+  baris: EditMassalBaris[];
+  hasil: EditMassalHasilBaris[] | null;
+}
+
+/** Unduhan biner (xlsx): `Response` dikembalikan apa adanya agar halaman penerus meneruskan byte dan header-nya; galat backend dilempar seperti `api`. */
+export async function apiBerkas(path: string, token: string): Promise<Response> {
+  const res = await fetch(`${BACKEND_URL}/api${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw await ApiRequestError.dariResponse(res);
+  }
+  return res;
+}

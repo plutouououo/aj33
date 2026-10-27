@@ -152,7 +152,7 @@ pub(crate) async fn create_product(
     Ok(id)
 }
 
-/// Menyunting produk; `patch` harus lengkap, dan `routes::koreksi_sku` tak dipanggil dari sini karena impor tak pernah menyentuh SKU produk yang ada.
+/// Menyunting produk; `patch` harus lengkap, dan `koreksi_sku` tak dipanggil dari sini karena impor tak pernah menyentuh SKU produk yang ada.
 pub(crate) async fn update_product(
     state: &AppState,
     id: Uuid,
@@ -281,6 +281,27 @@ pub(crate) async fn rakit_sku(
     .map_err(|err| AppError::bad_request(err.to_string()))?;
 
     repo::sku_harus_bebas(&state.pool, &kode, None).await?;
+    Ok(kode)
+}
+
+/// SKU hasil koreksi manual selama produk masih boleh dikoreksi (`repo::penahan_ubah_sku`); SKU kosong dikecualikan agar produk lama bisa diberi SKU.
+pub(crate) async fn koreksi_sku(
+    state: &AppState,
+    sekarang: &Product,
+    diminta: &str,
+) -> AppResult<String> {
+    if sekarang.sku.is_some() {
+        if let Some(penahan) = repo::penahan_ubah_sku(&state.pool, sekarang.id).await? {
+            return Err(AppError::conflict(format!(
+                "SKU tidak bisa diubah karena produk {penahan}."
+            )));
+        }
+    }
+
+    // Dinormalkan dulu agar koreksi tak melahirkan penyimpangan bentuk; `normalkan` juga menegakkan panjang 6-12 dan karakter yang boleh, sama dengan hasil rakitan.
+    let kode = sku::normalkan(diminta).map_err(|err| AppError::bad_request(err.to_string()))?;
+
+    repo::sku_harus_bebas(&state.pool, &kode, Some(sekarang.id)).await?;
     Ok(kode)
 }
 

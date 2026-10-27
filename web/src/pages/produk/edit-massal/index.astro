@@ -1,0 +1,155 @@
+---
+import Galat from '../../../components/Galat.astro';
+import AppShell from '../../../layouts/AppShell.astro';
+import { api, ApiRequestError, type EditMassalKelompok } from '../../../lib/api';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+const pemilik = user.role === 'owner';
+
+const BATAS_MB = 10;
+
+let galat: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  if (!pemilik) {
+    galat = 'Kamu tidak punya akses ke fitur ini.';
+  } else {
+    const form = await Astro.request.formData();
+    const berkas = form.get('berkas');
+    const kelompok = String(form.get('kelompok') ?? '');
+
+    if (kelompok !== 'utama' && kelompok !== 'stok') {
+      galat = 'Pilih kelompok atribut yang diedit.';
+    } else if (!(berkas instanceof File) || berkas.size === 0) {
+      galat = 'Pilih berkas .xlsx dulu.';
+    } else if (!berkas.name.toLowerCase().endsWith('.xlsx')) {
+      galat = 'Berkas harus berekstensi .xlsx.';
+    } else if (berkas.size > BATAS_MB * 1024 * 1024) {
+      galat = `Ukuran berkas maksimal ${BATAS_MB} MB.`;
+    } else {
+      try {
+        const { id } = await api<{ id: string }>(
+          `/bulk-edit?kelompok=${kelompok}&filename=${encodeURIComponent(berkas.name)}`,
+          {
+            method: 'POST',
+            token,
+            body: await berkas.arrayBuffer(),
+            headers: { 'Content-Type': 'application/octet-stream' },
+          },
+        );
+        return Astro.redirect(`/produk/edit-massal/${id}`, 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal mengunggah berkas.';
+      }
+    }
+  }
+}
+
+// Saringan daftar produk ikut ke ekspor, jadi edit massal bisa dibatasi ke hasil pencarian atau satu kategori.
+const cari = Astro.url.searchParams.get('cari')?.trim() ?? '';
+const kategori = Astro.url.searchParams.get('kategori') ?? '';
+function tautanEkspor(kelompok: EditMassalKelompok): string {
+  const p = new URLSearchParams({ kelompok });
+  if (cari) p.set('cari', cari);
+  if (kategori) p.set('kategori', kategori);
+  return `/produk/edit-massal/ekspor.xlsx?${p}`;
+}
+const disaring = Boolean(cari || kategori);
+---
+
+<AppShell judul="Edit Massal Produk" user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/produk">Produk</a>
+    <span aria-hidden="true">›</span>
+    <span aria-current="page">Edit Massal</span>
+  </nav>
+
+  <Galat pesan={galat} class="mb-4" />
+
+  {!pemilik ? (
+    <Galat pesan="Kamu tidak punya akses ke fitur ini." />
+  ) : (
+    <>
+      <p class="mb-5 max-w-2xl text-sm text-[var(--color-teks-lembut)]">
+        Unduh berkas xlsx, ubah di Excel atau Google Sheets, lalu unggah lagi. Perubahan tidak langsung masuk:
+        kamu melihat dulu pratinjau tiap baris (<strong>Baru</strong>, <strong>Edit</strong>, <strong>Tetap</strong>,
+        atau <strong>Error</strong>), baru menekan Terapkan.
+      </p>
+
+      <div class="mb-6 grid gap-4 md:grid-cols-2">
+        <section class="kartu">
+          <h2 class="mb-1 text-base font-bold">1. Atribut utama</h2>
+          <p class="mb-3 text-sm text-[var(--color-teks-lembut)]">
+            Nama produk, nama SEO, kategori, jenis, grade, merek, ukuran, SKU, harga ecer dan grosir tiap platform,
+            batas grosir, batas stok menipis, dan status. Satu baris per produk.
+          </p>
+          <a class="tombol-halus" href={tautanEkspor('utama')} download>Unduh xlsx atribut utama</a>
+        </section>
+
+        <section class="kartu">
+          <h2 class="mb-1 text-base font-bold">2. Atribut stok</h2>
+          <p class="mb-3 text-sm text-[var(--color-teks-lembut)]">
+            Varian dan batch: sisa stok, kedaluwarsa, rak, dan harga beli. Satu baris per batch yang masih bersisa.
+          </p>
+          <a class="tombol-halus" href={tautanEkspor('stok')} download>Unduh xlsx atribut stok</a>
+        </section>
+      </div>
+
+      {disaring && (
+        <p class="mb-6 text-sm text-[var(--color-teks-lembut)]">
+          Unduhan di atas mengikuti saringan daftar produk (pencarian atau kategori). Buka halaman ini dari
+          <a class="font-medium text-merah-600 hover:underline" href="/produk/edit-massal"> sini </a>
+          untuk mengunduh seluruh katalog.
+        </p>
+      )}
+
+      <section class="kartu mb-6 max-w-xl">
+        <h2 class="mb-3 text-base font-bold">Unggah berkas yang sudah diedit</h2>
+        <form method="POST" enctype="multipart/form-data" class="flex flex-col gap-4">
+          <div>
+            <span class="label">Kelompok</span>
+            <div class="flex flex-wrap gap-4">
+              <label class="flex items-center gap-2 text-sm">
+                <input type="radio" name="kelompok" value="utama" required /> Atribut utama
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input type="radio" name="kelompok" value="stok" required /> Atribut stok
+              </label>
+            </div>
+          </div>
+          <div>
+            <label class="label" for="berkas">Berkas (.xlsx, maksimal {BATAS_MB} MB)</label>
+            <input class="kolom" id="berkas" name="berkas" type="file" accept=".xlsx" required />
+          </div>
+          <div>
+            <button class="tombol-utama" type="submit">Unggah dan lihat pratinjau</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="kartu max-w-2xl">
+        <h2 class="mb-2 text-base font-bold">Aturan singkat</h2>
+        <ul class="list-disc space-y-1 pl-5 text-sm text-[var(--color-teks-lembut)]">
+          <li>Jangan ubah kolom <code>id</code> dan <code>id batch</code>; kolom abu-abu hanya acuan.</li>
+          <li>
+            Atribut utama: baris tanpa <code>id</code> yang SKU-nya tidak ditemukan dibuat sebagai produk baru
+            (wajib nama dan harga ecer walk in; SKU dirakit otomatis dari jenis, grade, merek, dan ukuran).
+            Produk yang sudah ada hanya diedit.
+          </li>
+          <li>
+            Sel kosong pada kolom opsional (harga grosir, harga platform, batas grosir, kategori, dll.) berarti
+            dikosongkan. Hapus seluruh kolomnya dari berkas bila tidak ingin menyentuhnya.
+          </li>
+          <li>SKU produk yang sudah punya varian atau terhubung ke listing marketplace tidak bisa diubah.</li>
+          <li>
+            Atribut stok: hanya batch yang sudah ada. Sisa stok tidak boleh melebihi isi kiriman; perubahannya
+            dicatat di riwayat stok sebagai koreksi manual. Batch baru dicatat lewat halaman produk.
+          </li>
+          <li>Tulis tanggal kedaluwarsa sebagai YYYY-MM-DD atau sel tanggal Excel.</li>
+          <li>Baris Error dilewati saat Terapkan; baris lain tetap diproses.</li>
+        </ul>
+      </section>
+    </>
+  )}
+</AppShell>

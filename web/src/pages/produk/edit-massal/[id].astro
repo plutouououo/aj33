@@ -1,0 +1,193 @@
+---
+import Galat from '../../../components/Galat.astro';
+import Paginasi from '../../../components/Paginasi.astro';
+import AppShell from '../../../layouts/AppShell.astro';
+import {
+  api,
+  ApiRequestError,
+  type EditMassalDetail,
+  type EditMassalStatusBaris,
+} from '../../../lib/api';
+import { waktu } from '../../../lib/format';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+const { id } = Astro.params;
+
+const LABEL: Record<EditMassalStatusBaris, string> = {
+  baru: 'Baru',
+  edit: 'Edit',
+  tetap: 'Tetap',
+  error: 'Error',
+};
+const KELAS_LENCANA: Record<EditMassalStatusBaris, string> = {
+  baru: 'lencana-selesai',
+  edit: 'lencana-berjalan',
+  tetap: 'lencana-nonaktif',
+  error: 'lencana-gagal',
+};
+const URUTAN: EditMassalStatusBaris[] = ['baru', 'edit', 'tetap', 'error'];
+const PER_HALAMAN = 50;
+
+let galat: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  if (user.role !== 'owner') {
+    galat = 'Kamu tidak punya akses ke fitur ini.';
+  } else {
+    try {
+      await api(`/bulk-edit/${id}/apply`, { method: 'POST', token });
+      return Astro.redirect(`/produk/edit-massal/${id}`, 303);
+    } catch (err) {
+      galat = err instanceof ApiRequestError ? err.message : 'Gagal menerapkan perubahan.';
+    }
+  }
+}
+
+let detail: EditMassalDetail;
+try {
+  detail = await api<EditMassalDetail>(`/bulk-edit/${id}`, { token });
+} catch (err) {
+  if (err instanceof ApiRequestError && err.status === 404) {
+    return Astro.redirect('/produk/edit-massal', 302);
+  }
+  throw err;
+}
+
+const params = Astro.url.searchParams;
+const dipilih = URUTAN.find((s) => s === params.get('status')) ?? null;
+const baris = dipilih ? detail.baris.filter((b) => b.status === dipilih) : detail.baris;
+const halamanTerakhir = Math.max(1, Math.ceil(baris.length / PER_HALAMAN));
+const halaman = Math.min(halamanTerakhir, Math.max(1, Number(params.get('halaman')) || 1));
+const tampil = baris.slice((halaman - 1) * PER_HALAMAN, halaman * PER_HALAMAN);
+
+const hasilPerBaris = new Map((detail.hasil ?? []).map((h) => [h.no, h]));
+const berhasil = (detail.hasil ?? []).filter((h) => h.ok).length;
+const gagal = (detail.hasil ?? []).filter((h) => !h.ok).length;
+
+const bisaDiterapkan = detail.ringkasan.baru + detail.ringkasan.edit;
+const sudahDiterapkan = detail.status === 'diterapkan';
+
+function tautan(status: EditMassalStatusBaris | null, ke = 1): string {
+  const p = new URLSearchParams();
+  if (status) p.set('status', status);
+  if (ke !== 1) p.set('halaman', String(ke));
+  const q = p.toString();
+  return q ? `?${q}` : '?';
+}
+---
+
+<AppShell judul="Pratinjau Edit Massal" user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/produk">Produk</a>
+    <span aria-hidden="true">›</span>
+    <a href="/produk/edit-massal">Edit Massal</a>
+    <span aria-hidden="true">›</span>
+    <span aria-current="page">Pratinjau</span>
+  </nav>
+
+  <Galat pesan={galat} class="mb-4" />
+
+  <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h1 class="text-lg font-bold break-all">{detail.file_name}</h1>
+      <p class="text-sm text-[var(--color-teks-lembut)]">
+        Atribut {detail.kelompok} · diunggah {waktu(detail.created_at)} ·
+        {sudahDiterapkan ? ` diterapkan ${waktu(detail.applied_at ?? detail.created_at)}` : ' belum diterapkan'}
+      </p>
+    </div>
+
+    {!sudahDiterapkan && (
+      <form method="POST">
+        <button class="tombol-utama" type="submit" disabled={bisaDiterapkan === 0}>
+          Terapkan {bisaDiterapkan} baris
+        </button>
+      </form>
+    )}
+  </div>
+
+  {sudahDiterapkan && (
+    <p class="mb-5 text-sm">
+      Selesai: <strong>{berhasil} berhasil</strong>, <strong>{gagal} gagal</strong>.
+      {gagal > 0 && ' Pesan galatnya ada pada baris di bawah.'}
+    </p>
+  )}
+  {!sudahDiterapkan && detail.ringkasan.error > 0 && (
+    <p class="mb-5 text-sm text-[var(--color-teks-lembut)]">
+      Baris Error dilewati saat diterapkan. Perbaiki di berkas lalu unggah ulang bila ingin ikut diproses.
+    </p>
+  )}
+
+  <div class="mb-4 flex gap-2 overflow-x-auto pb-1 tanpa-scrollbar">
+    <a href={tautan(null)} class={dipilih === null ? 'pil-aktif' : 'pil-diam'}>
+      Semua ({detail.baris.length})
+    </a>
+    {URUTAN.map((s) => (
+      <a href={tautan(s)} class={dipilih === s ? 'pil-aktif' : 'pil-diam'}>
+        {LABEL[s]} ({detail.ringkasan[s]})
+      </a>
+    ))}
+  </div>
+
+  <div id="daftar-baris" data-daftar>
+    {tampil.length === 0 ? (
+      <p class="kartu text-sm text-[var(--color-teks-lembut)]">Tidak ada baris pada saringan ini.</p>
+    ) : (
+      <ul class="kartu-rapat divide-y divide-[var(--color-garis-lembut)]">
+        {tampil.map((b) => {
+          const hasil = hasilPerBaris.get(b.no);
+          return (
+            <li class="px-3 py-3">
+              <div class="flex items-start justify-between gap-2">
+                <p class="min-w-0 break-words font-semibold">
+                  <span class="mr-1 text-xs font-normal text-[var(--color-teks-samar)]">{b.no}</span>
+                  {b.label}
+                </p>
+                <div class="flex shrink-0 gap-1">
+                  <span class={`${KELAS_LENCANA[b.status]} shrink-0`}>{LABEL[b.status]}</span>
+                  {hasil && (
+                    <span class={`${hasil.ok ? 'lencana-selesai' : 'lencana-gagal'} shrink-0`}>
+                      {hasil.ok ? 'OK' : 'Gagal'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {b.perubahan.length > 0 && (
+                <ul class="mt-1.5 space-y-0.5 text-xs text-[var(--color-teks-lembut)]">
+                  {b.perubahan.map((p) => (
+                    <li>
+                      <span class="font-semibold">{p.kolom}</span>:{' '}
+                      {b.status === 'baru' ? (
+                        <span>{p.baru || '—'}</span>
+                      ) : (
+                        <>
+                          <span class="line-through">{p.lama || '—'}</span> → <span>{p.baru || '—'}</span>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {b.galat.map((pesan) => (
+                <p class="mt-1.5 rounded-md border-l-2 border-red-500 bg-red-50 px-2 py-1.5 text-xs text-red-800">
+                  {pesan}
+                </p>
+              ))}
+              {hasil && !hasil.ok && hasil.pesan && (
+                <p class="mt-1.5 rounded-md border-l-2 border-red-500 bg-red-50 px-2 py-1.5 text-xs text-red-800">
+                  {hasil.pesan}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    )}
+
+    <div class="mt-4 flex justify-end">
+      <Paginasi halaman={halaman} halamanTerakhir={halamanTerakhir} tautan={(ke) => tautan(dipilih, ke)} />
+    </div>
+  </div>
+</AppShell>

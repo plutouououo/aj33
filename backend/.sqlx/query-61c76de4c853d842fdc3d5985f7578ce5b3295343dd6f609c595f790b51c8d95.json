@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE edit_massal\n        SET status = 'diterapkan', applied_at = now()\n        WHERE id = $1 AND status = 'pratinjau'\n        RETURNING kelompok, baris\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kelompok",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "baris",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "61c76de4c853d842fdc3d5985f7578ce5b3295343dd6f609c595f790b51c8d95"
+}

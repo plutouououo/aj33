@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, product_id, batch_number, purchase_price, quantity, remaining_qty,\n               expiry_date, storage_location, received_at AS \"received_at!\", created_by\n        FROM product_batches\n        ORDER BY product_id, expiry_date NULLS LAST, received_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "product_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "batch_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "purchase_price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "quantity",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "remaining_qty",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "expiry_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 7,
+        "name": "storage_location",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "received_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "d202d86b3be3f8834eea37f3224ebd38f6eeb38445ca6dd2a70f24fdca2c2379"
+}

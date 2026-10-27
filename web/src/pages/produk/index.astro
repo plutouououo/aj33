@@ -225,6 +225,10 @@ const ringkasan = `${induk.length} produk · ${induk.filter((p) => p.is_active).
 } restock`;
 
 /** Titipan "dari mana" untuk halaman rincian dan halaman tambah. */
+const kueriEditMassal = new URLSearchParams();
+if (cari) kueriEditMassal.set('cari', cari);
+if (kategoriDipilih) kueriEditMassal.set('kategori', kategoriDipilih);
+const tautanEditMassal = `/produk/edit-massal${kueriEditMassal.size ? `?${kueriEditMassal}` : ''}`;
 const titipan = saringan(halaman);
 const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
 ---
@@ -237,6 +241,7 @@ const bawaSaringan = titipan ? `?dari=${encodeURIComponent(titipan)}` : '';
     <p class="text-sm text-[var(--color-teks-lembut)]">{ringkasan}</p>
     {pemilik && (
       <div class="flex gap-2">
+        <a class="tombol-halus" href={tautanEditMassal}>Edit Massal</a>
         <a class="tombol-halus" href="/produk/impor">Impor XLSX</a>
         <a class="tombol-utama" href={`/produk/baru${bawaSaringan}`}>+ Tambah Produk</a>
       </div>

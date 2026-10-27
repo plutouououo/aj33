@@ -257,6 +257,16 @@ Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 - Impor massal (migrasi 0032) mengenali kolom `harga grosir`, `harga shopee`, `grosir shopee`, `harga tokopedia`, `grosir tokopedia`, `batas grosir`, `batas grosir shopee`, `batas grosir tokopedia` (lihat `import/parse.rs::map_header` untuk sinonimnya). Batas grosir berupa teks kg ("10 kg") seperti ukuran; yang tak terbaca jadi WARN dan diperlakukan kosong. Kolom kosong: produk baru memakai harga bawaan (ecer marketplace ikut walk in, grosir tidak ada), produk lama tidak diubah. Grosir yang melebihi ecer kanalnya jadi ERROR saat review bila keduanya terisi di berkas; selebihnya diperiksa `periksa_harga` saat commit.
 - Isian harga di form tambah/sunting produk dan tambah varian adalah satu komponen, `web/src/components/IsianHarga.astro`. Hitungan kasir (`hargaKanal`/`pakaiGrosir` di frontmatter dan `terapkanGrosir` di skrip `kasir.astro`) harus tetap sama dengan backend.
 
+### Edit massal produk lewat xlsx (migrasi 0034)
+
+- Tombol "Edit Massal" di `/produk` (khusus owner) membuka `/produk/edit-massal`: unduh xlsx, ubah, unggah, lihat pratinjau, lalu Terapkan. Kode ada di `backend/src/catalog/massal/` (`ekspor`, `rencana`, `terapkan`, `routes`, `repo`), tabel `edit_massal` menyimpan rencana per baris sebagai JSONB sampai diterapkan.
+- Dua kelompok. **Utama**: satu baris per produk, dikenali dari kolom `id` lalu SKU; yang tidak ditemukan dibuat sebagai produk baru (wajib nama dan harga ecer walk in, SKU dirakit otomatis, selalu produk tingkat atas, bukan varian). **Stok**: satu baris per batch yang masih bersisa, hanya batch yang sudah ada; sisa stok, kedaluwarsa, rak, harga beli.
+- Label pratinjau: Baru, Edit, Tetap, Error. Baris Error dilewati saat Terapkan, baris lain tetap jalan; tiap baris ditulis lewat `catalog::service` dan `stock.rs` (satu baris gagal tak menahan yang lain), hasilnya disimpan di kolom `hasil`.
+- Aturan sel: kolom yang tak ada di berkas tidak disentuh; sel kosong pada kolom opsional mengosongkan nilainya; sel kosong pada nama, harga ecer, batas stok, dan status berarti tetap. Ubah SKU lewat `service::koreksi_sku` (ditolak bila produk punya varian atau listing marketplace).
+- Sisa stok yang diubah dicatat di ledger sebagai `manual_adjustment` per batch lewat `stock::tambah`/`kurangi`, dan tak boleh melebihi isi kiriman (`quantity`).
+- Terapkan berjalan sinkron dalam satu request; berkas dibatasi 5000 baris dan 10 MB. `klaim_sesi` menandai sesi diterapkan lebih dulu agar dua klik tidak menjalankan perubahan dua kali.
+- Ekspor mengikuti saringan `cari` dan `kategori` dari daftar produk; tab status (menipis, habis, dll.) belum ikut.
+
 ### Diskon ongkir menggantikan diskon umum (migrasi 0023)
 
 - Kasir tak lagi punya input diskon umum; gantinya satu centang "Diskon ongkir: toko yang menanggung" (`shipping_borne_by_store`). `transactions.discount_amount` tetap ada hanya agar omzet transaksi lama tak berubah, dan tak pernah ditulis lagi.
