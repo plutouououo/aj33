@@ -27,6 +27,8 @@ pub enum Field {
     PriceTiktok,
     PriceTiktokWholesale,
     WholesaleThreshold,
+    WholesaleThresholdShopee,
+    WholesaleThresholdTiktok,
     Cost,
     Margin,
     Stock,
@@ -56,8 +58,15 @@ pub fn map_header(header: &str) -> Option<Field> {
         | "harga grosir tokopedia"
         | "grosir tiktok"
         | "price_tiktok_wholesale" => Some(Field::PriceTiktokWholesale),
-        "batas grosir" | "wholesale_threshold" | "wholesale_threshold_kg" => {
-            Some(Field::WholesaleThreshold)
+        "batas grosir"
+        | "batas grosir walk in"
+        | "wholesale_threshold"
+        | "wholesale_threshold_kg" => Some(Field::WholesaleThreshold),
+        "batas grosir shopee" | "wholesale_threshold_shopee" => {
+            Some(Field::WholesaleThresholdShopee)
+        }
+        "batas grosir tokopedia" | "batas grosir tiktok" | "wholesale_threshold_tiktok" => {
+            Some(Field::WholesaleThresholdTiktok)
         }
         "modal" | "cost" => Some(Field::Cost),
         "margin" | "margin_pct" => Some(Field::Margin),
@@ -229,6 +238,8 @@ pub struct ParsedRow {
     pub price_tiktok_wholesale: Option<Decimal>,
     /// Teks bebas seperti `variant_size` ("20", "20 kg"), diurai dengan `parse_ukuran_kg` saat commit.
     pub wholesale_threshold: Option<String>,
+    pub wholesale_threshold_shopee: Option<String>,
+    pub wholesale_threshold_tiktok: Option<String>,
     pub cost: Option<Decimal>,
     pub margin_pct: Option<Decimal>,
     pub stock: Option<i32>,
@@ -363,15 +374,30 @@ pub fn validate_row(row: &ParsedRow, sku_duplikat: bool, kategori_dikenal: bool)
         ));
     }
 
-    if row
-        .wholesale_threshold
-        .as_deref()
-        .is_some_and(|b| parse_ukuran_kg(b).is_none())
-    {
-        isu.push(warn(
-            "wholesale_threshold",
-            "Batas grosir tidak terbaca sebagai angka kg (mis. \"20 kg\") -- memakai batas bawaan.",
-        ));
+    for (kolom, batas, kanal) in [
+        ("wholesale_threshold", &row.wholesale_threshold, "walk in"),
+        (
+            "wholesale_threshold_shopee",
+            &row.wholesale_threshold_shopee,
+            "Shopee",
+        ),
+        (
+            "wholesale_threshold_tiktok",
+            &row.wholesale_threshold_tiktok,
+            "Tokopedia",
+        ),
+    ] {
+        if batas
+            .as_deref()
+            .is_some_and(|b| parse_ukuran_kg(b).is_none())
+        {
+            isu.push(warn(
+                kolom,
+                format!(
+                    "Batas grosir {kanal} tidak terbaca sebagai angka kg (mis. \"20 kg\") -- memakai batas bawaan."
+                ),
+            ));
+        }
     }
 
     if row.category_text.is_some() && !kategori_dikenal {
@@ -423,6 +449,35 @@ mod tests {
             Some(Field::PriceTiktokWholesale)
         );
         assert_eq!(map_header("Batas Grosir"), Some(Field::WholesaleThreshold));
+    }
+
+    #[test]
+    fn map_header_mengenali_batas_grosir_per_kanal() {
+        assert_eq!(map_header("Batas Grosir"), Some(Field::WholesaleThreshold));
+        assert_eq!(
+            map_header("batas grosir shopee"),
+            Some(Field::WholesaleThresholdShopee)
+        );
+        assert_eq!(
+            map_header("Batas Grosir Tokopedia"),
+            Some(Field::WholesaleThresholdTiktok)
+        );
+    }
+
+    #[test]
+    fn validate_row_batas_grosir_tak_terbaca_adalah_warn_per_kanal() {
+        let row = ParsedRow {
+            wholesale_threshold: Some("20 kg".into()),
+            wholesale_threshold_shopee: Some("banyak".into()),
+            ..baris_valid()
+        };
+        let isu = validate_row(&row, false, true);
+        let warn_batas: Vec<&str> = isu
+            .iter()
+            .filter(|i| i.level == Level::Warn && i.field.starts_with("wholesale_threshold"))
+            .map(|i| i.field.as_str())
+            .collect();
+        assert_eq!(warn_batas, ["wholesale_threshold_shopee"]);
     }
 
     #[test]

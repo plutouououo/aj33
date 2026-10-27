@@ -47,10 +47,15 @@ export function ringkasHargaKanal(r: ImportRow): string {
     ['Tokopedia', r.price_tiktok],
     ['grosir Tokopedia', r.price_tiktok_wholesale],
   ];
+  const batas: [string, string | null][] = [
+    ['batas walk in', r.wholesale_threshold],
+    ['batas Shopee', r.wholesale_threshold_shopee],
+    ['batas Tokopedia', r.wholesale_threshold_tiktok],
+  ];
   return [
     ...pasangan
       .filter(([, nilai]) => nilai !== null)
       .map(([label, nilai]) => `${label} ${rupiah(nilai as number)}`),
-    ...(r.wholesale_threshold ? [`batas grosir ${r.wholesale_threshold}`] : []),
+    ...batas.filter(([, teks]) => teks).map(([label, teks]) => `${label} ${teks}`),
   ].join(' · ');
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, row_no, name, sku, category_text, brand_text, product_type,\n               variant_grade, variant_size, category_id, lowest_price,\n               price_wholesale, price_shopee, price_shopee_wholesale, price_tiktok,\n               price_tiktok_wholesale, wholesale_threshold, cost,\n               margin_pct, stock, published, action, match_product_id,\n               issues, commit_state, commit_product_id, commit_error\n        FROM import_rows\n        WHERE batch_id = $1\n        ORDER BY row_no\n        LIMIT $2 OFFSET $3\n        ",
+  "query": "\n        SELECT id, row_no, name, sku, category_text, brand_text, product_type,\n               variant_grade, variant_size, category_id, lowest_price,\n               price_wholesale, price_shopee, price_shopee_wholesale, price_tiktok,\n               price_tiktok_wholesale, wholesale_threshold, wholesale_threshold_shopee,\n               wholesale_threshold_tiktok, cost,\n               margin_pct, stock, published, action, match_product_id,\n               issues, commit_state, commit_product_id, commit_error\n        FROM import_rows\n        WHERE batch_id = $1\n        ORDER BY row_no\n        LIMIT $2 OFFSET $3\n        ",
   "describe": {
     "columns": [
       {
@@ -90,51 +90,61 @@
       },
       {
         "ordinal": 17,
+        "name": "wholesale_threshold_shopee",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "wholesale_threshold_tiktok",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 19,
         "name": "cost",
         "type_info": "Numeric"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "margin_pct",
         "type_info": "Numeric"
       },
       {
-        "ordinal": 19,
+        "ordinal": 21,
         "name": "stock",
         "type_info": "Int4"
       },
       {
-        "ordinal": 20,
+        "ordinal": 22,
         "name": "published",
         "type_info": "Bool"
       },
       {
-        "ordinal": 21,
+        "ordinal": 23,
         "name": "action",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 22,
+        "ordinal": 24,
         "name": "match_product_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 23,
+        "ordinal": 25,
         "name": "issues",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 24,
+        "ordinal": 26,
         "name": "commit_state",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 25,
+        "ordinal": 27,
         "name": "commit_product_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 26,
+        "ordinal": 28,
         "name": "commit_error",
         "type_info": "Varchar"
       }
@@ -168,6 +178,8 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       true,
       false,
@@ -176,5 +188,5 @@
       true
     ]
   },
-  "hash": "c9543fe263f5fad6383e00feef0eb8c26f117511c7b7c3a5ff571e67cfbed5c1"
+  "hash": "a4cd6ac7268e27ff23dc51706e6916962f86a2f7743224889502e7464a18b8d5"
 }

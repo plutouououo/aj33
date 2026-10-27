@@ -26,6 +26,8 @@ const HEADER = [
   'harga tokopedia',
   'grosir tokopedia',
   'batas grosir',
+  'batas grosir shopee',
+  'batas grosir tokopedia',
   'modal',
   'margin',
   'stok',
@@ -33,8 +35,8 @@ const HEADER = [
 ];
 
 const CONTOH: (string | number)[][] = [
-  ['Ceker Bersih', '', 'Ceker', 'AFC', 'Ceker', 'Super Besar', '2 kg', 28000, 25000, 30000, 27000, '', '', '10 kg', 19600, 30, 10, 'ya'],
-  ['Dada Fillet', 'DADA-1KG', 'Dada', 'AFC', 'Fillet', 'Standar', '1 kg', 'Rp 45.000', '', '', '', 47000, 44000, '', '', '', 5, 'ya'],
+  ['Ceker Bersih', '', 'Ceker', 'AFC', 'Ceker', 'Super Besar', '2 kg', 28000, 25000, 30000, 27000, '', '', '10 kg', '8 kg', '', 19600, 30, 10, 'ya'],
+  ['Dada Fillet', 'DADA-1KG', 'Dada', 'AFC', 'Fillet', 'Standar', '1 kg', 'Rp 45.000', '', '', '', 47000, 44000, '', '', '', '', '', 5, 'ya'],
 ];
 
 export const GET: APIRoute = async ({ cookies, redirect }) => {

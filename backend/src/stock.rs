@@ -67,8 +67,10 @@ pub struct LockedProduct {
     /// `None` = grosir kanal itu belum diatur, kasir memakai harga ecer kanal itu.
     pub price_shopee_wholesale: Option<Decimal>,
     pub price_tiktok_wholesale: Option<Decimal>,
-    /// `None` = produk memakai batas grosir bawaan di `pricing_settings`.
+    /// Batas grosir produk per kanal; `None` = kanal itu memakai batas bawaan di `pricing_settings`.
     pub wholesale_threshold_kg: Option<Decimal>,
+    pub wholesale_threshold_kg_shopee: Option<Decimal>,
+    pub wholesale_threshold_kg_tiktok: Option<Decimal>,
     pub stock_qty: i32,
 }
 
@@ -140,7 +142,8 @@ pub async fn kunci_produk(
         LockedProduct,
         r#"
         SELECT id, name, variant_size, price, price_wholesale, price_shopee, price_tiktok,
-               price_shopee_wholesale, price_tiktok_wholesale, wholesale_threshold_kg, stock_qty
+               price_shopee_wholesale, price_tiktok_wholesale, wholesale_threshold_kg,
+               wholesale_threshold_kg_shopee, wholesale_threshold_kg_tiktok, stock_qty
         FROM products
         WHERE id = ANY($1)
         ORDER BY id

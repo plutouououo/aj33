@@ -167,8 +167,10 @@ struct ProductCreateRequest {
     /// Grosir per kanal marketplace; kosong berarti kasir memakai harga ecer kanal itu.
     price_shopee_wholesale: Option<Decimal>,
     price_tiktok_wholesale: Option<Decimal>,
-    /// Batas grosir produk ini (kg), semua kanal; kosong berarti batas bawaan di pengaturan.
+    /// Batas grosir produk ini (kg) per kanal (walk in, Shopee, Tokopedia); kosong berarti batas bawaan di pengaturan.
     wholesale_threshold_kg: Option<Decimal>,
+    wholesale_threshold_kg_shopee: Option<Decimal>,
+    wholesale_threshold_kg_tiktok: Option<Decimal>,
     /// Harga beli per batch, bukan harga modal default produk.
     purchase_price: Option<Decimal>,
     /// Stok awal. Selalu masuk sebagai batch, jadi asalnya tercatat.
@@ -208,6 +210,8 @@ async fn create_product(
             price_shopee_wholesale: body.price_shopee_wholesale,
             price_tiktok_wholesale: body.price_tiktok_wholesale,
             wholesale_threshold_kg: body.wholesale_threshold_kg,
+            wholesale_threshold_kg_shopee: body.wholesale_threshold_kg_shopee,
+            wholesale_threshold_kg_tiktok: body.wholesale_threshold_kg_tiktok,
             cost_price: None,
             // Endpoint manual selalu menerbitkan produk langsung; toggle terbit hanya ada di jalur impor massal.
             is_active: true,
@@ -260,6 +264,10 @@ struct ProductUpdateRequest {
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     wholesale_threshold_kg: Ubah<Decimal>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
+    wholesale_threshold_kg_shopee: Ubah<Decimal>,
+    #[serde(default, deserialize_with = "repo::ubah_terkirim")]
+    wholesale_threshold_kg_tiktok: Ubah<Decimal>,
+    #[serde(default, deserialize_with = "repo::ubah_terkirim")]
     cost_price: Ubah<Decimal>,
     low_stock_threshold: Option<i32>,
     #[serde(default, deserialize_with = "repo::ubah_terkirim")]
@@ -309,6 +317,8 @@ async fn update_product(
         price_shopee_wholesale: body.price_shopee_wholesale,
         price_tiktok_wholesale: body.price_tiktok_wholesale,
         wholesale_threshold_kg: body.wholesale_threshold_kg,
+        wholesale_threshold_kg_shopee: body.wholesale_threshold_kg_shopee,
+        wholesale_threshold_kg_tiktok: body.wholesale_threshold_kg_tiktok,
         cost_price: body.cost_price,
         low_stock_threshold: body.low_stock_threshold,
         image_url: ubah_teks(body.image_url),

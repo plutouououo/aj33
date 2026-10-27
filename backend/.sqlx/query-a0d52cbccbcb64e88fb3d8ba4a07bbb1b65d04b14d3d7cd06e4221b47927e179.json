@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,\n            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_kg,\n            p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url,\n            (SELECT min(b.expiry_date) FROM product_batches b\n             WHERE b.product_id = p.id AND b.remaining_qty > 0)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.id = $1\n        ",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,\n            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_kg,\n            p.wholesale_threshold_kg_shopee, p.wholesale_threshold_kg_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url,\n            (SELECT min(b.expiry_date) FROM product_batches b\n             WHERE b.product_id = p.id AND b.remaining_qty > 0)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -100,46 +100,56 @@
       },
       {
         "ordinal": 19,
-        "name": "cost_price",
+        "name": "wholesale_threshold_kg_shopee",
         "type_info": "Numeric"
       },
       {
         "ordinal": 20,
+        "name": "wholesale_threshold_kg_tiktok",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 21,
+        "name": "cost_price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 22,
         "name": "stock_qty",
         "type_info": "Int4"
       },
       {
-        "ordinal": 21,
+        "ordinal": 23,
         "name": "low_stock_threshold",
         "type_info": "Int4"
       },
       {
-        "ordinal": 22,
+        "ordinal": 24,
         "name": "image_url",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 23,
+        "ordinal": 25,
         "name": "nearest_expiry?",
         "type_info": "Date"
       },
       {
-        "ordinal": 24,
+        "ordinal": 26,
         "name": "is_active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 25,
+        "ordinal": 27,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 26,
+        "ordinal": 28,
         "name": "created_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 27,
+        "ordinal": 29,
         "name": "updated_at!",
         "type_info": "Timestamptz"
       }
@@ -170,6 +180,8 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       false,
       true,
@@ -180,5 +192,5 @@
       false
     ]
   },
-  "hash": "479256441b849a9b429edf9337b50acef78491e42e2e605c002bc4f7e0bf2c2c"
+  "hash": "a0d52cbccbcb64e88fb3d8ba4a07bbb1b65d04b14d3d7cd06e4221b47927e179"
 }

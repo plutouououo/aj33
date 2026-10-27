@@ -42,6 +42,8 @@ if (Astro.request.method === 'POST') {
   const hargaGrosirShopee = angkaOpsional('price_shopee_wholesale');
   const hargaGrosirTiktok = angkaOpsional('price_tiktok_wholesale');
   const batasGrosir = angkaOpsional('wholesale_threshold_kg');
+  const batasGrosirShopee = angkaOpsional('wholesale_threshold_kg_shopee');
+  const batasGrosirTiktok = angkaOpsional('wholesale_threshold_kg_tiktok');
   const hargaBeliBatch = angkaOpsional('purchase_price');
   const ukuranKg = angkaOpsional('variant_size');
 
@@ -57,7 +59,7 @@ if (Astro.request.method === 'POST') {
     galat = 'Harga grosir tidak boleh negatif.';
   } else if ((hargaShopee ?? 0) < 0 || (hargaTiktok ?? 0) < 0) {
     galat = 'Harga marketplace tidak boleh negatif.';
-  } else if (batasGrosir !== undefined && batasGrosir <= 0) {
+  } else if ([batasGrosir, batasGrosirShopee, batasGrosirTiktok].some((b) => b !== undefined && b <= 0)) {
     galat = 'Batas grosir harus lebih dari 0 kg.';
   } else if (ukuranKg !== undefined && ukuranKg <= 0) {
     galat = 'Ukuran harus lebih dari 0 kg.';
@@ -85,6 +87,8 @@ if (Astro.request.method === 'POST') {
           price_shopee_wholesale: hargaGrosirShopee,
           price_tiktok_wholesale: hargaGrosirTiktok,
           wholesale_threshold_kg: batasGrosir,
+          wholesale_threshold_kg_shopee: batasGrosirShopee,
+          wholesale_threshold_kg_tiktok: batasGrosirTiktok,
           purchase_price: hargaBeliBatch,
           stock_qty: Number.isFinite(stok) ? stok : 0,
           batch_number: teks('batch_number'),
@@ -238,7 +242,9 @@ const BAGIAN = [
             price_shopee_wholesale: isi('price_shopee_wholesale'),
             price_tiktok: isi('price_tiktok'),
             price_tiktok_wholesale: isi('price_tiktok_wholesale'),
-    wholesale_threshold_kg: isi('wholesale_threshold_kg'),
+            wholesale_threshold_kg: isi('wholesale_threshold_kg'),
+            wholesale_threshold_kg_shopee: isi('wholesale_threshold_kg_shopee'),
+            wholesale_threshold_kg_tiktok: isi('wholesale_threshold_kg_tiktok'),
           }}
         />
       </div>

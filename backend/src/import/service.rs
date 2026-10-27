@@ -89,6 +89,12 @@ pub async fn upload(
                 parse::Field::WholesaleThreshold => {
                     row.wholesale_threshold = Some(nilai.to_string())
                 }
+                parse::Field::WholesaleThresholdShopee => {
+                    row.wholesale_threshold_shopee = Some(nilai.to_string())
+                }
+                parse::Field::WholesaleThresholdTiktok => {
+                    row.wholesale_threshold_tiktok = Some(nilai.to_string())
+                }
                 parse::Field::Cost => row.cost = parse::parse_money(nilai),
                 parse::Field::Margin => row.margin_pct = parse::parse_percent(nilai),
                 parse::Field::Stock => row.stock = parse::parse_int(nilai),
@@ -176,6 +182,8 @@ pub async fn upload(
             price_tiktok: row.price_tiktok,
             price_tiktok_wholesale: row.price_tiktok_wholesale,
             wholesale_threshold: row.wholesale_threshold.clone(),
+            wholesale_threshold_shopee: row.wholesale_threshold_shopee.clone(),
+            wholesale_threshold_tiktok: row.wholesale_threshold_tiktok.clone(),
             cost: row.cost,
             margin_pct: row.margin_pct,
             stock: row.stock,
@@ -388,10 +396,10 @@ async fn proses_baris(
 ) -> AppResult<Uuid> {
     let (harga, _) = parse::harga_efektif(row.lowest_price, row.cost, row.margin_pct);
     // Tak terbaca sudah jadi WARN saat review; diperlakukan sama dengan kosong.
-    let batas_grosir = row
-        .wholesale_threshold
-        .as_deref()
-        .and_then(parse::parse_ukuran_kg);
+    let batas = |teks: &Option<String>| teks.as_deref().and_then(parse::parse_ukuran_kg);
+    let batas_grosir = batas(&row.wholesale_threshold);
+    let batas_grosir_shopee = batas(&row.wholesale_threshold_shopee);
+    let batas_grosir_tiktok = batas(&row.wholesale_threshold_tiktok);
 
     match row.action.as_str() {
         "create" => {
@@ -420,6 +428,8 @@ async fn proses_baris(
                     price_shopee_wholesale: row.price_shopee_wholesale,
                     price_tiktok_wholesale: row.price_tiktok_wholesale,
                     wholesale_threshold_kg: batas_grosir,
+                    wholesale_threshold_kg_shopee: batas_grosir_shopee,
+                    wholesale_threshold_kg_tiktok: batas_grosir_tiktok,
                     cost_price: row.cost,
                     is_active,
                     low_stock_threshold: None,
@@ -458,6 +468,8 @@ async fn proses_baris(
                     price_tiktok: row.price_tiktok.map(Some),
                     price_tiktok_wholesale: row.price_tiktok_wholesale.map(Some),
                     wholesale_threshold_kg: batas_grosir.map(Some),
+                    wholesale_threshold_kg_shopee: batas_grosir_shopee.map(Some),
+                    wholesale_threshold_kg_tiktok: batas_grosir_tiktok.map(Some),
                     cost_price: row.cost.map(Some),
                     category_id: row.category_id.map(Some),
                     is_active,

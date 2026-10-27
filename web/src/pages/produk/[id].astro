@@ -92,6 +92,8 @@ if (Astro.request.method === 'POST') {
           price_shopee_wholesale: angka(form, 'price_shopee_wholesale'),
           price_tiktok_wholesale: angka(form, 'price_tiktok_wholesale'),
           wholesale_threshold_kg: angka(form, 'wholesale_threshold_kg'),
+          wholesale_threshold_kg_shopee: angka(form, 'wholesale_threshold_kg_shopee'),
+          wholesale_threshold_kg_tiktok: angka(form, 'wholesale_threshold_kg_tiktok'),
           low_stock_threshold: angka(form, 'low_stock_threshold') ?? 5,
           image_url,
           is_active: form.get('is_active') === '1',
@@ -133,6 +135,8 @@ if (Astro.request.method === 'POST') {
           price_shopee_wholesale: angka(form, 'price_shopee_wholesale') ?? undefined,
           price_tiktok_wholesale: angka(form, 'price_tiktok_wholesale') ?? undefined,
           wholesale_threshold_kg: angka(form, 'wholesale_threshold_kg') ?? undefined,
+          wholesale_threshold_kg_shopee: angka(form, 'wholesale_threshold_kg_shopee') ?? undefined,
+          wholesale_threshold_kg_tiktok: angka(form, 'wholesale_threshold_kg_tiktok') ?? undefined,
           purchase_price: angka(form, 'purchase_price'),
           stock_qty: angka(form, 'stock_qty') ?? 0,
           batch_number: teks(form, 'batch_number'),
@@ -407,6 +411,8 @@ const DEKAT_KEDALUWARSA = 30;
                     price_tiktok: produk.price_tiktok,
                     price_tiktok_wholesale: produk.price_tiktok_wholesale,
       wholesale_threshold_kg: produk.wholesale_threshold_kg,
+      wholesale_threshold_kg_shopee: produk.wholesale_threshold_kg_shopee,
+      wholesale_threshold_kg_tiktok: produk.wholesale_threshold_kg_tiktok,
                   }}
                 />
               </div>

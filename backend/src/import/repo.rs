@@ -53,6 +53,8 @@ pub struct ImportRow {
     pub price_tiktok: Option<Decimal>,
     pub price_tiktok_wholesale: Option<Decimal>,
     pub wholesale_threshold: Option<String>,
+    pub wholesale_threshold_shopee: Option<String>,
+    pub wholesale_threshold_tiktok: Option<String>,
     pub cost: Option<Decimal>,
     pub margin_pct: Option<Decimal>,
     pub stock: Option<i32>,
@@ -83,6 +85,8 @@ pub struct NewImportRow {
     pub price_tiktok: Option<Decimal>,
     pub price_tiktok_wholesale: Option<Decimal>,
     pub wholesale_threshold: Option<String>,
+    pub wholesale_threshold_shopee: Option<String>,
+    pub wholesale_threshold_tiktok: Option<String>,
     pub cost: Option<Decimal>,
     pub margin_pct: Option<Decimal>,
     pub stock: Option<i32>,
@@ -131,9 +135,9 @@ pub async fn insert_rows(
                  lowest_price, cost, margin_pct, stock, published, action,
                  match_product_id, issues, price_wholesale, price_shopee,
                  price_shopee_wholesale, price_tiktok, price_tiktok_wholesale,
-                 wholesale_threshold)
+                 wholesale_threshold, wholesale_threshold_shopee, wholesale_threshold_tiktok)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
             "#,
             batch_id,
             r.row_no,
@@ -160,6 +164,8 @@ pub async fn insert_rows(
             r.price_tiktok,
             r.price_tiktok_wholesale,
             r.wholesale_threshold,
+            r.wholesale_threshold_shopee,
+            r.wholesale_threshold_tiktok,
         )
         .execute(&mut **tx)
         .await?;
@@ -275,7 +281,8 @@ pub async fn list_rows(
         SELECT id, row_no, name, sku, category_text, brand_text, product_type,
                variant_grade, variant_size, category_id, lowest_price,
                price_wholesale, price_shopee, price_shopee_wholesale, price_tiktok,
-               price_tiktok_wholesale, wholesale_threshold, cost,
+               price_tiktok_wholesale, wholesale_threshold, wholesale_threshold_shopee,
+               wholesale_threshold_tiktok, cost,
                margin_pct, stock, published, action, match_product_id,
                issues, commit_state, commit_product_id, commit_error
         FROM import_rows
@@ -581,6 +588,8 @@ pub struct ImportRowUntukCommit {
     pub price_tiktok: Option<Decimal>,
     pub price_tiktok_wholesale: Option<Decimal>,
     pub wholesale_threshold: Option<String>,
+    pub wholesale_threshold_shopee: Option<String>,
+    pub wholesale_threshold_tiktok: Option<String>,
     pub cost: Option<Decimal>,
     pub margin_pct: Option<Decimal>,
     pub stock: Option<i32>,
@@ -600,7 +609,8 @@ pub async fn next_pending_row(
         SELECT id, name, brand_text, product_type, variant_grade, variant_size,
                category_id, lowest_price, price_wholesale, price_shopee,
                price_shopee_wholesale, price_tiktok, price_tiktok_wholesale,
-               wholesale_threshold, cost, margin_pct, stock, published,
+               wholesale_threshold, wholesale_threshold_shopee, wholesale_threshold_tiktok,
+               cost, margin_pct, stock, published,
                action, match_product_id
         FROM import_rows
         WHERE batch_id = $1 AND commit_state = 'pending' AND action IN ('create', 'update')

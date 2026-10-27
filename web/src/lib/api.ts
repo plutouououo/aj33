@@ -128,8 +128,10 @@ export interface Product {
   /** Grosir per kanal marketplace; `null` berarti kasir memakai harga ecer kanal itu, bukan grosir toko. */
   price_shopee_wholesale: number | null;
   price_tiktok_wholesale: number | null;
-  /** Batas grosir produk ini (kg), semua kanal; `null` berarti batas bawaan di pengaturan. */
+  /** Batas grosir produk ini (kg) per kanal: walk in, Shopee, Tokopedia; `null` berarti kanal itu memakai batas bawaan di pengaturan. */
   wholesale_threshold_kg: number | null;
+  wholesale_threshold_kg_shopee: number | null;
+  wholesale_threshold_kg_tiktok: number | null;
   cost_price: number | null;
   stock_qty: number;
   low_stock_threshold: number;
@@ -623,8 +625,10 @@ export interface ImportRow {
   price_shopee_wholesale: number | null;
   price_tiktok: number | null;
   price_tiktok_wholesale: number | null;
-  /** Teks batas grosir apa adanya dari berkas (mis. "20 kg"). */
+  /** Teks batas grosir per kanal apa adanya dari berkas (mis. "20 kg"). */
   wholesale_threshold: string | null;
+  wholesale_threshold_shopee: string | null;
+  wholesale_threshold_tiktok: string | null;
   cost: number | null;
   margin_pct: number | null;
   stock: number | null;
