@@ -93,12 +93,34 @@ if (Astro.request.method === 'POST') {
         galat = err instanceof ApiRequestError ? err.message : 'Tugas packing gagal dikirim.';
       }
     }
+  } else if (aksi === 'batal') {
+    const dipilih = form.getAll('pesanan').map(String);
+
+    if (dipilih.length === 0) {
+      galat = 'Centang minimal satu pesanan untuk dibatalkan.';
+    } else {
+      try {
+        await api<{ dibatalkan: number }>('/orders/cancel', {
+          method: 'POST',
+          token,
+          body: { order_ids: dipilih },
+        });
+        return Astro.redirect(sesudahAksi(Astro.url, 'dibatalkan'), 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Pesanan gagal dibatalkan.';
+      }
+    }
   } else {
     galat = 'Aksi tidak dikenal.';
   }
 }
 
-const sukses = galat ? null : pesanDari(Astro.url, { terkirim: 'Tugas packing terkirim.' });
+const sukses = galat
+  ? null
+  : pesanDari(Astro.url, {
+      terkirim: 'Tugas packing terkirim.',
+      dibatalkan: 'Pesanan terpilih dibatalkan.',
+    });
 
 if (hasilLabel) {
   const gagalCatat = hasilLabel.filter((h) => h.status === 'gagal');
@@ -164,13 +186,17 @@ function labelBatch(b: ProductBatch): string {
     pesanan.length === 0 ? (
       <p class="text-sm text-stone-500">Tidak ada pesanan yang menunggu dikirim ke pengepak.</p>
     ) : (
-      <form method="POST">
-        <input type="hidden" name="aksi" value="kirim" />
-
+      <form method="POST" id="borang-pesanan">
         <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <p class="text-sm text-[var(--color-teks-lembut)]">
-            {pesanan.length} pesanan menunggu · terbaru di atas
-          </p>
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="hanya-js flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <input type="checkbox" class="h-4 w-4" data-pilih-semua checked />
+              Pilih semua
+            </label>
+            <p class="text-sm text-[var(--color-teks-lembut)]">
+              {pesanan.length} pesanan menunggu · <span data-ringkas>{pesanan.length} dipilih</span> · terbaru di atas
+            </p>
+          </div>
           <div class="flex flex-wrap items-end gap-2">
             <div>
               <label class="label" for="pengepak">Tugaskan ke</label>
@@ -181,7 +207,12 @@ function labelBatch(b: ProductBatch): string {
                 <option value={user.id}>Saya sendiri</option>
               </select>
             </div>
-            <button class="tombol-utama" type="submit">Kirim tugas packing terpilih</button>
+            <button class="tombol-utama" type="submit" name="aksi" value="kirim">
+              Kirim tugas packing terpilih
+            </button>
+            <button class="tombol-bahaya" type="submit" name="aksi" value="batal" formnovalidate data-tombol-batal>
+              Batalkan terpilih
+            </button>
           </div>
         </div>
 
@@ -189,7 +220,7 @@ function labelBatch(b: ProductBatch): string {
           {pesanan.map((o) => (
             <li class="kartu">
               <label class="flex cursor-pointer flex-wrap items-start gap-3">
-                <input class="mt-1 h-4 w-4" type="checkbox" name="pesanan" value={o.id} checked />
+                <input class="mt-1 h-4 w-4" type="checkbox" name="pesanan" value={o.id} checked data-pilih-baris />
                 <div class="min-w-0 flex-1">
                   <p class="font-semibold">
                     {kodeTampil(o.pickup_code, o.external_order_id)}
@@ -262,3 +293,56 @@ function labelBatch(b: ProductBatch): string {
     )
   }
 </AppShell>
+
+{/* Progressive enhancement: tanpa skrip checkbox per pesanan dan kedua tombol tetap berfungsi, hanya "Pilih semua" yang tersembunyi. */}
+<script is:inline>
+  (function () {
+    var borang = document.getElementById('borang-pesanan');
+    if (!borang) return;
+
+    document.documentElement.dataset.js = 'ya';
+
+    var semua = borang.querySelector('[data-pilih-semua]');
+    var baris = Array.prototype.slice.call(borang.querySelectorAll('[data-pilih-baris]'));
+    var ringkas = borang.querySelector('[data-ringkas]');
+    var tombolBatal = borang.querySelector('[data-tombol-batal]');
+
+    function terpilih() {
+      return baris.filter(function (c) {
+        return c.checked;
+      }).length;
+    }
+
+    function hitungUlang() {
+      var n = terpilih();
+      if (ringkas) ringkas.textContent = n + ' dipilih';
+      if (semua) {
+        semua.checked = n === baris.length;
+        semua.indeterminate = n > 0 && n < baris.length;
+      }
+    }
+
+    baris.forEach(function (c) {
+      c.addEventListener('change', hitungUlang);
+    });
+    if (semua) {
+      semua.addEventListener('change', function () {
+        baris.forEach(function (c) {
+          c.checked = semua.checked;
+        });
+        hitungUlang();
+      });
+    }
+    if (tombolBatal) {
+      tombolBatal.addEventListener('click', function (e) {
+        var n = terpilih();
+        if (n === 0) return;
+        if (!window.confirm('Batalkan ' + n + ' pesanan terpilih? Pesanan tidak akan muncul lagi di daftar ini.')) {
+          e.preventDefault();
+        }
+      });
+    }
+
+    hitungUlang();
+  })();
+</script>

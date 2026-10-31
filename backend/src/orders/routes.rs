@@ -29,6 +29,7 @@ pub fn router() -> Router<AppState> {
         .route("/platforms/shopee/sync", post(sync_shopee))
         .route("/webhooks/tiktok", post(webhook))
         .route("/orders", get(list_orders))
+        .route("/orders/cancel", post(batalkan_pesanan))
         .route("/orders/labels", post(catat_label))
         .route(
             "/orders/labels/shortcut",
@@ -448,6 +449,39 @@ async fn catat_label_shortcut(
 ) -> AppResult<Json<Vec<HasilLabel>>> {
     tracing::info!(user_id = %pengunggah.id, jumlah = body.labels.len(), "label dicatat lewat Shortcut");
     Ok(Json(service::catat_label(&state.pool, body.labels).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct BatalRequest {
+    order_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Serialize)]
+struct BatalResult {
+    dibatalkan: u64,
+}
+
+async fn batalkan_pesanan(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<BatalRequest>,
+) -> AppResult<Json<BatalResult>> {
+    user.require(&[Role::Owner])?;
+
+    if body.order_ids.is_empty() {
+        return Err(AppError::bad_request(
+            "Pilih minimal satu pesanan untuk dibatalkan.",
+        ));
+    }
+
+    let dibatalkan = repo::batalkan_pesanan(&state.pool, &body.order_ids).await?;
+    if dibatalkan == 0 {
+        return Err(AppError::bad_request(
+            "Pesanan terpilih tidak bisa dibatalkan: sudah ditugaskan ke pengepak atau sudah tidak baru.",
+        ));
+    }
+
+    Ok(Json(BatalResult { dibatalkan }))
 }
 
 async fn get_order(

@@ -425,6 +425,24 @@ pub async fn delete_mapping(pool: &PgPool, product_id: Uuid, mapping_id: Uuid) -
     Ok(hasil.rows_affected() > 0)
 }
 
+/// Hanya pesanan baru yang belum punya tugas packing yang dibatalkan; yang sudah ditugaskan harus lewat alur tiket agar stok dan pengepaknya tak menggantung.
+pub async fn batalkan_pesanan(pool: &PgPool, ids: &[Uuid]) -> AppResult<u64> {
+    let hasil = sqlx::query!(
+        r#"
+        UPDATE external_orders o
+        SET status = 'cancelled', updated_at = now()
+        WHERE o.id = ANY($1)
+          AND o.status = 'new'
+          AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.external_order_id = o.id)
+        "#,
+        ids
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(hasil.rows_affected())
+}
+
 // --- Pesanan dari label pengiriman Shopee ---
 
 /// Produk jual dengan SKU ini; produk induk bervarian dilewati karena stoknya hidup di varian.
