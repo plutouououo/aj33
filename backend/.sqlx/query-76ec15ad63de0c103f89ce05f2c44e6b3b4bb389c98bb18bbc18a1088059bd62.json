@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE external_orders o\n        SET status = 'cancelled', updated_at = now()\n        WHERE o.id = ANY($1)\n          AND o.status = 'new'\n          AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.external_order_id = o.id)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "76ec15ad63de0c103f89ce05f2c44e6b3b4bb389c98bb18bbc18a1088059bd62"
+}
