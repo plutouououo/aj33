@@ -184,6 +184,30 @@ pub async fn tugaskan(
     Ok(())
 }
 
+/// Membatalkan tugas yang tak jadi dikerjakan: tiket dihapus dan pesanannya kembali ke antrean Pesanan Masuk; stok aman karena baru berkurang saat `handed_over`.
+pub async fn batalkan(pool: &PgPool, ticket_id: Uuid, oleh: CurrentUser) -> AppResult<()> {
+    if oleh.role != Role::Owner {
+        return Err(AppError::forbidden(
+            "Hanya owner yang bisa membatalkan tugas packing.",
+        ));
+    }
+
+    let mut tx = pool.begin().await?;
+    let tiket = ambil_terkunci(&mut tx, ticket_id).await?;
+
+    if TicketStatus::parse(&tiket.status)? == TicketStatus::HandedOver {
+        return Err(AppError::conflict(
+            "Tugas packing yang sudah selesai tidak bisa dibatalkan; batalkan lewat void transaksinya.",
+        ));
+    }
+
+    repo::hapus_tiket(&mut tx, ticket_id).await?;
+    repo::set_status_pesanan(&mut tx, tiket.external_order_id, "new").await?;
+    tx.commit().await?;
+
+    Ok(())
+}
+
 /// Memindahkan status satu langkah; pesanan baru tercatat sebagai penjualan dan stoknya berkurang saat `handed_over` (barang keluar), bukan lebih awal.
 pub async fn pindah_status(
     pool: &PgPool,

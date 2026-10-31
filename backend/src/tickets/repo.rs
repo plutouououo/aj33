@@ -303,6 +303,18 @@ pub async fn kunci(
     Ok(row)
 }
 
+/// Menghapus tiket beserta barangnya; pemanggil sudah memastikan tiket belum diserahkan, jadi belum ada penjualan atau stok yang tertaut.
+pub async fn hapus_tiket(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> AppResult<()> {
+    sqlx::query!("DELETE FROM ticket_items WHERE ticket_id = $1", id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query!("DELETE FROM tickets WHERE id = $1", id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
 pub async fn set_penugasan(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,

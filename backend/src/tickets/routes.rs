@@ -17,7 +17,7 @@ pub fn router() -> Router<AppState> {
         .route("/orders/{id}/ticket", post(create_ticket))
         .route("/tickets", get(list_tickets))
         .route("/tickets/bulk", post(kirim_tiket))
-        .route("/tickets/{id}", get(get_ticket))
+        .route("/tickets/{id}", get(get_ticket).delete(batalkan_tiket))
         .route("/tickets/{id}/assign", post(assign))
         .route("/tickets/{id}/status", patch(set_status))
         .route("/tickets/{id}/items/{item_id}", patch(set_item))
@@ -142,6 +142,17 @@ async fn get_ticket(
 ) -> AppResult<Json<Ticket>> {
     user.require(&[Role::Owner, Role::Pengepak])?;
     Ok(Json(muat(&state, id).await?))
+}
+
+async fn batalkan_tiket(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<axum::http::StatusCode> {
+    user.require(&[Role::Owner])?;
+    service::batalkan(&state.pool, id, user).await?;
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize)]
