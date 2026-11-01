@@ -51,6 +51,13 @@ try {
   }
 }
 
+const potonganPlatform = transaksi
+  ? transaksi.platform_commission_fee +
+    transaksi.platform_service_fee +
+    transaksi.platform_withholding_tax +
+    transaksi.platform_order_processing_fee
+  : 0;
+
 const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
 ---
 
@@ -208,7 +215,9 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
             </section>
 
             <section class="kartu">
-              <h2 class="mb-4 text-base font-bold">Rincian Keuangan</h2>
+              <h2 class="mb-4 text-base font-bold">
+                {transaksi.sales_channel === 'shopee' ? 'Pencairan Shopee' : 'Tagihan Pembeli'}
+              </h2>
               <table class="w-full text-sm">
                 <tbody>
                   <tr>
@@ -236,14 +245,6 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
                       <td class="py-1">Diskon Ongkir (ditanggung toko)</td>
                       <td class="py-1 text-right tabular-nums">
                         -{rupiah(transaksi.shipping_cost)}
-                      </td>
-                    </tr>
-                  )}
-                  {transaksi.sales_channel === 'toko' && transaksi.platform_withholding_tax > 0 && (
-                    <tr>
-                      <td class="py-1 text-[var(--color-teks-lembut)]">PPh UMKM (0,5%, beban toko)</td>
-                      <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
-                        {rupiah(transaksi.platform_withholding_tax)}
                       </td>
                     </tr>
                   )}
@@ -299,13 +300,52 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
                       <td class="py-1 text-right tabular-nums">{rupiah(transaksi.change_amount)}</td>
                     </tr>
                   )}
-                  <tr class="border-t border-[var(--color-garis)]">
-                    <td class="py-1 text-[var(--color-teks-lembut)]">Harga Pokok</td>
-                    <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
-                      {rupiah(transaksi.cogs)}
-                    </td>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="kartu">
+              <h2 class="mb-1 text-base font-bold">Perhitungan Laba</h2>
+              <p class="mb-4 text-xs text-[var(--color-teks-lembut)]">Internal toko, tidak tampil di struk pembeli.</p>
+              <table class="w-full text-sm">
+                <tbody>
+                  <tr>
+                    <td class="py-1">Subtotal Barang</td>
+                    <td class="py-1 text-right tabular-nums">{rupiah(transaksi.subtotal)}</td>
                   </tr>
-                  <tr class="font-bold">
+                  {transaksi.discount_amount > 0 && (
+                    <tr>
+                      <td class="py-1">Diskon</td>
+                      <td class="py-1 text-right tabular-nums">
+                        -{rupiah(transaksi.discount_amount)}
+                      </td>
+                    </tr>
+                  )}
+                  <tr>
+                    <td class="py-1">Harga Pokok</td>
+                    <td class="py-1 text-right tabular-nums">-{rupiah(transaksi.cogs)}</td>
+                  </tr>
+                  {transaksi.sales_channel === 'shopee' && (
+                    <tr>
+                      <td class="py-1">Potongan Shopee (komisi, layanan, PPh, biaya proses)</td>
+                      <td class="py-1 text-right tabular-nums">-{rupiah(potonganPlatform)}</td>
+                    </tr>
+                  )}
+                  {transaksi.sales_channel === 'toko' && transaksi.platform_withholding_tax > 0 && (
+                    <tr>
+                      <td class="py-1">PPh UMKM (0,5%)</td>
+                      <td class="py-1 text-right tabular-nums">
+                        -{rupiah(transaksi.platform_withholding_tax)}
+                      </td>
+                    </tr>
+                  )}
+                  {transaksi.shipping_borne_by_store && (
+                    <tr>
+                      <td class="py-1">Ongkir ditanggung toko</td>
+                      <td class="py-1 text-right tabular-nums">-{rupiah(transaksi.shipping_cost)}</td>
+                    </tr>
+                  )}
+                  <tr class="border-t border-[var(--color-garis)] font-bold">
                     <td class="py-1.5">Laba Transaksi Ini</td>
                     <td
                       class={`py-1.5 text-right tabular-nums ${transaksi.net_profit < 0 ? 'text-red-600' : ''}`}
@@ -316,11 +356,8 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
                 </tbody>
               </table>
               <p class="mt-3 text-xs text-[var(--color-teks-lembut)]">
-                Laba = subtotal − diskon − harga pokok
-                {transaksi.sales_channel === 'shopee' && ' − potongan Shopee'}
-                {transaksi.sales_channel === 'toko' && ' − PPh UMKM'}
-                {transaksi.shipping_borne_by_store && ' − ongkir yang ditanggung toko'}. Beban toko lain per
-                periode tidak ikut dihitung di sini -- lihat halaman Laporan untuk angka itu.
+                Ongkir yang ditagih ke pembeli tidak ikut laba karena diteruskan ke kurir. Beban toko lain per
+                periode tidak dihitung di sini -- lihat halaman Laporan untuk angka itu.
               </p>
             </section>
           </div>
