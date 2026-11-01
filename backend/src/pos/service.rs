@@ -427,16 +427,16 @@ async fn tulis(
         SalesChannel::Shopee | SalesChannel::Toko => rupiah_bulat(basis_fee * pph_umkm_persen()),
         SalesChannel::Tiktok => Decimal::ZERO,
     };
-    let (biaya_komisi, biaya_layanan, biaya_proses) =
-        if input.sales_channel == SalesChannel::Shopee {
-            (
-                rupiah_bulat(basis_fee * commission_persen),
-                rupiah_bulat(basis_fee * service_persen),
-                biaya_proses_pesanan(),
-            )
-        } else {
-            (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO)
-        };
+    let (biaya_komisi, biaya_layanan, biaya_proses) = if input.sales_channel == SalesChannel::Shopee
+    {
+        (
+            rupiah_bulat(basis_fee * commission_persen),
+            rupiah_bulat(basis_fee * service_persen),
+            biaya_proses_pesanan(),
+        )
+    } else {
+        (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO)
+    };
     let pph_memotong_tagihan = if input.sales_channel == SalesChannel::Shopee {
         pph
     } else {
@@ -449,8 +449,13 @@ async fn tulis(
     } else {
         ongkir
     };
-    let total_amount =
-        uang(subtotal + ongkir_ditagih - biaya_komisi - biaya_layanan - pph_memotong_tagihan - biaya_proses);
+    let total_amount = uang(
+        subtotal + ongkir_ditagih
+            - biaya_komisi
+            - biaya_layanan
+            - pph_memotong_tagihan
+            - biaya_proses,
+    );
 
     if input.payment_method == PaymentMethod::Cash {
         let dibayar = amount_paid_tersimpan
