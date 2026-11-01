@@ -3,7 +3,7 @@
 import Galat from '../../components/Galat.astro';
 import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type PricingSettings } from '../../lib/api';
-import { kg } from '../../lib/format';
+import { kg, rupiah } from '../../lib/format';
 import { pesanDari, sesudahAksi } from '../../lib/pesan';
 
 const user = Astro.locals.user!;
@@ -152,4 +152,35 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
 
     <button class="tombol-halus" type="submit">Simpan biaya Shopee</button>
   </form>
+
+  <section class="kartu borang-tegak mb-6">
+    <h2 class="font-semibold">Biaya tetap</h2>
+    <p class="text-sm text-[var(--color-teks-lembut)]">Ditetapkan sistem dan tidak bisa diubah.</p>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="pph_umkm">PPh UMKM (%)</label>
+      <input
+        class="kolom tabular-nums"
+        id="pph_umkm"
+        type="text"
+        value={keTeksPersen(pengaturan.withholding_tax_percent)}
+        readonly
+        disabled
+      />
+      <p class="isian-bantu">Dari omzet barang, untuk kanal Toko dan Shopee. Di Toko menjadi beban toko, tidak mengurangi tagihan pembeli.</p>
+    </div>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="biaya_proses">Biaya proses pemesanan (Rp)</label>
+      <input
+        class="kolom tabular-nums"
+        id="biaya_proses"
+        type="text"
+        value={rupiah(pengaturan.order_processing_fee)}
+        readonly
+        disabled
+      />
+      <p class="isian-bantu">Per transaksi, hanya untuk kanal Shopee.</p>
+    </div>
+  </section>
 </PengaturanShell>

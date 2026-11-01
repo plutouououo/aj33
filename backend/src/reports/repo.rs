@@ -42,7 +42,7 @@ pub struct SalesSummary {
     pub cogs: Decimal,
     /// Beban toko: tabel `expenses` ditambah `shipping_subsidy`.
     pub expenses: Decimal,
-    /// Jumlah `platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee` periode ini dari kolom tersimpan (migrasi 0017/0018), nol selain Shopee.
+    /// Jumlah `platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee` periode ini dari kolom tersimpan (migrasi 0017/0018); komisi, layanan, dan biaya proses nol selain Shopee, PPh juga terisi di toko.
     pub platform_fees: Decimal,
     /// `revenue - cogs - expenses - platform_fees`.
     pub profit: Decimal,

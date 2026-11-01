@@ -186,6 +186,10 @@ export interface PricingSettings {
   /** Pecahan (0,1725 = 17,25%), bukan persen. */
   shopee_commission_percent: number;
   shopee_service_percent: number;
+  /** Pecahan PPh final UMKM (tetap). */
+  withholding_tax_percent: number;
+  /** Rupiah per transaksi Shopee (tetap). */
+  order_processing_fee: number;
 }
 
 /** Bagian atribut yang punya kode sendiri di kamus SKU. */

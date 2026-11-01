@@ -94,11 +94,11 @@ impl SalesChannel {
     }
 }
 
-/// Tarif Shopee mengikuti `get_escrow_detail` (migrasi 0018): komisi dan service fee diatur owner di `pricing_settings`, PPh 0,5% dan Rp1.250 tetap; fungsi karena `Decimal::new` bukan `const fn`.
-fn shopee_withholding_tax_persen() -> Decimal {
+/// Tarif mengikuti `get_escrow_detail` Shopee (migrasi 0018): komisi dan service fee diatur owner di `pricing_settings`, PPh 0,5% dan Rp1.250 tetap; fungsi karena `Decimal::new` bukan `const fn`.
+pub fn pph_umkm_persen() -> Decimal {
     Decimal::new(5, 3) // 0,5%
 }
-fn shopee_order_processing_fee() -> Decimal {
+pub fn biaya_proses_pesanan() -> Decimal {
     Decimal::new(1250, 0)
 }
 
@@ -421,19 +421,27 @@ async fn tulis(
 
     let subtotal = uang(subtotal);
 
-    // Potongan Shopee: komisi + service_fee + PPh 0,5% dari omzet barang, plus Rp1.250 per transaksi, nol selain Shopee; `rupiah_bulat` sama strateginya dengan `Math.round` di kasir.
+    // Shopee: komisi + service_fee + PPh 0,5% dari omzet barang plus Rp1.250 per transaksi, semuanya memotong `total_amount`; toko: hanya PPh 0,5% sebagai beban toko yang tidak memotong tagihan pembeli; `rupiah_bulat` sama strateginya dengan `Math.round` di kasir.
     let basis_fee = subtotal;
-    let (biaya_komisi, biaya_layanan, pph, biaya_proses) =
+    let pph = match input.sales_channel {
+        SalesChannel::Shopee | SalesChannel::Toko => rupiah_bulat(basis_fee * pph_umkm_persen()),
+        SalesChannel::Tiktok => Decimal::ZERO,
+    };
+    let (biaya_komisi, biaya_layanan, biaya_proses) =
         if input.sales_channel == SalesChannel::Shopee {
             (
                 rupiah_bulat(basis_fee * commission_persen),
                 rupiah_bulat(basis_fee * service_persen),
-                rupiah_bulat(basis_fee * shopee_withholding_tax_persen()),
-                shopee_order_processing_fee(),
+                biaya_proses_pesanan(),
             )
         } else {
-            (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO)
+            (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO)
         };
+    let pph_memotong_tagihan = if input.sales_channel == SalesChannel::Shopee {
+        pph
+    } else {
+        Decimal::ZERO
+    };
 
     // Ongkir hanya menambah tagihan bila pembeli yang menanggung; bila toko, ongkir tak masuk `total_amount` dan dicatat sebagai beban (`shipping_subsidy`). Untuk Shopee `total_amount` adalah uang yang cair ke toko.
     let ongkir_ditagih = if ongkir_ditanggung_toko {
@@ -442,7 +450,7 @@ async fn tulis(
         ongkir
     };
     let total_amount =
-        uang(subtotal + ongkir_ditagih - biaya_komisi - biaya_layanan - pph - biaya_proses);
+        uang(subtotal + ongkir_ditagih - biaya_komisi - biaya_layanan - pph_memotong_tagihan - biaya_proses);
 
     if input.payment_method == PaymentMethod::Cash {
         let dibayar = amount_paid_tersimpan

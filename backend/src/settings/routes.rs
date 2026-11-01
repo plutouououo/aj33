@@ -3,6 +3,7 @@
 use super::repo;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
+use crate::pos::service;
 use crate::AppState;
 use axum::extract::State;
 use axum::routing::{get, patch};
@@ -27,6 +28,10 @@ struct PricingSettings {
     shopee_commission_percent: Decimal,
     /// Pecahan biaya layanan Shopee (program opsional), bawaan nol.
     shopee_service_percent: Decimal,
+    /// Pecahan PPh final UMKM, tetap (tak bisa diubah): dicatat di kanal toko dan Shopee.
+    withholding_tax_percent: Decimal,
+    /// Biaya proses pesanan Shopee dalam rupiah, tetap per transaksi.
+    order_processing_fee: Decimal,
 }
 
 async fn baca_pricing(state: &AppState) -> AppResult<PricingSettings> {
@@ -35,6 +40,8 @@ async fn baca_pricing(state: &AppState) -> AppResult<PricingSettings> {
         wholesale_threshold_kg: repo::batas_grosir_kg(&state.pool).await?,
         shopee_commission_percent: biaya.komisi,
         shopee_service_percent: biaya.layanan,
+        withholding_tax_percent: service::pph_umkm_persen(),
+        order_processing_fee: service::biaya_proses_pesanan(),
     })
 }
 
