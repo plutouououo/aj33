@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT sa.reference_id AS \"transaksi_id!\",\n               SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS \"modal!\"\n        FROM stock_adjustments sa\n        JOIN transactions t ON t.id = sa.reference_id\n        LEFT JOIN product_batches pb ON pb.id = sa.batch_id\n        LEFT JOIN products p ON p.id = sa.product_id\n        WHERE sa.reason = 'sale'\n          AND sa.change_qty < 0\n          AND sa.reference_type = 'transaction'\n          AND t.status = 'completed'\n          AND (t.created_at AT TIME ZONE 'Asia/Jakarta')::date = $1\n        GROUP BY sa.reference_id, sa.product_id\n        ORDER BY sa.reference_id, sa.product_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "transaksi_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "modal!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "cceb602b368485edd3314c7fec4e4b329a6b4a96b2d6ad777e316f61e6b6569e"
+}

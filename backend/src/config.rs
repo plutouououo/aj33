@@ -11,6 +11,8 @@ pub struct Config {
     pub cors_origins: Vec<String>,
     /// Kunci enkripsi token marketplace, 32 byte hasil decode hex.
     pub token_encryption_key: [u8; 32],
+    /// Token baca laporan harian untuk Apps Script di Google Sheets; kosong berarti endpoint `/api/sheet/harian` mati.
+    pub sheet_token: String,
     pub tiktok: TiktokConfig,
     pub shopee: ShopeeConfig,
 }
@@ -91,6 +93,7 @@ impl Config {
             jwt_secret,
             cors_origins,
             token_encryption_key,
+            sheet_token: optional("SHEET_TOKEN").trim().to_string(),
             tiktok: TiktokConfig {
                 app_key: optional("TIKTOK_APP_KEY"),
                 app_secret: optional("TIKTOK_APP_SECRET"),

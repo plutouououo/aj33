@@ -7,10 +7,12 @@ use super::repo::{
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
-use axum::extract::{Path, Query, State};
+use axum::extract::{FromRequestParts, Path, Query, State};
+use axum::http::request::Parts;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub fn router() -> Router<AppState> {
@@ -18,6 +20,7 @@ pub fn router() -> Router<AppState> {
         .route("/dashboard", get(dashboard))
         .route("/reports/sales", get(sales_report))
         .route("/reports/sales/{id}", get(sales_transaction_detail))
+        .route("/sheet/harian", get(sheet_harian))
 }
 
 /// Banyaknya baris pada daftar pendek di dasbor.
@@ -261,4 +264,63 @@ async fn sales_transaction_detail(
         .ok_or_else(|| AppError::not_found("Transaksi tidak ditemukan."))?;
 
     Ok(Json(detail))
+}
+
+// --- Laporan harian untuk Google Sheets ---
+
+/// Pemegang `SHEET_TOKEN`; tipe tersendiri agar token itu hanya membuka satu endpoint baca, bukan API lain.
+struct PembacaSheet;
+
+impl FromRequestParts<AppState> for PembacaSheet {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let diharap = &state.config.sheet_token;
+        if diharap.is_empty() {
+            return Err(AppError::not_found("Laporan sheet belum diaktifkan."));
+        }
+
+        let token = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(str::trim)
+            .unwrap_or_default();
+
+        // Dibandingkan lewat hash agar waktu pembandingan tak membocorkan awalan token yang benar.
+        if Sha256::digest(token.as_bytes()) == Sha256::digest(diharap.as_bytes()) {
+            Ok(Self)
+        } else {
+            Err(AppError::unauthorized("Token sheet tidak valid."))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct HarianQuery {
+    /// `YYYY-MM-DD` waktu Jakarta; kosong berarti hari ini.
+    tanggal: Option<chrono::NaiveDate>,
+}
+
+#[derive(Debug, Serialize)]
+struct LaporanHarian {
+    tanggal: chrono::NaiveDate,
+    transaksi: Vec<repo::BarisHarian>,
+}
+
+async fn sheet_harian(
+    _pembaca: PembacaSheet,
+    State(state): State<AppState>,
+    Query(query): Query<HarianQuery>,
+) -> AppResult<Json<LaporanHarian>> {
+    let tanggal = query.tanggal.unwrap_or_else(|| {
+        let jakarta = chrono::FixedOffset::east_opt(7 * 3600).expect("offset WIB sah");
+        chrono::Utc::now().with_timezone(&jakarta).date_naive()
+    });
+    let transaksi = repo::laporan_harian(&state.pool, tanggal).await?;
+    Ok(Json(LaporanHarian { tanggal, transaksi }))
 }

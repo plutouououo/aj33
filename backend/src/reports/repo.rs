@@ -866,3 +866,84 @@ pub async fn counts(pool: &PgPool) -> AppResult<Counts> {
         low_stock_count: row.low_stock_count,
     })
 }
+
+/// Satu transaksi selesai pada laporan harian Google Sheets; `modal` berisi harga pokok per produk dalam urutan tetap supaya kolom Item 1..5 stabil antar penarikan.
+#[derive(Debug, Serialize)]
+pub struct BarisHarian {
+    pub id: Uuid,
+    pub kanal: String,
+    pub pelanggan: Option<String>,
+    /// Omzet barang `subtotal - discount_amount`, kolom Cash di template.
+    pub bruto: Decimal,
+    /// Uang yang benar-benar cair: `total_amount` (sudah dipotong komisi, layanan, PPh, dan biaya proses untuk Shopee).
+    pub bersih: Decimal,
+    pub pph: Decimal,
+    pub modal: Vec<Decimal>,
+}
+
+pub async fn laporan_harian(
+    pool: &PgPool,
+    tanggal: chrono::NaiveDate,
+) -> AppResult<Vec<BarisHarian>> {
+    let transaksi = sqlx::query!(
+        r#"
+        SELECT t.id                        AS "id!",
+               t.sales_channel             AS "kanal!",
+               COALESCE(c.name, t.customer_name_snapshot) AS pelanggan,
+               t.subtotal - t.discount_amount AS "bruto!",
+               t.total_amount              AS "bersih!",
+               t.platform_withholding_tax  AS "pph!"
+        FROM transactions t
+        LEFT JOIN customers c ON c.id = t.customer_id
+        WHERE t.status = 'completed'
+          AND (t.created_at AT TIME ZONE 'Asia/Jakarta')::date = $1
+        ORDER BY t.created_at, t.id
+        "#,
+        tanggal
+    )
+    .fetch_all(pool)
+    .await?;
+
+    // Logika harga pokok sama dengan `sales_summary`, dikelompokkan per transaksi dan produk.
+    let pokok = sqlx::query!(
+        r#"
+        SELECT sa.reference_id AS "transaksi_id!",
+               SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS "modal!"
+        FROM stock_adjustments sa
+        JOIN transactions t ON t.id = sa.reference_id
+        LEFT JOIN product_batches pb ON pb.id = sa.batch_id
+        LEFT JOIN products p ON p.id = sa.product_id
+        WHERE sa.reason = 'sale'
+          AND sa.change_qty < 0
+          AND sa.reference_type = 'transaction'
+          AND t.status = 'completed'
+          AND (t.created_at AT TIME ZONE 'Asia/Jakarta')::date = $1
+        GROUP BY sa.reference_id, sa.product_id
+        ORDER BY sa.reference_id, sa.product_id
+        "#,
+        tanggal
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut modal: std::collections::HashMap<Uuid, Vec<Decimal>> = std::collections::HashMap::new();
+    for baris in pokok {
+        modal
+            .entry(baris.transaksi_id)
+            .or_default()
+            .push(baris.modal);
+    }
+
+    Ok(transaksi
+        .into_iter()
+        .map(|t| BarisHarian {
+            modal: modal.remove(&t.id).unwrap_or_default(),
+            id: t.id,
+            kanal: t.kanal,
+            pelanggan: t.pelanggan,
+            bruto: t.bruto,
+            bersih: t.bersih,
+            pph: t.pph,
+        })
+        .collect())
+}

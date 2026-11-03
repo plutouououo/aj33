@@ -495,3 +495,12 @@ aj33-cek
 systemctl is-active aj33-backend aj33-web caddy postgresql
 sudo -u postgres psql -d aj33 -tAc "SELECT version, description FROM _sqlx_migrations ORDER BY version"
 ```
+
+## Laporan harian ke Google Sheets
+
+Apps Script (`docs/apps-script/laporan-harian.gs`) menarik `GET /sheet/harian?tanggal=YYYY-MM-DD` tiap 5 menit dan mengisi satu tab per tanggal dengan layout Offline | Shopee | Tokopedia.
+
+- Alur: Apps Script → Caddy → web `/sheet/harian` (penerus, tanpa cookie) → backend `/api/sheet/harian`. Backend memeriksa `Authorization: Bearer` terhadap env `SHEET_TOKEN` (kosong = endpoint mati, 404); token ini hanya membuka endpoint baca itu.
+- Pasang: `openssl rand -hex 32` → `SHEET_TOKEN` di `/etc/aj33/backend.env` (dan `backend/.env` lokal), restart backend; di sheet, Extensions › Apps Script, tempel berkas, isi Script properties `URL_APP` (mis. `https://domain-toko`) dan `TOKEN_SHEET` (nilai yang sama), jalankan `pasangPemicu()` sekali dan setujui izinnya.
+- Kolom: Cash = omzet barang (`subtotal - discount`), Item 1..5 = harga pokok per produk (lebih dari 5 produk dijumlahkan ke Item 5), Bersih = `total_amount` (hanya Shopee). Profit offline/Tokopedia = Cash − Modal, Shopee = Bersih − Modal; PPh offline ditampilkan terpisah dan tidak mengurangi profit, sama seperti template lama.
+- Tab ditimpa tiap sinkron, jadi edit manual di tab hari berjalan akan hilang; hari lampau tidak disentuh.
