@@ -304,7 +304,14 @@ owner → owner ACC di WhatsApp (di luar aplikasi) dan menekan "Selesaikan" di
   yang tercetak di blok "Pengirim" milik toko. Pelanggan dari label dikenali
   lewat nama + alamat (`source = 'marketplace'`), tanpa telepon.
 - **Barang dicocokkan lewat SKU** (`products.sku`, tanpa membedakan huruf
-  besar-kecil, produk aktif tanpa varian). Nama yang tampil adalah nama di
+  besar-kecil, produk aktif). SKU produk tanpa varian dipakai langsung. SKU
+  induk bervarian memilih satu varian anaknya dari teks kolom Variasi label
+  (`orders::service::pilih_varian`): teks diurai jadi ukuran (kg atau gr) dan
+  kata sisa (merek, grade), lalu dicocokkan ke `variant_size` dan
+  `brand_name`/`variant_grade` varian aktif. Hanya satu kecocokan yang
+  diterima; variasi kosong, tak dikenal, atau kembar menolak label dengan
+  daftar varian yang ada, tak pernah menebak karena salah pilih memotong stok
+  barang lain. Nama yang tampil adalah nama di
   app; nama Shopee hanya disimpan di `item_name_snapshot`. Label dengan SKU
   kosong atau tak dikenal ditolak per label, label lain tetap tercatat.
   Nomor pesanan yang sudah ada dijawab "sudah ada", jadi unggah ulang aman.

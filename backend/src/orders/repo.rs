@@ -445,22 +445,54 @@ pub async fn batalkan_pesanan(pool: &PgPool, ids: &[Uuid]) -> AppResult<u64> {
 
 // --- Pesanan dari label pengiriman Shopee ---
 
-/// Produk jual dengan SKU ini; produk induk bervarian dilewati karena stoknya hidup di varian.
-pub async fn produk_dari_sku(pool: &PgPool, sku: &str) -> AppResult<Option<Uuid>> {
-    let id = sqlx::query_scalar!(
+/// Varian aktif milik induk yang SKU-nya tercetak di label; dicocokkan ke teks kolom Variasi.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct VarianLabel {
+    pub id: Uuid,
+    pub brand_name: Option<String>,
+    pub variant_grade: Option<String>,
+    pub variant_size: Option<Decimal>,
+    pub is_active: bool,
+}
+
+pub enum CocokSku {
+    /// Produk tanpa varian: stoknya hidup di produk itu sendiri.
+    Langsung(Uuid),
+    /// Induk bervarian: stoknya hidup di varian, jadi satu varian harus dipilih dari teks variasi.
+    Induk(Vec<VarianLabel>),
+    Tidak,
+}
+
+/// Produk aktif dengan SKU ini; query biasa (bukan makro) agar tak menambah cache `.sqlx`.
+pub async fn cari_sku_label(pool: &PgPool, sku: &str) -> AppResult<CocokSku> {
+    let id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM products WHERE upper(sku) = upper($1) AND is_active")
+            .bind(sku)
+            .fetch_optional(pool)
+            .await?;
+
+    let Some(id) = id else {
+        return Ok(CocokSku::Tidak);
+    };
+
+    let anak: Vec<VarianLabel> = sqlx::query_as(
         r#"
-        SELECT p.id
-        FROM products p
-        WHERE upper(p.sku) = upper($1)
-          AND p.is_active
-          AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)
+        SELECT id, brand_name, variant_grade, variant_size, is_active
+        FROM products
+        WHERE parent_id = $1
+        ORDER BY variant_size NULLS LAST, brand_name
         "#,
-        sku
     )
-    .fetch_optional(pool)
+    .bind(id)
+    .fetch_all(pool)
     .await?;
 
-    Ok(id)
+    // Induk yang semua variannya nonaktif tetap induk: stoknya tak pernah ada di baris induk.
+    Ok(if anak.is_empty() {
+        CocokSku::Langsung(id)
+    } else {
+        CocokSku::Induk(anak.into_iter().filter(|v| v.is_active).collect())
+    })
 }
 
 pub struct LabelBarisBaru {

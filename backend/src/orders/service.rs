@@ -1,11 +1,13 @@
 //! Pesanan Shopee dari label pengiriman: Astro membaca PDF-nya, di sini isinya diperiksa, SKU dicocokkan ke produk, lalu dicatat sebagai pesanan menunggu tiket.
 
-use super::repo::{self, LabelBarisBaru, LabelBaru};
+use super::repo::{self, CocokSku, LabelBarisBaru, LabelBaru, VarianLabel};
 use crate::error::{AppError, AppResult};
 use crate::marketplace::{shopee, SlaType};
 use chrono::{NaiveDate, NaiveTime, TimeZone, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use std::str::FromStr;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -101,28 +103,33 @@ pub async fn catat_label(pool: &PgPool, labels: Vec<LabelShopee>) -> AppResult<V
         };
 
         let mut baris = Vec::with_capacity(siap.items.len());
-        let mut sku_asing = Vec::new();
+        let mut masalah = Vec::new();
         for item in &siap.items {
-            match repo::produk_dari_sku(pool, &item.sku).await? {
-                Some(product_id) => baris.push(LabelBarisBaru {
+            let product_id = match repo::cari_sku_label(pool, &item.sku).await? {
+                CocokSku::Langsung(id) => Ok(id),
+                CocokSku::Induk(varian) => {
+                    pilih_varian(&item.sku, item.variation.as_deref(), &varian)
+                }
+                CocokSku::Tidak => Err(format!(
+                    "SKU {} tidak ada di produk aktif. Samakan SKU di Shopee dengan SKU di app.",
+                    item.sku
+                )),
+            };
+
+            match product_id {
+                Ok(product_id) => baris.push(LabelBarisBaru {
                     product_id,
                     name: item.name.clone(),
                     sku: item.sku.clone(),
                     variation: item.variation.clone(),
                     qty: item.qty,
                 }),
-                None => sku_asing.push(item.sku.clone()),
+                Err(pesan) => masalah.push(pesan),
             }
         }
 
-        if !sku_asing.is_empty() {
-            hasil.push(gagal(
-                order_sn,
-                format!(
-                    "SKU berikut tidak ada di produk aktif: {}. Samakan SKU di Shopee dengan SKU di app.",
-                    sku_asing.join(", ")
-                ),
-            ));
+        if !masalah.is_empty() {
+            hasil.push(gagal(order_sn, masalah.join(" ")));
             continue;
         }
 
@@ -165,6 +172,147 @@ pub async fn catat_label(pool: &PgPool, labels: Vec<LabelShopee>) -> AppResult<V
     }
 
     Ok(hasil)
+}
+
+#[derive(Debug, Default)]
+struct VariasiUrai {
+    ukuran_kg: Option<Decimal>,
+    /// Lebih dari satu ukuran dalam teks (mis. "2 x 500 gr"): tak ditebak mana yang berlaku.
+    ukuran_ganda: bool,
+    /// Kata sisa setelah ukuran dibuang (merek, grade), sudah huruf kecil.
+    kata: Vec<String>,
+}
+
+fn kata_kecil(teks: &str) -> Vec<String> {
+    teks.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '.' && c != ',')
+        .map(|k| k.trim_matches(|c| c == '.' || c == ',').to_string())
+        .filter(|k| !k.is_empty())
+        .collect()
+}
+
+fn ukuran_kg(angka: &str, satuan: &str) -> Option<Decimal> {
+    let nilai = Decimal::from_str(&angka.replace(',', ".")).ok()?;
+    match satuan {
+        "kg" | "kgs" => Some(nilai),
+        "g" | "gr" | "gram" => Some(nilai / Decimal::from(1000)),
+        _ => None,
+    }
+}
+
+/// Memisahkan ukuran ("0,6 kg", "800gr") dari sisa teks variasi Shopee.
+fn urai_variasi(teks: &str) -> VariasiUrai {
+    let kata = kata_kecil(teks);
+    let mut hasil = VariasiUrai::default();
+    let mut i = 0;
+
+    while i < kata.len() {
+        let k = &kata[i];
+        let batas = k
+            .find(|c: char| !c.is_ascii_digit() && c != '.' && c != ',')
+            .unwrap_or(k.len());
+        let (angka, menempel) = k.split_at(batas);
+
+        let ukuran = if angka.is_empty() {
+            None
+        } else if !menempel.is_empty() {
+            ukuran_kg(angka, menempel).map(|u| (u, 1))
+        } else {
+            kata.get(i + 1)
+                .and_then(|s| ukuran_kg(angka, s))
+                .map(|u| (u, 2))
+        };
+
+        match ukuran {
+            Some((u, dipakai)) => {
+                if hasil.ukuran_kg.is_some_and(|lama| lama != u) {
+                    hasil.ukuran_ganda = true;
+                }
+                hasil.ukuran_kg = Some(u);
+                i += dipakai;
+            }
+            None => {
+                hasil.kata.push(k.clone());
+                i += 1;
+            }
+        }
+    }
+
+    hasil
+}
+
+fn nama_varian(v: &VarianLabel) -> String {
+    let ukuran = v
+        .variant_size
+        .map(|u| format!("{} kg", u.normalize()))
+        .unwrap_or_default();
+    [Some(ukuran), v.brand_name.clone(), v.variant_grade.clone()]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn daftar_varian(varian: &[VarianLabel]) -> String {
+    if varian.is_empty() {
+        return "tidak ada varian aktif".into();
+    }
+    varian
+        .iter()
+        .map(nama_varian)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Memilih satu varian induk dari teks kolom Variasi label; ragu berarti gagal dengan daftar varian, tak pernah menebak karena salah pilih memotong stok barang lain.
+fn pilih_varian(sku: &str, variasi: Option<&str>, varian: &[VarianLabel]) -> Result<Uuid, String> {
+    let Some(variasi) = variasi.filter(|v| !v.trim().is_empty()) else {
+        return Err(format!(
+            "SKU {sku} adalah induk bervarian tapi label tak memuat variasi. Varian di app: {}.",
+            daftar_varian(varian)
+        ));
+    };
+
+    let gagal = |sebab: &str| {
+        format!(
+            "Variasi \"{variasi}\" pada SKU {sku} {sebab}. Varian di app: {}.",
+            daftar_varian(varian)
+        )
+    };
+
+    let urai = urai_variasi(variasi);
+    if urai.ukuran_ganda {
+        return Err(gagal("memuat lebih dari satu ukuran"));
+    }
+
+    let cocok: Vec<&VarianLabel> = varian
+        .iter()
+        .filter(|v| {
+            let ciri: Vec<String> = [v.brand_name.as_deref(), v.variant_grade.as_deref()]
+                .into_iter()
+                .flatten()
+                .flat_map(kata_kecil)
+                .collect();
+
+            match urai.ukuran_kg {
+                Some(u) => v.variant_size == Some(u) && urai.kata.iter().all(|k| ciri.contains(k)),
+                // Tanpa ukuran: seluruh kata harus persis ciri varian itu, karena tak ada yang membedakan selain nama.
+                None => {
+                    !urai.kata.is_empty()
+                        && v.variant_size.is_none()
+                        && urai.kata.len() == ciri.len()
+                        && urai.kata.iter().all(|k| ciri.contains(k))
+                }
+            }
+        })
+        .collect();
+
+    match cocok.as_slice() {
+        [satu] => Ok(satu.id),
+        [] => Err(gagal("tidak cocok dengan varian mana pun")),
+        _ => Err(gagal("cocok dengan lebih dari satu varian")),
+    }
 }
 
 fn gagal(order_sn: String, pesan: String) -> HasilLabel {
@@ -314,6 +462,114 @@ mod tests {
         let mut tanpa_sku = label();
         tanpa_sku.items[0].sku = "  ".into();
         assert!(periksa(&tanpa_sku).is_err());
+    }
+
+    fn varian(brand: &str, grade: Option<&str>, kg: &str) -> VarianLabel {
+        VarianLabel {
+            id: Uuid::new_v4(),
+            brand_name: Some(brand.into()),
+            variant_grade: grade.map(Into::into),
+            variant_size: Some(Decimal::from_str(kg).unwrap()),
+            is_active: true,
+        }
+    }
+
+    fn contoh_varian() -> Vec<VarianLabel> {
+        vec![
+            varian("AFCO", None, "0.6"),
+            varian("AFCO", None, "0.7"),
+            varian("AFCO", None, "0.8"),
+            varian("BEST CHICKEN", None, "1.0"),
+        ]
+    }
+
+    #[test]
+    fn ukuran_dan_sisa_teks_diurai() {
+        let u = urai_variasi("0,6 kg afco");
+        assert_eq!(u.ukuran_kg, Some(Decimal::from_str("0.6").unwrap()));
+        assert_eq!(u.kata, vec!["afco"]);
+
+        let u = urai_variasi("1.0 kg best chicken");
+        assert_eq!(u.ukuran_kg, Some(Decimal::from(1)));
+        assert_eq!(u.kata, vec!["best", "chicken"]);
+
+        let u = urai_variasi("800gr AFCO");
+        assert_eq!(u.ukuran_kg, Some(Decimal::from_str("0.8").unwrap()));
+        assert_eq!(u.kata, vec!["afco"]);
+    }
+
+    #[test]
+    fn dua_ukuran_berbeda_ditandai_ganda() {
+        assert!(urai_variasi("2 x 500 gr 1 kg").ukuran_ganda);
+        assert!(!urai_variasi("500 gr 0,5 kg").ukuran_ganda);
+    }
+
+    #[test]
+    fn variasi_dicocokkan_ke_varian_lewat_ukuran_dan_merek() {
+        let v = contoh_varian();
+
+        assert_eq!(pilih_varian("AYU", Some("0,7 kg afco"), &v), Ok(v[1].id));
+        assert_eq!(pilih_varian("AYU", Some("800 gr AFCO"), &v), Ok(v[2].id));
+        assert_eq!(
+            pilih_varian("AYU", Some("1.0 kg best chicken"), &v),
+            Ok(v[3].id)
+        );
+    }
+
+    #[test]
+    fn ukuran_saja_cukup_bila_hanya_satu_varian_berukuran_itu() {
+        let v = contoh_varian();
+        assert_eq!(pilih_varian("AYU", Some("1 kg"), &v), Ok(v[3].id));
+    }
+
+    #[test]
+    fn ukuran_kembar_beda_merek_butuh_merek() {
+        let mut v = contoh_varian();
+        v.push(varian("BEST CHICKEN", None, "0.6"));
+
+        assert!(pilih_varian("AYU", Some("0,6 kg"), &v).is_err());
+        assert_eq!(pilih_varian("AYU", Some("0,6 kg afco"), &v), Ok(v[0].id));
+        assert_eq!(
+            pilih_varian("AYU", Some("0,6 kg best chicken"), &v),
+            Ok(v[4].id)
+        );
+    }
+
+    #[test]
+    fn variasi_kosong_atau_tak_dikenal_gagal_dengan_daftar_varian() {
+        let v = contoh_varian();
+
+        let kosong = pilih_varian("AYU", None, &v).unwrap_err();
+        assert!(kosong.contains("tak memuat variasi"));
+        assert!(kosong.contains("0.6 kg AFCO"));
+
+        assert!(pilih_varian("AYU", Some("   "), &v).is_err());
+        assert!(pilih_varian("AYU", Some("0,9 kg afco"), &v).is_err());
+        // Kata asing di sisa teks tak boleh diabaikan.
+        assert!(pilih_varian("AYU", Some("0,6 kg afco karton"), &v).is_err());
+    }
+
+    #[test]
+    fn induk_tanpa_varian_aktif_gagal() {
+        let pesan = pilih_varian("AYU", Some("0,6 kg afco"), &[]).unwrap_err();
+        assert!(pesan.contains("tidak ada varian aktif"));
+    }
+
+    #[test]
+    fn variasi_tanpa_ukuran_dicocokkan_ke_varian_tanpa_ukuran() {
+        let v = vec![VarianLabel {
+            id: Uuid::new_v4(),
+            brand_name: Some("AFCO".into()),
+            variant_grade: Some("Super Besar".into()),
+            variant_size: None,
+            is_active: true,
+        }];
+
+        assert_eq!(
+            pilih_varian("CKR", Some("afco super besar"), &v),
+            Ok(v[0].id)
+        );
+        assert!(pilih_varian("CKR", Some("afco"), &v).is_err());
     }
 
     #[test]
