@@ -878,7 +878,44 @@ pub struct BarisHarian {
     /// Uang yang benar-benar cair: `total_amount` (sudah dipotong komisi, layanan, PPh, dan biaya proses untuk Shopee).
     pub bersih: Decimal,
     pub pph: Decimal,
+    pub komisi: Decimal,
+    pub layanan: Decimal,
+    pub biaya_proses: Decimal,
+    /// Ongkir yang ditanggung toko pada transaksi ini; beban harian yang tak ada di tabel `expenses`.
+    pub subsidi_ongkir: Decimal,
+    /// Ada barang tanpa harga pokok atau tak ada keluaran stok sama sekali, jadi modal dan profit baris ini batas atas.
+    pub modal_tidak_lengkap: bool,
     pub modal: Vec<Decimal>,
+}
+
+/// Satu beban toko pada laporan harian Google Sheets.
+#[derive(Debug, Serialize)]
+pub struct PengeluaranHarian {
+    pub kategori: Option<String>,
+    pub keterangan: Option<String>,
+    pub jumlah: Decimal,
+}
+
+pub async fn pengeluaran_harian(
+    pool: &PgPool,
+    tanggal: chrono::NaiveDate,
+) -> AppResult<Vec<PengeluaranHarian>> {
+    let baris = sqlx::query_as!(
+        PengeluaranHarian,
+        r#"
+        SELECT e.category    AS kategori,
+               e.description AS keterangan,
+               e.amount      AS "jumlah!"
+        FROM expenses e
+        WHERE e.expense_date = $1
+        ORDER BY e.created_at, e.id
+        "#,
+        tanggal
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(baris)
 }
 
 pub async fn laporan_harian(
@@ -892,7 +929,11 @@ pub async fn laporan_harian(
                COALESCE(c.name, t.customer_name_snapshot) AS pelanggan,
                t.subtotal - t.discount_amount AS "bruto!",
                t.total_amount              AS "bersih!",
-               t.platform_withholding_tax  AS "pph!"
+               t.platform_withholding_tax  AS "pph!",
+               t.platform_commission_fee   AS "komisi!",
+               t.platform_service_fee      AS "layanan!",
+               t.platform_order_processing_fee AS "biaya_proses!",
+               t.shipping_subsidy          AS "subsidi_ongkir!"
         FROM transactions t
         LEFT JOIN customers c ON c.id = t.customer_id
         WHERE t.status = 'completed'
@@ -908,7 +949,10 @@ pub async fn laporan_harian(
     let pokok = sqlx::query!(
         r#"
         SELECT sa.reference_id AS "transaksi_id!",
-               SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS "modal!"
+               SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS "modal!",
+               COUNT(*) FILTER (
+                   WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL
+               ) AS "tanpa_pokok!"
         FROM stock_adjustments sa
         JOIN transactions t ON t.id = sa.reference_id
         LEFT JOIN product_batches pb ON pb.id = sa.batch_id
@@ -926,24 +970,32 @@ pub async fn laporan_harian(
     .fetch_all(pool)
     .await?;
 
-    let mut modal: std::collections::HashMap<Uuid, Vec<Decimal>> = std::collections::HashMap::new();
+    let mut modal: std::collections::HashMap<Uuid, (Vec<Decimal>, bool)> =
+        std::collections::HashMap::new();
     for baris in pokok {
-        modal
-            .entry(baris.transaksi_id)
-            .or_default()
-            .push(baris.modal);
+        let (daftar, tanpa) = modal.entry(baris.transaksi_id).or_default();
+        daftar.push(baris.modal);
+        *tanpa |= baris.tanpa_pokok > 0;
     }
 
     Ok(transaksi
         .into_iter()
-        .map(|t| BarisHarian {
-            modal: modal.remove(&t.id).unwrap_or_default(),
-            id: t.id,
-            kanal: t.kanal,
-            pelanggan: t.pelanggan,
-            bruto: t.bruto,
-            bersih: t.bersih,
-            pph: t.pph,
+        .map(|t| {
+            let (modal, tanpa_pokok) = modal.remove(&t.id).unwrap_or_default();
+            BarisHarian {
+                modal_tidak_lengkap: tanpa_pokok || modal.is_empty(),
+                modal,
+                id: t.id,
+                komisi: t.komisi,
+                layanan: t.layanan,
+                biaya_proses: t.biaya_proses,
+                subsidi_ongkir: t.subsidi_ongkir,
+                kanal: t.kanal,
+                pelanggan: t.pelanggan,
+                bruto: t.bruto,
+                bersih: t.bersih,
+                pph: t.pph,
+            }
         })
         .collect())
 }

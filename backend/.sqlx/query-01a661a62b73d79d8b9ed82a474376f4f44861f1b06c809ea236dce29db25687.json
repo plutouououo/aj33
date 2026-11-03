@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id                        AS \"id!\",\n               t.sales_channel             AS \"kanal!\",\n               COALESCE(c.name, t.customer_name_snapshot) AS pelanggan,\n               t.subtotal - t.discount_amount AS \"bruto!\",\n               t.total_amount              AS \"bersih!\",\n               t.platform_withholding_tax  AS \"pph!\",\n               t.platform_commission_fee   AS \"komisi!\",\n               t.platform_service_fee      AS \"layanan!\",\n               t.platform_order_processing_fee AS \"biaya_proses!\",\n               t.shipping_subsidy          AS \"subsidi_ongkir!\"\n        FROM transactions t\n        LEFT JOIN customers c ON c.id = t.customer_id\n        WHERE t.status = 'completed'\n          AND (t.created_at AT TIME ZONE 'Asia/Jakarta')::date = $1\n        ORDER BY t.created_at, t.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kanal!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "pelanggan",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "bruto!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "bersih!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "pph!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "komisi!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "layanan!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "biaya_proses!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
+        "name": "subsidi_ongkir!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "01a661a62b73d79d8b9ed82a474376f4f44861f1b06c809ea236dce29db25687"
+}

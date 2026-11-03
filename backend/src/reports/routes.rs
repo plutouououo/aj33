@@ -310,6 +310,7 @@ struct HarianQuery {
 struct LaporanHarian {
     tanggal: chrono::NaiveDate,
     transaksi: Vec<repo::BarisHarian>,
+    pengeluaran: Vec<repo::PengeluaranHarian>,
 }
 
 async fn sheet_harian(
@@ -322,5 +323,10 @@ async fn sheet_harian(
         chrono::Utc::now().with_timezone(&jakarta).date_naive()
     });
     let transaksi = repo::laporan_harian(&state.pool, tanggal).await?;
-    Ok(Json(LaporanHarian { tanggal, transaksi }))
+    let pengeluaran = repo::pengeluaran_harian(&state.pool, tanggal).await?;
+    Ok(Json(LaporanHarian {
+        tanggal,
+        transaksi,
+        pengeluaran,
+    }))
 }

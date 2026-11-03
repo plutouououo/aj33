@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT e.category    AS kategori,\n               e.description AS keterangan,\n               e.amount      AS \"jumlah!\"\n        FROM expenses e\n        WHERE e.expense_date = $1\n        ORDER BY e.created_at, e.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kategori",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "keterangan",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "jumlah!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "3c42617af4d61081f81c50120568e294164ef03b5ba46d3254e93d1527d19e37"
+}
