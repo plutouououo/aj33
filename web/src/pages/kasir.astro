@@ -46,20 +46,19 @@ function hargaKanal(p: Product, kanal: Kanal): { ecer: number; grosir: number | 
 }
 
 /** Batas produk di kanal itu, atau batas bawaan di pengaturan bila produk tak mengaturnya; sama dengan `SalesChannel::harga` di backend. */
-function batasGrosirKg(p: Product, kanal: Kanal): number {
+function batasGrosirPack(p: Product, kanal: Kanal): number {
   const batas =
     kanal === 'shopee'
-      ? p.wholesale_threshold_kg_shopee
+      ? p.wholesale_threshold_qty_shopee
       : kanal === 'tiktok'
-        ? p.wholesale_threshold_kg_tiktok
-        : p.wholesale_threshold_kg;
-  return batas ?? pengaturanHarga.wholesale_threshold_kg;
+        ? p.wholesale_threshold_qty_tiktok
+        : p.wholesale_threshold_qty;
+  return batas ?? pengaturanHarga.wholesale_threshold_qty;
 }
 
-/** Grosir bila berat baris (jumlah × ukuran) LEBIH dari batas produk di kanal itu; dalam gram bulat karena desimal float bisa meleset tepat di batas. */
+/** Grosir bila jumlah pack (semua batch digabung) LEBIH dari batas produk di kanal itu; tepat di batas masih ecer. */
 function pakaiGrosir(p: Product, kanal: Kanal, qty: number): boolean {
-  if (p.variant_size === null || hargaKanal(p, kanal).grosir === null) return false;
-  return Math.round(p.variant_size * 1000) * qty > Math.round(batasGrosirKg(p, kanal) * 1000);
+  return hargaKanal(p, kanal).grosir !== null && qty > batasGrosirPack(p, kanal);
 }
 
 /** Harga satu pack di kanal itu; `qty` 0 memberi harga ecer. Kalau beda dari backend, layar tidak cocok dengan struk. */
@@ -523,13 +522,12 @@ function ringkasBatch(p: Product): string {
               data-satu-batch={satuBatch ? '' : undefined}
               data-pid={p.id}
               data-harga={hargaDi(p, kanalIsi, jumlah)}
-              data-batas-gram-toko={Math.round(batasGrosirKg(p, 'toko') * 1000)}
-              data-batas-gram-shopee={Math.round(batasGrosirKg(p, 'shopee') * 1000)}
-              data-batas-gram-tiktok={Math.round(batasGrosirKg(p, 'tiktok') * 1000)}
+              data-batas-toko={batasGrosirPack(p, 'toko')}
+              data-batas-shopee={batasGrosirPack(p, 'shopee')}
+              data-batas-tiktok={batasGrosirPack(p, 'tiktok')}
               data-grosir-toko={p.price_wholesale ?? undefined}
               data-grosir-shopee={p.price_shopee_wholesale ?? undefined}
               data-grosir-tiktok={p.price_tiktok_wholesale ?? undefined}
-              data-ukuran-g={p.variant_size === null ? undefined : Math.round(p.variant_size * 1000)}
               data-harga-toko={hargaDi(p, 'toko')}
               data-harga-shopee={hargaDi(p, 'shopee')}
               data-harga-tiktok={hargaDi(p, 'tiktok')}
@@ -614,7 +612,7 @@ function ringkasBatch(p: Product): string {
                         <dd class="tabular-nums">
                           ecer {rupiah(h.ecer)}
                           {h.grosir !== null &&
-                            ` · grosir ${rupiah(h.grosir)} bila > ${kg(batasGrosirKg(p, k.nilai))}`}
+                            ` · grosir ${rupiah(h.grosir)} bila > ${batasGrosirPack(p, k.nilai)} pack`}
                         </dd>
                       </>
                     );
@@ -1574,7 +1572,7 @@ function ringkasBatch(p: Product): string {
       });
     }
 
-    /** Sama dengan `SalesChannel::harga` di `pos/service.rs` dan `hargaDi` di frontmatter: kanal terpilih memakai grosirnya bila berat baris (jumlah semua batch × ukuran, gram bulat) melebihi batas produk itu di kanal tersebut. */
+    /** Sama dengan `SalesChannel::harga` di `pos/service.rs` dan `hargaDi` di frontmatter: kanal terpilih memakai grosirnya bila jumlah pack baris (semua batch) melebihi batas produk itu di kanal tersebut. */
     function terapkanGrosir() {
       var pilihan = kanal();
       var akhiran = pilihan.charAt(0).toUpperCase() + pilihan.slice(1);
@@ -1585,10 +1583,8 @@ function ringkasBatch(p: Product): string {
         if (ecer === undefined) return;
 
         var grosir = row.dataset['grosir' + akhiran];
-        var ukuranGram = parseInt(row.dataset.ukuranG || '0', 10);
-        var batasGram = parseInt(row.dataset['batasGram' + akhiran] || '0', 10);
-        var dipakai =
-          grosir !== undefined && ukuranGram > 0 && jumlahBaris(row) * ukuranGram > batasGram;
+        var batas = parseInt(row.dataset['batas' + akhiran] || '0', 10);
+        var dipakai = grosir !== undefined && jumlahBaris(row) > batas;
         var harga = dipakai ? grosir : ecer;
 
         tulisHargaKartu(row, harga);

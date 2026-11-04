@@ -30,9 +30,9 @@ mod judul {
     pub const GROSIR_SHOPEE: &str = "harga grosir shopee";
     pub const TIKTOK: &str = "harga ecer tokopedia";
     pub const GROSIR_TIKTOK: &str = "harga grosir tokopedia";
-    pub const BATAS: &str = "batas grosir walk in (kg)";
-    pub const BATAS_SHOPEE: &str = "batas grosir shopee (kg)";
-    pub const BATAS_TIKTOK: &str = "batas grosir tokopedia (kg)";
+    pub const BATAS: &str = "batas grosir walk in (pack)";
+    pub const BATAS_SHOPEE: &str = "batas grosir shopee (pack)";
+    pub const BATAS_TIKTOK: &str = "batas grosir tokopedia (pack)";
     pub const BATAS_STOK: &str = "batas stok menipis";
     pub const STATUS: &str = "status";
 
@@ -63,9 +63,9 @@ pub enum Kolom {
     GrosirShopee(Option<Decimal>),
     Tiktok(Option<Decimal>),
     GrosirTiktok(Option<Decimal>),
-    Batas(Option<Decimal>),
-    BatasShopee(Option<Decimal>),
-    BatasTiktok(Option<Decimal>),
+    Batas(Option<i32>),
+    BatasShopee(Option<i32>),
+    BatasTiktok(Option<i32>),
     BatasStok(i32),
     Aktif(bool),
 }

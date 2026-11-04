@@ -17,13 +17,10 @@ pub fn router() -> Router<AppState> {
         .route("/settings/shopee-fees", patch(update_shopee_fees))
 }
 
-/// Batas atas mengikuti NUMERIC(8,3) di kolomnya; lebih dari itu galat database yang tak terbaca pemilik.
-const BATAS_MAKS_KG: Decimal = Decimal::from_parts(99_999_999, 0, 0, false, 3);
-
 #[derive(Debug, Serialize)]
 struct PricingSettings {
-    /// Baris kanal toko memakai harga grosir bila berat baris (qty x ukuran pack) LEBIH dari angka ini.
-    wholesale_threshold_kg: Decimal,
+    /// Kanal toko memakai harga grosir bila jumlah pack LEBIH dari angka ini.
+    wholesale_threshold_qty: i32,
     /// Pecahan (0,1725 = 17,25%) komisi Shopee yang dipakai checkout bila kasir tak menyebut persen sendiri.
     shopee_commission_percent: Decimal,
     /// Pecahan biaya layanan Shopee (program opsional), bawaan nol.
@@ -37,7 +34,7 @@ struct PricingSettings {
 async fn baca_pricing(state: &AppState) -> AppResult<PricingSettings> {
     let biaya = repo::biaya_shopee(&state.pool).await?;
     Ok(PricingSettings {
-        wholesale_threshold_kg: repo::batas_grosir_kg(&state.pool).await?,
+        wholesale_threshold_qty: repo::batas_grosir_qty(&state.pool).await?,
         shopee_commission_percent: biaya.komisi,
         shopee_service_percent: biaya.layanan,
         withholding_tax_percent: service::pph_umkm_persen(),
@@ -55,7 +52,7 @@ async fn get_pricing(
 
 #[derive(Debug, Deserialize)]
 struct PricingUpdateRequest {
-    wholesale_threshold_kg: Decimal,
+    wholesale_threshold_qty: i32,
 }
 
 async fn update_pricing(
@@ -65,14 +62,14 @@ async fn update_pricing(
 ) -> AppResult<Json<PricingSettings>> {
     user.require(&[Role::Owner])?;
 
-    let batas = body.wholesale_threshold_kg;
-    if batas <= Decimal::ZERO || batas > BATAS_MAKS_KG {
+    let batas = body.wholesale_threshold_qty;
+    if batas <= 0 {
         return Err(AppError::bad_request(
-            "Batas grosir harus lebih dari 0 dan paling banyak 99.999,999 kg.",
+            "Batas grosir harus bilangan bulat lebih dari 0 pack.",
         ));
     }
 
-    repo::ubah_batas_grosir_kg(&state.pool, batas, user.id).await?;
+    repo::ubah_batas_grosir_qty(&state.pool, batas, user.id).await?;
 
     Ok(Json(baca_pricing(&state).await?))
 }

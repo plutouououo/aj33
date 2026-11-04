@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,\n            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_kg,\n            p.wholesale_threshold_kg_shopee, p.wholesale_threshold_kg_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url,\n            (SELECT min(b.expiry_date) FROM product_batches b\n             WHERE b.product_id = p.id AND b.remaining_qty > 0)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.id = $1\n        ",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,\n            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_qty,\n            p.wholesale_threshold_qty_shopee, p.wholesale_threshold_qty_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url,\n            (SELECT min(b.expiry_date) FROM product_batches b\n             WHERE b.product_id = p.id AND b.remaining_qty > 0)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        WHERE p.parent_id = $1\n        ORDER BY p.variant_grade NULLS FIRST, p.variant_size NULLS FIRST, p.name\n        ",
   "describe": {
     "columns": [
       {
@@ -95,18 +95,18 @@
       },
       {
         "ordinal": 18,
-        "name": "wholesale_threshold_kg",
-        "type_info": "Numeric"
+        "name": "wholesale_threshold_qty",
+        "type_info": "Int4"
       },
       {
         "ordinal": 19,
-        "name": "wholesale_threshold_kg_shopee",
-        "type_info": "Numeric"
+        "name": "wholesale_threshold_qty_shopee",
+        "type_info": "Int4"
       },
       {
         "ordinal": 20,
-        "name": "wholesale_threshold_kg_tiktok",
-        "type_info": "Numeric"
+        "name": "wholesale_threshold_qty_tiktok",
+        "type_info": "Int4"
       },
       {
         "ordinal": 21,
@@ -192,5 +192,5 @@
       false
     ]
   },
-  "hash": "a0d52cbccbcb64e88fb3d8ba4a07bbb1b65d04b14d3d7cd06e4221b47927e179"
+  "hash": "80342f4c4a76d302f15aa245462eb1457e8392cfd456206a17813aef5c6ff37b"
 }

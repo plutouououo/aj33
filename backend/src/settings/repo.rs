@@ -5,23 +5,23 @@ use rust_decimal::Decimal;
 use sqlx::PgExecutor;
 use uuid::Uuid;
 
-pub async fn batas_grosir_kg(db: impl PgExecutor<'_>) -> AppResult<Decimal> {
-    let batas = sqlx::query_scalar!(r#"SELECT wholesale_threshold_kg FROM pricing_settings"#)
+pub async fn batas_grosir_qty(db: impl PgExecutor<'_>) -> AppResult<i32> {
+    let batas = sqlx::query_scalar!(r#"SELECT wholesale_threshold_qty FROM pricing_settings"#)
         .fetch_one(db)
         .await?;
 
     Ok(batas)
 }
 
-pub async fn ubah_batas_grosir_kg(
+pub async fn ubah_batas_grosir_qty(
     db: impl PgExecutor<'_>,
-    batas: Decimal,
+    batas: i32,
     updated_by: Uuid,
 ) -> AppResult<()> {
     sqlx::query!(
         r#"
         UPDATE pricing_settings
-        SET wholesale_threshold_kg = $1, updated_by = $2, updated_at = now()
+        SET wholesale_threshold_qty = $1, updated_by = $2, updated_at = now()
         "#,
         batas,
         updated_by

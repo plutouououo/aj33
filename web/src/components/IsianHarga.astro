@@ -1,13 +1,12 @@
 ---
 /** Isian harga jual per kanal (walk in, Shopee, Tokopedia): ecer, grosir, dan batas grosirnya; dipakai form tambah produk, sunting produk, dan tambah varian, `awalan` membedakan id bila dua form ada di satu halaman. */
 import type { PricingSettings, Product } from '../lib/api';
-import { kg } from '../lib/format';
 
 type KolomHarga = keyof Pick<
   Product,
   'price' | 'price_wholesale' | 'price_shopee' | 'price_shopee_wholesale' | 'price_tiktok' |
-    'price_tiktok_wholesale' | 'wholesale_threshold_kg' | 'wholesale_threshold_kg_shopee' |
-    'wholesale_threshold_kg_tiktok'
+    'price_tiktok_wholesale' | 'wholesale_threshold_qty' | 'wholesale_threshold_qty_shopee' |
+    'wholesale_threshold_qty_tiktok'
 >;
 
 interface Props {
@@ -24,7 +23,7 @@ const KANAL = [
     label: 'Walk in',
     ecer: 'price',
     grosir: 'price_wholesale',
-    batas: 'wholesale_threshold_kg',
+    batas: 'wholesale_threshold_qty',
     ikutEcer: null,
     ikutGrosir: 'ikut ecer',
   },
@@ -32,7 +31,7 @@ const KANAL = [
     label: 'Shopee',
     ecer: 'price_shopee',
     grosir: 'price_shopee_wholesale',
-    batas: 'wholesale_threshold_kg_shopee',
+    batas: 'wholesale_threshold_qty_shopee',
     ikutEcer: 'ikut walk in',
     ikutGrosir: 'ikut ecer Shopee',
   },
@@ -40,7 +39,7 @@ const KANAL = [
     label: 'Tokopedia / TikTok',
     ecer: 'price_tiktok',
     grosir: 'price_tiktok_wholesale',
-    batas: 'wholesale_threshold_kg_tiktok',
+    batas: 'wholesale_threshold_qty_tiktok',
     ikutEcer: 'ikut walk in',
     ikutGrosir: 'ikut ecer Tokopedia',
   },
@@ -83,17 +82,17 @@ const isi = (kolom: KolomHarga): string => String(nilai[kolom] ?? '');
             />
           </div>
           <div>
-            <label class="label" for={`${awalan}${k.batas}`}>Batas grosir (kg)</label>
+            <label class="label" for={`${awalan}${k.batas}`}>Batas grosir (pack)</label>
             <input
               class="kolom"
               id={`${awalan}${k.batas}`}
               name={k.batas}
               type="number"
-              min="0.001"
-              step="any"
-              inputmode="decimal"
+              min="1"
+              step="1"
+              inputmode="numeric"
               value={isi(k.batas)}
-              placeholder={`bawaan ${kg(pengaturan.wholesale_threshold_kg)}`}
+              placeholder={`bawaan ${pengaturan.wholesale_threshold_qty}`}
             />
           </div>
         </div>
@@ -101,7 +100,7 @@ const isi = (kolom: KolomHarga): string => String(nilai[kolom] ?? '');
     ))}
   </div>
   <p class="isian-bantu">
-    Grosir dipakai di kanal itu bila berat satu baris (jumlah × ukuran) lebih dari batas grosirnya.
+    Grosir dipakai di kanal itu bila jumlah pack satu baris lebih dari batas grosirnya.
     Batas yang dikosongkan memakai batas bawaan di Pengaturan › Harga.
   </p>
 </div>

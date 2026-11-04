@@ -43,9 +43,9 @@ pub struct Product {
     pub price_shopee_wholesale: Option<Decimal>,
     pub price_tiktok_wholesale: Option<Decimal>,
     /// Batas grosir produk ini (kg) per kanal; `None` berarti kanal itu memakai batas bawaan di pengaturan.
-    pub wholesale_threshold_kg: Option<Decimal>,
-    pub wholesale_threshold_kg_shopee: Option<Decimal>,
-    pub wholesale_threshold_kg_tiktok: Option<Decimal>,
+    pub wholesale_threshold_qty: Option<i32>,
+    pub wholesale_threshold_qty_shopee: Option<i32>,
+    pub wholesale_threshold_qty_tiktok: Option<i32>,
     pub cost_price: Option<Decimal>,
     pub stock_qty: i32,
     pub low_stock_threshold: i32,
@@ -172,8 +172,8 @@ async fn cari_produk(
             p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,
-            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_kg,
-            p.wholesale_threshold_kg_shopee, p.wholesale_threshold_kg_tiktok, p.cost_price,
+            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_qty,
+            p.wholesale_threshold_qty_shopee, p.wholesale_threshold_qty_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
@@ -279,8 +279,8 @@ pub async fn find_product(pool: &PgPool, id: Uuid) -> AppResult<Option<Product>>
             p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,
-            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_kg,
-            p.wholesale_threshold_kg_shopee, p.wholesale_threshold_kg_tiktok, p.cost_price,
+            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_qty,
+            p.wholesale_threshold_qty_shopee, p.wholesale_threshold_qty_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
@@ -310,8 +310,8 @@ pub async fn list_variants(pool: &PgPool, parent_id: Uuid) -> AppResult<Vec<Prod
             p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,
             (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS "variant_count!",
             p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,
-            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_kg,
-            p.wholesale_threshold_kg_shopee, p.wholesale_threshold_kg_tiktok, p.cost_price,
+            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_qty,
+            p.wholesale_threshold_qty_shopee, p.wholesale_threshold_qty_tiktok, p.cost_price,
             p.stock_qty, p.low_stock_threshold,
             p.image_url,
             (SELECT min(b.expiry_date) FROM product_batches b
@@ -348,9 +348,9 @@ pub struct NewProduct {
     pub price_tiktok: Option<Decimal>,
     pub price_shopee_wholesale: Option<Decimal>,
     pub price_tiktok_wholesale: Option<Decimal>,
-    pub wholesale_threshold_kg: Option<Decimal>,
-    pub wholesale_threshold_kg_shopee: Option<Decimal>,
-    pub wholesale_threshold_kg_tiktok: Option<Decimal>,
+    pub wholesale_threshold_qty: Option<i32>,
+    pub wholesale_threshold_qty_shopee: Option<i32>,
+    pub wholesale_threshold_qty_tiktok: Option<i32>,
     pub cost_price: Option<Decimal>,
     pub low_stock_threshold: i32,
     pub image_url: Option<String>,
@@ -369,8 +369,8 @@ pub async fn insert_product(
         INSERT INTO products
             (name, seo_name, sku, brand_name, product_type, variant_grade, variant_size,
              parent_id, category_id, price, price_wholesale, price_shopee, price_tiktok,
-             price_shopee_wholesale, price_tiktok_wholesale, wholesale_threshold_kg,
-             wholesale_threshold_kg_shopee, wholesale_threshold_kg_tiktok,
+             price_shopee_wholesale, price_tiktok_wholesale, wholesale_threshold_qty,
+             wholesale_threshold_qty_shopee, wholesale_threshold_qty_tiktok,
              cost_price, stock_qty, low_stock_threshold, image_url, is_active, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
                 $18, $19, 0, $20, $21, $22, $23)
@@ -391,9 +391,9 @@ pub async fn insert_product(
         input.price_tiktok,
         input.price_shopee_wholesale,
         input.price_tiktok_wholesale,
-        input.wholesale_threshold_kg,
-        input.wholesale_threshold_kg_shopee,
-        input.wholesale_threshold_kg_tiktok,
+        input.wholesale_threshold_qty,
+        input.wholesale_threshold_qty_shopee,
+        input.wholesale_threshold_qty_tiktok,
         input.cost_price,
         input.low_stock_threshold,
         input.image_url,
@@ -450,9 +450,9 @@ pub struct ProductPatch {
     pub price_tiktok: Ubah<Decimal>,
     pub price_shopee_wholesale: Ubah<Decimal>,
     pub price_tiktok_wholesale: Ubah<Decimal>,
-    pub wholesale_threshold_kg: Ubah<Decimal>,
-    pub wholesale_threshold_kg_shopee: Ubah<Decimal>,
-    pub wholesale_threshold_kg_tiktok: Ubah<Decimal>,
+    pub wholesale_threshold_qty: Ubah<i32>,
+    pub wholesale_threshold_qty_shopee: Ubah<i32>,
+    pub wholesale_threshold_qty_tiktok: Ubah<i32>,
     pub cost_price: Ubah<Decimal>,
     pub low_stock_threshold: Option<i32>,
     pub image_url: Ubah<String>,
@@ -472,11 +472,11 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
     let (ubah_tiktok, price_tiktok) = salinan(&patch.price_tiktok);
     let (ubah_grosir_shopee, price_shopee_wholesale) = salinan(&patch.price_shopee_wholesale);
     let (ubah_grosir_tiktok, price_tiktok_wholesale) = salinan(&patch.price_tiktok_wholesale);
-    let (ubah_batas, wholesale_threshold_kg) = salinan(&patch.wholesale_threshold_kg);
-    let (ubah_batas_shopee, wholesale_threshold_kg_shopee) =
-        salinan(&patch.wholesale_threshold_kg_shopee);
-    let (ubah_batas_tiktok, wholesale_threshold_kg_tiktok) =
-        salinan(&patch.wholesale_threshold_kg_tiktok);
+    let (ubah_batas, wholesale_threshold_qty) = salinan(&patch.wholesale_threshold_qty);
+    let (ubah_batas_shopee, wholesale_threshold_qty_shopee) =
+        salinan(&patch.wholesale_threshold_qty_shopee);
+    let (ubah_batas_tiktok, wholesale_threshold_qty_tiktok) =
+        salinan(&patch.wholesale_threshold_qty_tiktok);
     let (ubah_modal, cost_price) = salinan(&patch.cost_price);
     let (ubah_gambar, image_url) = teks(&patch.image_url);
 
@@ -502,9 +502,9 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
             price_wholesale     = CASE WHEN $28::bool THEN $29::numeric ELSE price_wholesale END,
             price_shopee_wholesale = CASE WHEN $30::bool THEN $31::numeric ELSE price_shopee_wholesale END,
             price_tiktok_wholesale = CASE WHEN $32::bool THEN $33::numeric ELSE price_tiktok_wholesale END,
-            wholesale_threshold_kg = CASE WHEN $34::bool THEN $35::numeric ELSE wholesale_threshold_kg END,
-            wholesale_threshold_kg_shopee = CASE WHEN $36::bool THEN $37::numeric ELSE wholesale_threshold_kg_shopee END,
-            wholesale_threshold_kg_tiktok = CASE WHEN $38::bool THEN $39::numeric ELSE wholesale_threshold_kg_tiktok END,
+            wholesale_threshold_qty = CASE WHEN $34::bool THEN $35::int ELSE wholesale_threshold_qty END,
+            wholesale_threshold_qty_shopee = CASE WHEN $36::bool THEN $37::int ELSE wholesale_threshold_qty_shopee END,
+            wholesale_threshold_qty_tiktok = CASE WHEN $38::bool THEN $39::int ELSE wholesale_threshold_qty_tiktok END,
             updated_at          = now()
         WHERE id = $1
         "#,
@@ -542,11 +542,11 @@ pub async fn update_product(pool: &PgPool, id: Uuid, patch: &ProductPatch) -> Ap
         ubah_grosir_tiktok,
         price_tiktok_wholesale,
         ubah_batas,
-        wholesale_threshold_kg,
+        wholesale_threshold_qty,
         ubah_batas_shopee,
-        wholesale_threshold_kg_shopee,
+        wholesale_threshold_qty_shopee,
         ubah_batas_tiktok,
-        wholesale_threshold_kg_tiktok
+        wholesale_threshold_qty_tiktok
     )
     .execute(pool)
     .await?;

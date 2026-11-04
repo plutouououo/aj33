@@ -117,7 +117,7 @@ export interface Product {
   parent_id: string | null;
   /** Induk yang punya varian tidak dijual langsung — variannya yang dijual. */
   variant_count: number;
-  /** Harga ecer per pack: yang dipakai kasir bila berat baris tak melebihi batas grosir, sekaligus rujukan saat harga kanal kosong. */
+  /** Harga ecer per pack: yang dipakai kasir bila jumlah pack tak melebihi batas grosir, sekaligus rujukan saat harga kanal kosong. */
   price: number;
   /** Harga grosir per pack kanal toko (walk in). `null` berarti belum diatur -- kasir tetap memakai harga ecer. */
   price_wholesale: number | null;
@@ -128,10 +128,10 @@ export interface Product {
   /** Grosir per kanal marketplace; `null` berarti kasir memakai harga ecer kanal itu, bukan grosir toko. */
   price_shopee_wholesale: number | null;
   price_tiktok_wholesale: number | null;
-  /** Batas grosir produk ini (kg) per kanal: walk in, Shopee, Tokopedia; `null` berarti kanal itu memakai batas bawaan di pengaturan. */
-  wholesale_threshold_kg: number | null;
-  wholesale_threshold_kg_shopee: number | null;
-  wholesale_threshold_kg_tiktok: number | null;
+  /** Batas grosir produk ini (jumlah pack) per kanal: walk in, Shopee, Tokopedia; `null` berarti kanal itu memakai batas bawaan di pengaturan. */
+  wholesale_threshold_qty: number | null;
+  wholesale_threshold_qty_shopee: number | null;
+  wholesale_threshold_qty_tiktok: number | null;
   cost_price: number | null;
   stock_qty: number;
   low_stock_threshold: number;
@@ -180,9 +180,9 @@ export interface Category {
   name: string;
 }
 
-/** Pengaturan harga: batas grosir bawaan (baris dihargai grosir bila berat baris, jumlah × ukuran pack, LEBIH dari angka ini) untuk produk yang tak mengatur batasnya sendiri, dan persen biaya Shopee bawaan. */
+/** Pengaturan harga: batas grosir bawaan (baris dihargai grosir bila jumlah pack LEBIH dari angka ini) untuk produk yang tak mengatur batasnya sendiri, dan persen biaya Shopee bawaan. */
 export interface PricingSettings {
-  wholesale_threshold_kg: number;
+  wholesale_threshold_qty: number;
   /** Pecahan (0,1725 = 17,25%), bukan persen. */
   shopee_commission_percent: number;
   shopee_service_percent: number;
@@ -629,7 +629,7 @@ export interface ImportRow {
   price_shopee_wholesale: number | null;
   price_tiktok: number | null;
   price_tiktok_wholesale: number | null;
-  /** Teks batas grosir per kanal apa adanya dari berkas (mis. "20 kg"). */
+  /** Teks batas grosir per kanal apa adanya dari berkas (mis. "20"). */
   wholesale_threshold: string | null;
   wholesale_threshold_shopee: string | null;
   wholesale_threshold_tiktok: string | null;

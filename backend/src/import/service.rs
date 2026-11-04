@@ -396,7 +396,7 @@ async fn proses_baris(
 ) -> AppResult<Uuid> {
     let (harga, _) = parse::harga_efektif(row.lowest_price, row.cost, row.margin_pct);
     // Tak terbaca sudah jadi WARN saat review; diperlakukan sama dengan kosong.
-    let batas = |teks: &Option<String>| teks.as_deref().and_then(parse::parse_ukuran_kg);
+    let batas = |teks: &Option<String>| teks.as_deref().and_then(parse::parse_batas_pack);
     let batas_grosir = batas(&row.wholesale_threshold);
     let batas_grosir_shopee = batas(&row.wholesale_threshold_shopee);
     let batas_grosir_tiktok = batas(&row.wholesale_threshold_tiktok);
@@ -427,9 +427,9 @@ async fn proses_baris(
                     price_tiktok: row.price_tiktok,
                     price_shopee_wholesale: row.price_shopee_wholesale,
                     price_tiktok_wholesale: row.price_tiktok_wholesale,
-                    wholesale_threshold_kg: batas_grosir,
-                    wholesale_threshold_kg_shopee: batas_grosir_shopee,
-                    wholesale_threshold_kg_tiktok: batas_grosir_tiktok,
+                    wholesale_threshold_qty: batas_grosir,
+                    wholesale_threshold_qty_shopee: batas_grosir_shopee,
+                    wholesale_threshold_qty_tiktok: batas_grosir_tiktok,
                     cost_price: row.cost,
                     is_active,
                     low_stock_threshold: None,
@@ -467,9 +467,9 @@ async fn proses_baris(
                     price_shopee_wholesale: row.price_shopee_wholesale.map(Some),
                     price_tiktok: row.price_tiktok.map(Some),
                     price_tiktok_wholesale: row.price_tiktok_wholesale.map(Some),
-                    wholesale_threshold_kg: batas_grosir.map(Some),
-                    wholesale_threshold_kg_shopee: batas_grosir_shopee.map(Some),
-                    wholesale_threshold_kg_tiktok: batas_grosir_tiktok.map(Some),
+                    wholesale_threshold_qty: batas_grosir.map(Some),
+                    wholesale_threshold_qty_shopee: batas_grosir_shopee.map(Some),
+                    wholesale_threshold_qty_tiktok: batas_grosir_tiktok.map(Some),
                     cost_price: row.cost.map(Some),
                     category_id: row.category_id.map(Some),
                     is_active,

@@ -61,7 +61,7 @@ pub fn map_header(header: &str) -> Option<Field> {
         "batas grosir"
         | "batas grosir walk in"
         | "wholesale_threshold"
-        | "wholesale_threshold_kg" => Some(Field::WholesaleThreshold),
+        | "wholesale_threshold_qty" => Some(Field::WholesaleThreshold),
         "batas grosir shopee" | "wholesale_threshold_shopee" => {
             Some(Field::WholesaleThresholdShopee)
         }
@@ -170,6 +170,17 @@ pub fn parse_ukuran_kg(raw: &str) -> Option<Decimal> {
 
     let nilai = parse_money(angka)? / Decimal::from(pembagi);
     (nilai > Decimal::ZERO).then_some(nilai)
+}
+
+/// Batas grosir dalam pack: bilangan bulat lebih dari 0, boleh diakhiri "pack" ("20 pack"); desimal ditolak supaya "2,5" tak diam-diam dibulatkan.
+pub fn parse_batas_pack(raw: &str) -> Option<i32> {
+    let kecil = raw.trim().to_lowercase();
+    let angka = kecil.strip_suffix("pack").unwrap_or(&kecil);
+    let nilai = parse_money(angka)?;
+    if nilai.fract() != Decimal::ZERO || nilai <= Decimal::ZERO {
+        return None;
+    }
+    i32::try_from(nilai).ok()
 }
 
 /// Buang "%" lalu `parse_money`; hasil angka persen apa adanya ("17,25%" → 17.25), bukan pecahan (pemanggil membagi 100, lihat `harga_efektif`).
@@ -389,12 +400,12 @@ pub fn validate_row(row: &ParsedRow, sku_duplikat: bool, kategori_dikenal: bool)
     ] {
         if batas
             .as_deref()
-            .is_some_and(|b| parse_ukuran_kg(b).is_none())
+            .is_some_and(|b| parse_batas_pack(b).is_none())
         {
             isu.push(warn(
                 kolom,
                 format!(
-                    "Batas grosir {kanal} tidak terbaca sebagai angka kg (mis. \"20 kg\") -- memakai batas bawaan."
+                    "Batas grosir {kanal} tidak terbaca sebagai jumlah pack bulat (mis. \"20\") -- memakai batas bawaan."
                 ),
             ));
         }
@@ -467,7 +478,7 @@ mod tests {
     #[test]
     fn validate_row_batas_grosir_tak_terbaca_adalah_warn_per_kanal() {
         let row = ParsedRow {
-            wholesale_threshold: Some("20 kg".into()),
+            wholesale_threshold: Some("20 pack".into()),
             wholesale_threshold_shopee: Some("banyak".into()),
             ..baris_valid()
         };

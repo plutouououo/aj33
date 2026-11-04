@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT wholesale_threshold_qty FROM pricing_settings",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "wholesale_threshold_qty",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d470bef1188ba0f4cce4dcbaef4e72d97cb892ab033478b6387930c80e293a40"
+}

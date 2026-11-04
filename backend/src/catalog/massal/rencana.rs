@@ -127,6 +127,14 @@ fn kg(sel: &Data) -> Result<Option<Decimal>, String> {
     }
 }
 
+/// Batas grosir dalam jumlah pack: bilangan bulat lebih dari 0.
+fn batas_pack(sel: &Data) -> Result<Option<i32>, String> {
+    match bulat(sel)? {
+        Some(v) if v <= 0 => Err("harus lebih dari 0.".to_string()),
+        hasil => Ok(hasil),
+    }
+}
+
 fn bulat(sel: &Data) -> Result<Option<i32>, String> {
     match angka(sel)? {
         None => Ok(None),
@@ -180,6 +188,10 @@ fn tampil_angka(nilai: &Option<Decimal>) -> String {
     nilai.map(|v| v.normalize().to_string()).unwrap_or_default()
 }
 
+fn tampil_bulat(nilai: &Option<i32>) -> String {
+    nilai.map(|v| v.to_string()).unwrap_or_default()
+}
+
 fn tampil_status(aktif: bool) -> String {
     if aktif { "aktif" } else { "nonaktif" }.to_string()
 }
@@ -200,9 +212,9 @@ struct Nilai {
     grosir_shopee: Option<Decimal>,
     tiktok: Option<Decimal>,
     grosir_tiktok: Option<Decimal>,
-    batas: Option<Decimal>,
-    batas_shopee: Option<Decimal>,
-    batas_tiktok: Option<Decimal>,
+    batas: Option<i32>,
+    batas_shopee: Option<i32>,
+    batas_tiktok: Option<i32>,
     batas_stok: i32,
     aktif: bool,
 }
@@ -247,9 +259,9 @@ impl Nilai {
             grosir_shopee: p.price_shopee_wholesale,
             tiktok: p.price_tiktok,
             grosir_tiktok: p.price_tiktok_wholesale,
-            batas: p.wholesale_threshold_kg,
-            batas_shopee: p.wholesale_threshold_kg_shopee,
-            batas_tiktok: p.wholesale_threshold_kg_tiktok,
+            batas: p.wholesale_threshold_qty,
+            batas_shopee: p.wholesale_threshold_qty_shopee,
+            batas_tiktok: p.wholesale_threshold_qty_tiktok,
             batas_stok: p.low_stock_threshold,
             aktif: p.is_active,
         }
@@ -330,14 +342,14 @@ fn baca_nilai(
             isi(galat, judul, uang(sel), tujuan);
         }
     }
-    let opsi_kg: [(&str, &mut Option<Decimal>); 3] = [
+    let opsi_batas: [(&str, &mut Option<i32>); 3] = [
         (j::BATAS, &mut n.batas),
         (j::BATAS_SHOPEE, &mut n.batas_shopee),
         (j::BATAS_TIKTOK, &mut n.batas_tiktok),
     ];
-    for (judul, tujuan) in opsi_kg {
+    for (judul, tujuan) in opsi_batas {
         if let Some(sel) = lembar.sel(baris, judul) {
-            isi(galat, judul, kg(sel), tujuan);
+            isi(galat, judul, batas_pack(sel), tujuan);
         }
     }
     if let Some(sel) = lembar.sel(baris, j::BATAS_STOK) {
@@ -369,6 +381,7 @@ fn baca_nilai(
 }
 
 type Bungkus = fn(Option<Decimal>) -> Kolom;
+type BungkusBatas = fn(Option<i32>) -> Kolom;
 
 /// Beda `lama` dan `baru` sebagai kolom yang ditulis beserta isi tampilan untuk pratinjau.
 fn selisih(
@@ -456,7 +469,7 @@ fn selisih(
             Kolom::Harga(baru.harga),
         );
     }
-    let opsional: [(&str, Option<Decimal>, Option<Decimal>, Bungkus); 8] = [
+    let opsional: [(&str, Option<Decimal>, Option<Decimal>, Bungkus); 5] = [
         (j::GROSIR, lama.grosir, baru.grosir, Kolom::Grosir),
         (j::SHOPEE, lama.shopee, baru.shopee, Kolom::Shopee),
         (
@@ -472,6 +485,18 @@ fn selisih(
             baru.grosir_tiktok,
             Kolom::GrosirTiktok,
         ),
+    ];
+    for (judul, dulu, kini, bungkus) in opsional {
+        if dulu != kini {
+            tambah(
+                judul,
+                tampil_angka(&dulu),
+                tampil_angka(&kini),
+                bungkus(kini),
+            );
+        }
+    }
+    let batas: [(&str, Option<i32>, Option<i32>, BungkusBatas); 3] = [
         (j::BATAS, lama.batas, baru.batas, Kolom::Batas),
         (
             j::BATAS_SHOPEE,
@@ -486,12 +511,12 @@ fn selisih(
             Kolom::BatasTiktok,
         ),
     ];
-    for (judul, dulu, kini, bungkus) in opsional {
+    for (judul, dulu, kini, bungkus) in batas {
         if dulu != kini {
             tambah(
                 judul,
-                tampil_angka(&dulu),
-                tampil_angka(&kini),
+                tampil_bulat(&dulu),
+                tampil_bulat(&kini),
                 bungkus(kini),
             );
         }
@@ -834,9 +859,9 @@ mod tests {
             price_tiktok: None,
             price_shopee_wholesale: None,
             price_tiktok_wholesale: None,
-            wholesale_threshold_kg: None,
-            wholesale_threshold_kg_shopee: None,
-            wholesale_threshold_kg_tiktok: None,
+            wholesale_threshold_qty: None,
+            wholesale_threshold_qty_shopee: None,
+            wholesale_threshold_qty_tiktok: None,
             cost_price: None,
             stock_qty: 0,
             low_stock_threshold: 5,

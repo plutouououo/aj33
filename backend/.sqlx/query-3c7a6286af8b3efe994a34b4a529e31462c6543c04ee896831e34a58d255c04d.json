@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE pricing_settings\n        SET wholesale_threshold_qty = $1, updated_by = $2, updated_at = now()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3c7a6286af8b3efe994a34b4a529e31462c6543c04ee896831e34a58d255c04d"
+}

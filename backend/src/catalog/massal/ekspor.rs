@@ -28,6 +28,10 @@ fn angka(nilai: Option<Decimal>) -> Sel {
         .map_or(Sel::Kosong, Sel::Angka)
 }
 
+fn bulat(nilai: Option<i32>) -> Sel {
+    nilai.map_or(Sel::Kosong, |v| Sel::Angka(f64::from(v)))
+}
+
 fn galat(err: XlsxError) -> AppError {
     AppError::internal(format!("Gagal menulis berkas xlsx: {err}"))
 }
@@ -128,9 +132,9 @@ pub fn utama(produk: &[Product]) -> AppResult<Vec<u8>> {
                 angka(p.price_shopee_wholesale),
                 angka(p.price_tiktok),
                 angka(p.price_tiktok_wholesale),
-                angka(p.wholesale_threshold_kg),
-                angka(p.wholesale_threshold_kg_shopee),
-                angka(p.wholesale_threshold_kg_tiktok),
+                bulat(p.wholesale_threshold_qty),
+                bulat(p.wholesale_threshold_qty_shopee),
+                bulat(p.wholesale_threshold_qty_tiktok),
                 Sel::Angka(f64::from(p.low_stock_threshold)),
                 Sel::Teks(if p.is_active { "aktif" } else { "nonaktif" }.to_string()),
             ]

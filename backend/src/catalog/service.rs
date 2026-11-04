@@ -27,9 +27,9 @@ pub struct CreateProductInput {
     pub price_tiktok: Option<Decimal>,
     pub price_shopee_wholesale: Option<Decimal>,
     pub price_tiktok_wholesale: Option<Decimal>,
-    pub wholesale_threshold_kg: Option<Decimal>,
-    pub wholesale_threshold_kg_shopee: Option<Decimal>,
-    pub wholesale_threshold_kg_tiktok: Option<Decimal>,
+    pub wholesale_threshold_qty: Option<i32>,
+    pub wholesale_threshold_qty_shopee: Option<i32>,
+    pub wholesale_threshold_qty_tiktok: Option<i32>,
     pub cost_price: Option<Decimal>,
     pub is_active: bool,
     pub low_stock_threshold: Option<i32>,
@@ -60,9 +60,9 @@ pub(crate) async fn create_product(
         price_tiktok_wholesale: input.price_tiktok_wholesale,
     })?;
     periksa_ukuran(input.variant_size)?;
-    periksa_batas_grosir(input.wholesale_threshold_kg)?;
-    periksa_batas_grosir(input.wholesale_threshold_kg_shopee)?;
-    periksa_batas_grosir(input.wholesale_threshold_kg_tiktok)?;
+    periksa_batas_grosir(input.wholesale_threshold_qty)?;
+    periksa_batas_grosir(input.wholesale_threshold_qty_shopee)?;
+    periksa_batas_grosir(input.wholesale_threshold_qty_tiktok)?;
     if input.stock_qty < 0 {
         return Err(AppError::bad_request("Stok awal tidak boleh negatif."));
     }
@@ -120,9 +120,9 @@ pub(crate) async fn create_product(
             price_tiktok: input.price_tiktok,
             price_shopee_wholesale: input.price_shopee_wholesale,
             price_tiktok_wholesale: input.price_tiktok_wholesale,
-            wholesale_threshold_kg: input.wholesale_threshold_kg,
-            wholesale_threshold_kg_shopee: input.wholesale_threshold_kg_shopee,
-            wholesale_threshold_kg_tiktok: input.wholesale_threshold_kg_tiktok,
+            wholesale_threshold_qty: input.wholesale_threshold_qty,
+            wholesale_threshold_qty_shopee: input.wholesale_threshold_qty_shopee,
+            wholesale_threshold_qty_tiktok: input.wholesale_threshold_qty_tiktok,
             cost_price: input.cost_price,
             is_active: input.is_active,
             low_stock_threshold: input.low_stock_threshold.unwrap_or(5),
@@ -174,9 +174,9 @@ pub(crate) async fn update_product(
             .unwrap_or(sekarang.price_tiktok_wholesale),
     })?;
     periksa_ukuran(patch.variant_size.flatten())?;
-    periksa_batas_grosir(patch.wholesale_threshold_kg.flatten())?;
-    periksa_batas_grosir(patch.wholesale_threshold_kg_shopee.flatten())?;
-    periksa_batas_grosir(patch.wholesale_threshold_kg_tiktok.flatten())?;
+    periksa_batas_grosir(patch.wholesale_threshold_qty.flatten())?;
+    periksa_batas_grosir(patch.wholesale_threshold_qty_shopee.flatten())?;
+    periksa_batas_grosir(patch.wholesale_threshold_qty_tiktok.flatten())?;
 
     if let Some(Some(category_id)) = patch.category_id {
         if !repo::category_ada(&state.pool, category_id).await? {
@@ -193,13 +193,10 @@ pub(crate) async fn ambil_produk(state: &AppState, id: Uuid) -> AppResult<Produc
         .ok_or_else(|| AppError::not_found("Produk tidak ditemukan."))
 }
 
-/// Batas atas mengikuti NUMERIC(8,3) di kolomnya; lebih dari itu galat database yang tak terbaca pemilik.
-const BATAS_GROSIR_MAKS_KG: Decimal = Decimal::from_parts(99_999_999, 0, 0, false, 3);
-
-fn periksa_batas_grosir(batas: Option<Decimal>) -> AppResult<()> {
-    if batas.is_some_and(|b| b <= Decimal::ZERO || b > BATAS_GROSIR_MAKS_KG) {
+fn periksa_batas_grosir(batas: Option<i32>) -> AppResult<()> {
+    if batas.is_some_and(|b| b <= 0) {
         return Err(AppError::bad_request(
-            "Batas grosir harus lebih dari 0 dan paling banyak 99.999,999 kg.",
+            "Batas grosir harus bilangan bulat lebih dari 0 pack.",
         ));
     }
     Ok(())

@@ -1,9 +1,9 @@
 ---
-/** Pengaturan harga: batas grosir bawaan untuk produk yang tak mengatur batasnya sendiri (berat baris lebih dari batas memakai harga grosir kanalnya) dan persen komisi/layanan Shopee yang jadi bawaan kasir. */
+/** Pengaturan harga: batas grosir bawaan untuk produk yang tak mengatur batasnya sendiri (jumlah pack lebih dari batas memakai harga grosir kanalnya) dan persen komisi/layanan Shopee yang jadi bawaan kasir. */
 import Galat from '../../components/Galat.astro';
 import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type PricingSettings } from '../../lib/api';
-import { kg, rupiah } from '../../lib/format';
+import { rupiah } from '../../lib/format';
 import { pesanDari, sesudahAksi } from '../../lib/pesan';
 
 const user = Astro.locals.user!;
@@ -47,17 +47,17 @@ if (Astro.request.method === 'POST') {
       }
     }
   } else {
-    isiBatas = String(form.get('wholesale_threshold_kg') ?? '').trim();
+    isiBatas = String(form.get('wholesale_threshold_qty') ?? '').trim();
     const batas = Number(isiBatas);
 
-    if (isiBatas === '' || !Number.isFinite(batas) || batas <= 0) {
-      galat = 'Batas grosir harus berupa angka lebih dari 0.';
+    if (isiBatas === '' || !Number.isInteger(batas) || batas <= 0) {
+      galat = 'Batas grosir harus bilangan bulat lebih dari 0 pack.';
     } else {
       try {
         await api<PricingSettings>('/settings/pricing', {
           method: 'PATCH',
           token,
-          body: { wholesale_threshold_kg: batas },
+          body: { wholesale_threshold_qty: batas },
         });
         return Astro.redirect(sesudahAksi(Astro.url, 'simpan'), 303);
       } catch (err) {
@@ -92,21 +92,21 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
     </p>
 
     <div class="isian isian-pendek">
-      <label class="label" for="wholesale_threshold_kg">Grosir bila lebih dari (kg)</label>
+      <label class="label" for="wholesale_threshold_qty">Grosir bila lebih dari (pack)</label>
       <input
         class="kolom"
-        id="wholesale_threshold_kg"
-        name="wholesale_threshold_kg"
+        id="wholesale_threshold_qty"
+        name="wholesale_threshold_qty"
         type="number"
-        min="0.001"
-        step="any"
-        inputmode="decimal"
-        value={isiBatas ?? String(pengaturan.wholesale_threshold_kg)}
+        min="1"
+        step="1"
+        inputmode="numeric"
+        value={isiBatas ?? String(pengaturan.wholesale_threshold_qty)}
         required
       />
       <p class="isian-bantu">
-        Saat ini: lebih dari {kg(pengaturan.wholesale_threshold_kg)} grosir, sampai
-        {kg(pengaturan.wholesale_threshold_kg)} ecer.
+        Saat ini: lebih dari {pengaturan.wholesale_threshold_qty} pack grosir, sampai
+        {pengaturan.wholesale_threshold_qty} pack ecer.
       </p>
     </div>
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,\n            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_kg,\n            p.wholesale_threshold_kg_shopee, p.wholesale_threshold_kg_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url,\n            (SELECT min(b.expiry_date) FROM product_batches b\n             WHERE b.product_id = p.id AND b.remaining_qty > 0)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        -- Rata-rata dua ukuran: `word_similarity` mengangkat nama SEO pendek yang termuat utuh di kueri panjang, `similarity` mengangkat yang mirip keseluruhan.\n        CROSS JOIN LATERAL (\n            SELECT greatest(\n                (word_similarity(p.name, $1) + similarity(p.name, $1)) / 2,\n                (word_similarity(coalesce(p.seo_name, ''), $1) + similarity(coalesce(p.seo_name, ''), $1)) / 2,\n                (word_similarity(coalesce(p.sku, ''), $1) + similarity(coalesce(p.sku, ''), $1)) / 2\n            ) AS nilai\n        ) skor\n        WHERE ($1::text IS NULL\n               OR ($8::bool AND skor.nilai >= $9)\n               OR (NOT $8::bool AND NOT EXISTS (\n                   SELECT 1 FROM regexp_split_to_table($1, '[^[:alnum:]]+') AS kata\n                   WHERE kata <> ''\n                     -- `IS NOT TRUE`, bukan `NOT`: seo_name/sku boleh NULL, dan `NOT (NULL)` bernilai NULL sehingga kata yang tak ada tak terhitung hilang dan produk itu cocok dengan pencarian apa pun.\n                     AND (p.name ILIKE '%' || kata || '%'\n                          OR p.seo_name ILIKE '%' || kata || '%'\n                          OR p.sku ILIKE '%' || kata || '%') IS NOT TRUE)))\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n          AND ($4::uuid IS NULL OR p.parent_id = $4)\n          AND ($5::text IS NULL\n               OR ($5 = 'induk' AND p.parent_id IS NULL)\n               OR ($5 = 'terjual'\n                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))\n        -- Saat mencari, yang paling mirip seluruh kueri naik ke atas (nama SEO tempelan dari marketplace jadi nomor satu); trigram mengabaikan tanda baca.\n        ORDER BY CASE WHEN $1::text IS NULL THEN 0 ELSE skor.nilai END DESC,\n        -- `p.id` pemutus urutan: nama produk boleh kembar dan tanpanya baris kembar bisa bertukar antar kueri (muncul dua kali di daftar berhalaman).\n                 p.name, p.id\n        LIMIT $6 OFFSET $7\n        ",
+  "query": "\n        SELECT\n            p.id, p.category_id, c.name AS \"category_name?\", p.name, p.seo_name, p.sku,\n            p.brand_name, p.product_type, p.variant_grade, p.variant_size, p.parent_id,\n            (SELECT count(*) FROM products v WHERE v.parent_id = p.id) AS \"variant_count!\",\n            p.price, p.price_wholesale, p.price_shopee, p.price_tiktok,\n            p.price_shopee_wholesale, p.price_tiktok_wholesale, p.wholesale_threshold_qty,\n            p.wholesale_threshold_qty_shopee, p.wholesale_threshold_qty_tiktok, p.cost_price,\n            p.stock_qty, p.low_stock_threshold,\n            p.image_url,\n            (SELECT min(b.expiry_date) FROM product_batches b\n             WHERE b.product_id = p.id AND b.remaining_qty > 0)\n                AS \"nearest_expiry?\",\n            p.is_active, p.created_by,\n            p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\"\n        FROM products p\n        LEFT JOIN categories c ON c.id = p.category_id\n        -- Rata-rata dua ukuran: `word_similarity` mengangkat nama SEO pendek yang termuat utuh di kueri panjang, `similarity` mengangkat yang mirip keseluruhan.\n        CROSS JOIN LATERAL (\n            SELECT greatest(\n                (word_similarity(p.name, $1) + similarity(p.name, $1)) / 2,\n                (word_similarity(coalesce(p.seo_name, ''), $1) + similarity(coalesce(p.seo_name, ''), $1)) / 2,\n                (word_similarity(coalesce(p.sku, ''), $1) + similarity(coalesce(p.sku, ''), $1)) / 2\n            ) AS nilai\n        ) skor\n        WHERE ($1::text IS NULL\n               OR ($8::bool AND skor.nilai >= $9)\n               OR (NOT $8::bool AND NOT EXISTS (\n                   SELECT 1 FROM regexp_split_to_table($1, '[^[:alnum:]]+') AS kata\n                   WHERE kata <> ''\n                     -- `IS NOT TRUE`, bukan `NOT`: seo_name/sku boleh NULL, dan `NOT (NULL)` bernilai NULL sehingga kata yang tak ada tak terhitung hilang dan produk itu cocok dengan pencarian apa pun.\n                     AND (p.name ILIKE '%' || kata || '%'\n                          OR p.seo_name ILIKE '%' || kata || '%'\n                          OR p.sku ILIKE '%' || kata || '%') IS NOT TRUE)))\n          AND ($2::uuid IS NULL OR p.category_id = $2)\n          AND (NOT $3::bool OR p.is_active)\n          AND ($4::uuid IS NULL OR p.parent_id = $4)\n          AND ($5::text IS NULL\n               OR ($5 = 'induk' AND p.parent_id IS NULL)\n               OR ($5 = 'terjual'\n                   AND NOT EXISTS (SELECT 1 FROM products v WHERE v.parent_id = p.id)))\n        -- Saat mencari, yang paling mirip seluruh kueri naik ke atas (nama SEO tempelan dari marketplace jadi nomor satu); trigram mengabaikan tanda baca.\n        ORDER BY CASE WHEN $1::text IS NULL THEN 0 ELSE skor.nilai END DESC,\n        -- `p.id` pemutus urutan: nama produk boleh kembar dan tanpanya baris kembar bisa bertukar antar kueri (muncul dua kali di daftar berhalaman).\n                 p.name, p.id\n        LIMIT $6 OFFSET $7\n        ",
   "describe": {
     "columns": [
       {
@@ -95,18 +95,18 @@
       },
       {
         "ordinal": 18,
-        "name": "wholesale_threshold_kg",
-        "type_info": "Numeric"
+        "name": "wholesale_threshold_qty",
+        "type_info": "Int4"
       },
       {
         "ordinal": 19,
-        "name": "wholesale_threshold_kg_shopee",
-        "type_info": "Numeric"
+        "name": "wholesale_threshold_qty_shopee",
+        "type_info": "Int4"
       },
       {
         "ordinal": 20,
-        "name": "wholesale_threshold_kg_tiktok",
-        "type_info": "Numeric"
+        "name": "wholesale_threshold_qty_tiktok",
+        "type_info": "Int4"
       },
       {
         "ordinal": 21,
@@ -200,5 +200,5 @@
       false
     ]
   },
-  "hash": "3cd2f5b0e16445b864a2b994520f83b290033c796fd352066a1e3bf43c3d7945"
+  "hash": "08430584ce48da7da12746b9715dc8b294ea780e6e340248259ac1a0fbc88a9b"
 }

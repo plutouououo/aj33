@@ -55,8 +55,6 @@ pub struct StockLine {
 pub struct LockedProduct {
     pub id: Uuid,
     pub name: String,
-    /// Isi satu pack dalam kg; bersama harga grosir kanal menentukan ecer atau grosir.
-    pub variant_size: Option<Decimal>,
     pub price: Decimal,
     /// `None` = grosir belum diatur, kasir tetap memakai `price`.
     pub price_wholesale: Option<Decimal>,
@@ -68,9 +66,9 @@ pub struct LockedProduct {
     pub price_shopee_wholesale: Option<Decimal>,
     pub price_tiktok_wholesale: Option<Decimal>,
     /// Batas grosir produk per kanal; `None` = kanal itu memakai batas bawaan di `pricing_settings`.
-    pub wholesale_threshold_kg: Option<Decimal>,
-    pub wholesale_threshold_kg_shopee: Option<Decimal>,
-    pub wholesale_threshold_kg_tiktok: Option<Decimal>,
+    pub wholesale_threshold_qty: Option<i32>,
+    pub wholesale_threshold_qty_shopee: Option<i32>,
+    pub wholesale_threshold_qty_tiktok: Option<i32>,
     pub stock_qty: i32,
 }
 
@@ -141,9 +139,9 @@ pub async fn kunci_produk(
     let rows = sqlx::query_as!(
         LockedProduct,
         r#"
-        SELECT id, name, variant_size, price, price_wholesale, price_shopee, price_tiktok,
-               price_shopee_wholesale, price_tiktok_wholesale, wholesale_threshold_kg,
-               wholesale_threshold_kg_shopee, wholesale_threshold_kg_tiktok, stock_qty
+        SELECT id, name, price, price_wholesale, price_shopee, price_tiktok,
+               price_shopee_wholesale, price_tiktok_wholesale, wholesale_threshold_qty,
+               wholesale_threshold_qty_shopee, wholesale_threshold_qty_tiktok, stock_qty
         FROM products
         WHERE id = ANY($1)
         ORDER BY id
