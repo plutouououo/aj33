@@ -1,17 +1,55 @@
 //! Query agregat laporan: hanya transaksi `completed`; omzet = `subtotal - discount_amount` (bukan `total_amount`); `profit` mengurangi `platform_fees` Shopee dari kolom tersimpan (migrasi 0017/0018).
 
 use crate::error::AppResult;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+/// Tanggal hari ini pada zona toko; WIB tanpa DST, jadi offset tetap cukup.
+pub fn hari_ini() -> NaiveDate {
+    let jakarta = FixedOffset::east_opt(7 * 3600).expect("offset WIB sah");
+    Utc::now().with_timezone(&jakarta).date_naive()
+}
+
+/// Satuan periode baku yang berjalan dari awal satuan itu sampai sekarang.
+#[derive(Debug, Clone, Copy)]
+pub enum Periode {
+    Hari,
+    /// Pekan mulai Senin, sama dengan `date_trunc('week')`.
+    Pekan,
+    Bulan,
+    Tahun,
+}
+
+/// Rentang waktu penjualan; tanggal selalu kalender zona toko dan batas akhir ikut dihitung.
+#[derive(Debug, Default, Clone)]
+pub enum Rentang {
+    /// Seluruh waktu.
+    #[default]
+    Semua,
+    Periode(Periode),
+    /// Tanggal pilihan; sisi yang kosong tak dibatasi.
+    Tanggal {
+        dari: Option<NaiveDate>,
+        sampai: Option<NaiveDate>,
+    },
+}
+
+fn awal_periode(periode: Periode, hari: NaiveDate) -> NaiveDate {
+    match periode {
+        Periode::Hari => hari,
+        Periode::Pekan => hari - Duration::days(i64::from(hari.weekday().num_days_from_monday())),
+        Periode::Bulan => hari.with_day(1).expect("tanggal 1 selalu ada"),
+        Periode::Tahun => hari.with_ordinal(1).expect("hari ke-1 selalu ada"),
+    }
+}
+
 /// Saringan bersama seluruh angka penjualan.
 #[derive(Debug, Default, Clone)]
 pub struct SalesFilter {
-    /// Satuan `date_trunc` (`day`, `week`, `month`, `year`); `None` berarti seluruh waktu.
-    pub period: Option<&'static str>,
+    pub rentang: Rentang,
     pub payment_method: Option<String>,
     /// `walk_in` atau `pre_order`.
     pub transaction_type: Option<String>,
@@ -19,11 +57,53 @@ pub struct SalesFilter {
 
 impl SalesFilter {
     /// Saringan yang hanya membatasi periode, dipakai dasbor yang tak punya metode bayar/jenis transaksi.
-    pub fn periode(period: Option<&'static str>) -> Self {
+    pub fn periode(periode: Periode) -> Self {
         Self {
-            period,
+            rentang: Rentang::Periode(periode),
             ..Self::default()
         }
+    }
+
+    /// Batas tanggal (awal, akhir) untuk query; `None` berarti sisi itu tak dibatasi.
+    pub fn jendela(&self) -> (Option<NaiveDate>, Option<NaiveDate>) {
+        match &self.rentang {
+            Rentang::Semua => (None, None),
+            Rentang::Periode(p) => (Some(awal_periode(*p, hari_ini())), None),
+            Rentang::Tanggal { dari, sampai } => (*dari, *sampai),
+        }
+    }
+
+    /// Saringan yang sama untuk rentang pembanding tepat sebelumnya; `None` bila tak ada pembanding (seluruh waktu, atau tanggal pilihan yang salah satu sisinya kosong).
+    pub fn sebelumnya(&self) -> Option<Self> {
+        let (dari, sampai) = match &self.rentang {
+            Rentang::Semua => return None,
+            Rentang::Periode(p) => {
+                let akhir = awal_periode(*p, hari_ini()).pred_opt()?;
+                let awal = match p {
+                    Periode::Hari => akhir,
+                    Periode::Pekan => akhir - Duration::days(6),
+                    Periode::Bulan => akhir.with_day(1)?,
+                    Periode::Tahun => akhir.with_ordinal(1)?,
+                };
+                (awal, akhir)
+            }
+            Rentang::Tanggal {
+                dari: Some(dari),
+                sampai: Some(sampai),
+            } => {
+                let panjang = (*sampai - *dari).num_days() + 1;
+                (*dari - Duration::days(panjang), dari.pred_opt()?)
+            }
+            Rentang::Tanggal { .. } => return None,
+        };
+
+        Some(Self {
+            rentang: Rentang::Tanggal {
+                dari: Some(dari),
+                sampai: Some(sampai),
+            },
+            ..self.clone()
+        })
     }
 }
 
@@ -52,6 +132,7 @@ pub struct SalesSummary {
 }
 
 pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<SalesSummary> {
+    let (dari, sampai) = filter.jendela();
     let penjualan = sqlx::query!(
         r#"
         SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS "revenue!",
@@ -65,13 +146,15 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
                )                                 AS "platform_fees!"
         FROM transactions t
         WHERE t.status = 'completed'
-          AND ($1::text IS NULL
-               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                  AT TIME ZONE 'Asia/Jakarta')
-          AND ($2::text IS NULL OR t.payment_method = $2)
-          AND ($3::text IS NULL OR t.type = $3)
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
         "#,
-        filter.period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref()
     )
@@ -95,13 +178,15 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
           AND sa.change_qty < 0
           AND sa.reference_type = 'transaction'
           AND t.status = 'completed'
-          AND ($1::text IS NULL
-               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                  AT TIME ZONE 'Asia/Jakarta')
-          AND ($2::text IS NULL OR t.payment_method = $2)
-          AND ($3::text IS NULL OR t.type = $3)
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
         "#,
-        filter.period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref()
     )
@@ -115,13 +200,15 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
         JOIN transactions t ON t.id = ti.transaction_id
         JOIN products p ON p.id = ti.product_id
         WHERE t.status = 'completed'
-          AND ($1::text IS NULL
-               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                  AT TIME ZONE 'Asia/Jakarta')
-          AND ($2::text IS NULL OR t.payment_method = $2)
-          AND ($3::text IS NULL OR t.type = $3)
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
         "#,
-        filter.period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref()
     )
@@ -133,10 +220,11 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
         r#"
         SELECT COALESCE(SUM(e.amount), 0) AS "total!"
         FROM expenses e
-        WHERE $1::text IS NULL
-           OR e.expense_date >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')::date
+        WHERE ($1::date IS NULL OR e.expense_date >= $1)
+          AND ($2::date IS NULL OR e.expense_date <= $2)
         "#,
-        filter.period
+        dari,
+        sampai
     )
     .fetch_one(pool)
     .await?;
@@ -157,19 +245,35 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
     })
 }
 
-/// Periode sebelumnya untuk kartu trend (`None` bila "Seluruh Waktu"): jendela closed-open yang meniru `sales_summary`; `'1 ' || $1` aman karena `$1` divalidasi `satuan_periode()`.
-pub async fn sales_summary_previous(
+/// Kanal penjualan yang selalu tampil di laporan, dalam urutan tampil; harus sama dengan CHECK `transactions_sales_channel_check`.
+const KANAL: [&str; 3] = ["toko", "shopee", "tiktok"];
+
+/// Omzet dan laba satu kanal penjualan (`toko` = offline, `shopee`, `tiktok` = Tokopedia).
+#[derive(Debug, Serialize)]
+pub struct ChannelSummary {
+    pub channel: String,
+    pub revenue: Decimal,
+    pub cogs: Decimal,
+    /// Komisi, layanan, PPh, dan biaya proses dari kolom tersimpan; PPh juga terisi di kanal toko (migrasi 0035).
+    pub platform_fees: Decimal,
+    pub shipping_subsidy: Decimal,
+    /// `revenue - cogs - platform_fees - shipping_subsidy`; tabel `expenses` tak ikut karena tak dicatat per kanal, jadi jumlah laba kanal lebih besar dari `SalesSummary::profit` sebesar beban itu.
+    pub profit: Decimal,
+    pub transaction_count: i64,
+    /// Baris keluaran stok kanal ini tanpa harga pokok; selama bukan nol `cogs` dan `profit` kanal ini adalah batas atas.
+    pub items_without_cost: i64,
+}
+
+/// Ringkasan per kanal dengan saringan yang sama seperti `sales_summary`; ketiga kanal selalu ada walau kosong supaya tata letak halaman tak berubah.
+pub async fn channel_summaries(
     pool: &PgPool,
     filter: &SalesFilter,
-) -> AppResult<Option<SalesSummary>> {
-    let Some(period) = filter.period else {
-        return Ok(None);
-    };
-
+) -> AppResult<Vec<ChannelSummary>> {
+    let (dari, sampai) = filter.jendela();
     let penjualan = sqlx::query!(
         r#"
-        SELECT COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS "revenue!",
-               COALESCE(SUM(t.shipping_charged), 0) AS "shipping!",
+        SELECT t.sales_channel AS "channel!",
+               COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS "revenue!",
                COALESCE(SUM(t.shipping_subsidy), 0) AS "shipping_subsidy!",
                COUNT(*)                          AS "count!",
                COALESCE(
@@ -179,23 +283,26 @@ pub async fn sales_summary_previous(
                )                                 AS "platform_fees!"
         FROM transactions t
         WHERE t.status = 'completed'
-          AND t.created_at >= (date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                - ('1 ' || $1)::interval) AT TIME ZONE 'Asia/Jakarta'
-          AND t.created_at <  date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                               AT TIME ZONE 'Asia/Jakarta'
-          AND ($2::text IS NULL OR t.payment_method = $2)
-          AND ($3::text IS NULL OR t.type = $3)
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
+        GROUP BY t.sales_channel
         "#,
-        period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref()
     )
-    .fetch_one(pool)
+    .fetch_all(pool)
     .await?;
 
     let pokok = sqlx::query!(
         r#"
-        SELECT COALESCE(
+        SELECT t.sales_channel AS "channel!",
+               COALESCE(
                    SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)),
                    0
                ) AS "cogs!",
@@ -210,68 +317,56 @@ pub async fn sales_summary_previous(
           AND sa.change_qty < 0
           AND sa.reference_type = 'transaction'
           AND t.status = 'completed'
-          AND t.created_at >= (date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                - ('1 ' || $1)::interval) AT TIME ZONE 'Asia/Jakarta'
-          AND t.created_at <  date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                               AT TIME ZONE 'Asia/Jakarta'
-          AND ($2::text IS NULL OR t.payment_method = $2)
-          AND ($3::text IS NULL OR t.type = $3)
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
+        GROUP BY t.sales_channel
         "#,
-        period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref()
     )
-    .fetch_one(pool)
+    .fetch_all(pool)
     .await?;
 
-    let terjual = sqlx::query_scalar!(
-        r#"
-        SELECT COALESCE(SUM(ti.qty * p.variant_size), 0) AS "kg!"
-        FROM transaction_items ti
-        JOIN transactions t ON t.id = ti.transaction_id
-        JOIN products p ON p.id = ti.product_id
-        WHERE t.status = 'completed'
-          AND t.created_at >= (date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                - ('1 ' || $1)::interval) AT TIME ZONE 'Asia/Jakarta'
-          AND t.created_at <  date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                               AT TIME ZONE 'Asia/Jakarta'
-          AND ($2::text IS NULL OR t.payment_method = $2)
-          AND ($3::text IS NULL OR t.type = $3)
-        "#,
-        period,
-        filter.payment_method.as_deref(),
-        filter.transaction_type.as_deref()
-    )
-    .fetch_one(pool)
-    .await?;
+    Ok(KANAL
+        .iter()
+        .map(|kanal| {
+            let jual = penjualan.iter().find(|r| r.channel == *kanal);
+            let harga_pokok = pokok.iter().find(|r| r.channel == *kanal);
 
-    let beban = sqlx::query_scalar!(
-        r#"
-        SELECT COALESCE(SUM(e.amount), 0) AS "total!"
-        FROM expenses e
-        WHERE e.expense_date >= (date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                  - ('1 ' || $1)::interval)::date
-          AND e.expense_date <  date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')::date
-        "#,
-        period
-    )
-    .fetch_one(pool)
-    .await?;
+            let revenue = jual.map(|r| r.revenue).unwrap_or_default();
+            let platform_fees = jual.map(|r| r.platform_fees).unwrap_or_default();
+            let shipping_subsidy = jual.map(|r| r.shipping_subsidy).unwrap_or_default();
+            let cogs = harga_pokok.map(|r| r.cogs).unwrap_or_default();
 
-    let beban = beban + penjualan.shipping_subsidy;
+            ChannelSummary {
+                channel: (*kanal).to_string(),
+                revenue,
+                cogs,
+                platform_fees,
+                shipping_subsidy,
+                profit: revenue - cogs - platform_fees - shipping_subsidy,
+                transaction_count: jual.map(|r| r.count).unwrap_or_default(),
+                items_without_cost: harga_pokok.map(|r| r.tanpa_pokok).unwrap_or_default(),
+            }
+        })
+        .collect())
+}
 
-    Ok(Some(SalesSummary {
-        revenue: penjualan.revenue,
-        shipping: penjualan.shipping,
-        shipping_subsidy: penjualan.shipping_subsidy,
-        sold_kg: terjual,
-        cogs: pokok.cogs,
-        expenses: beban,
-        platform_fees: penjualan.platform_fees,
-        profit: penjualan.revenue - pokok.cogs - beban - penjualan.platform_fees,
-        transaction_count: penjualan.count,
-        items_without_cost: pokok.tanpa_pokok,
-    }))
+/// Periode pembanding untuk kartu trend (`None` bila tak ada pembanding, lihat `SalesFilter::sebelumnya`): angka yang sama dihitung pada rentang tepat sebelumnya.
+pub async fn sales_summary_previous(
+    pool: &PgPool,
+    filter: &SalesFilter,
+) -> AppResult<Option<SalesSummary>> {
+    match filter.sebelumnya() {
+        Some(sebelumnya) => Ok(Some(sales_summary(pool, &sebelumnya).await?)),
+        None => Ok(None),
+    }
 }
 
 /// Omzet hari ini dan bulan ini, keduanya pada zona toko.
@@ -384,6 +479,7 @@ pub async fn expense_breakdown(
     pool: &PgPool,
     filter: &SalesFilter,
 ) -> AppResult<Vec<ExpenseSlice>> {
+    let (dari, sampai) = filter.jendela();
     let rows = sqlx::query!(
         r#"
         SELECT x.category AS "category!", SUM(x.amount) AS "amount!"
@@ -391,23 +487,25 @@ pub async fn expense_breakdown(
             SELECT COALESCE(NULLIF(trim(e.category), ''), 'Lainnya') AS category,
                    e.amount
             FROM expenses e
-            WHERE $1::text IS NULL
-               OR e.expense_date >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')::date
+            WHERE ($1::date IS NULL OR e.expense_date >= $1)
+              AND ($2::date IS NULL OR e.expense_date <= $2)
             UNION ALL
             SELECT 'Ongkir ditanggung toko', t.shipping_subsidy
             FROM transactions t
             WHERE t.status = 'completed'
               AND t.shipping_subsidy > 0
-              AND ($1::text IS NULL
-                   OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                      AT TIME ZONE 'Asia/Jakarta')
-              AND ($2::text IS NULL OR t.payment_method = $2)
-              AND ($3::text IS NULL OR t.type = $3)
+              AND ($1::date IS NULL
+                   OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+              AND ($2::date IS NULL
+                   OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+              AND ($3::text IS NULL OR t.payment_method = $3)
+              AND ($4::text IS NULL OR t.type = $4)
         ) x
         GROUP BY 1
         ORDER BY 2 DESC
         "#,
-        filter.period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref()
     )
@@ -440,6 +538,7 @@ pub async fn top_products(
     limit: i64,
     offset: i64,
 ) -> AppResult<Vec<TopProduct>> {
+    let (dari, sampai) = filter.jendela();
     let rows = sqlx::query!(
         r#"
         SELECT ti.product_id                        AS product_id,
@@ -451,16 +550,18 @@ pub async fn top_products(
         JOIN transactions t ON t.id = ti.transaction_id
         LEFT JOIN products p ON p.id = ti.product_id
         WHERE t.status = 'completed'
-          AND ($1::text IS NULL
-               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                  AT TIME ZONE 'Asia/Jakarta')
-          AND ($2::text IS NULL OR t.payment_method = $2)
-          AND ($3::text IS NULL OR t.type = $3)
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
         GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END
         ORDER BY "qty!" DESC, "revenue!" DESC, 1
-        LIMIT $4 OFFSET $5
+        LIMIT $5 OFFSET $6
         "#,
-        filter.period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref(),
         limit,
@@ -483,6 +584,7 @@ pub async fn top_products(
 
 /// Jumlah baris produk terlaris tanpa batas, dasar jumlah halaman; harus mengelompokkan sama persis dengan `top_products`.
 pub async fn top_products_count(pool: &PgPool, filter: &SalesFilter) -> AppResult<i64> {
+    let (dari, sampai) = filter.jendela();
     let jumlah = sqlx::query_scalar!(
         r#"
         SELECT count(*) AS "jumlah!"
@@ -491,15 +593,17 @@ pub async fn top_products_count(pool: &PgPool, filter: &SalesFilter) -> AppResul
             FROM transaction_items ti
             JOIN transactions t ON t.id = ti.transaction_id
             WHERE t.status = 'completed'
-              AND ($1::text IS NULL
-                   OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                      AT TIME ZONE 'Asia/Jakarta')
-              AND ($2::text IS NULL OR t.payment_method = $2)
-              AND ($3::text IS NULL OR t.type = $3)
+              AND ($1::date IS NULL
+                   OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+              AND ($2::date IS NULL
+                   OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+              AND ($3::text IS NULL OR t.payment_method = $3)
+              AND ($4::text IS NULL OR t.type = $4)
             GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END
         ) x
         "#,
-        filter.period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref()
     )
@@ -531,6 +635,7 @@ pub async fn recent_sales(
     limit: i64,
     offset: i64,
 ) -> AppResult<Vec<SaleRow>> {
+    let (dari, sampai) = filter.jendela();
     let rows = sqlx::query!(
         r#"
         SELECT t.id                    AS "id!",
@@ -546,15 +651,17 @@ pub async fn recent_sales(
         FROM transactions t
         LEFT JOIN customers c ON c.id = t.customer_id
         WHERE t.status = 'completed'
-          AND ($1::text IS NULL
-               OR t.created_at >= date_trunc($1, now() AT TIME ZONE 'Asia/Jakarta')
-                                  AT TIME ZONE 'Asia/Jakarta')
-          AND ($2::text IS NULL OR t.payment_method = $2)
-          AND ($3::text IS NULL OR t.type = $3)
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
         ORDER BY t.created_at DESC, t.id
-        LIMIT $4 OFFSET $5
+        LIMIT $5 OFFSET $6
         "#,
-        filter.period,
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref(),
         limit,
@@ -998,4 +1105,62 @@ pub async fn laporan_harian(
             }
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tgl(t: i32, b: u32, h: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(t, b, h).unwrap()
+    }
+
+    #[test]
+    fn awal_pekan_adalah_senin_dan_tahun_baru_adalah_1_januari() {
+        assert_eq!(
+            awal_periode(Periode::Pekan, tgl(2026, 11, 10)),
+            tgl(2026, 11, 9)
+        );
+        assert_eq!(
+            awal_periode(Periode::Pekan, tgl(2026, 11, 9)),
+            tgl(2026, 11, 9)
+        );
+        assert_eq!(
+            awal_periode(Periode::Bulan, tgl(2026, 11, 10)),
+            tgl(2026, 11, 1)
+        );
+        assert_eq!(
+            awal_periode(Periode::Tahun, tgl(2026, 11, 10)),
+            tgl(2026, 1, 1)
+        );
+    }
+
+    #[test]
+    fn pembanding_tanggal_pilihan_sama_panjang_dan_menempel_di_depannya() {
+        let filter = SalesFilter {
+            rentang: Rentang::Tanggal {
+                dari: Some(tgl(2026, 11, 8)),
+                sampai: Some(tgl(2026, 11, 10)),
+            },
+            ..SalesFilter::default()
+        };
+        let (dari, sampai) = filter.sebelumnya().unwrap().jendela();
+        assert_eq!(
+            (dari, sampai),
+            (Some(tgl(2026, 11, 5)), Some(tgl(2026, 11, 7)))
+        );
+    }
+
+    #[test]
+    fn tanpa_pembanding_untuk_seluruh_waktu_dan_tanggal_setengah_terbuka() {
+        assert!(SalesFilter::default().sebelumnya().is_none());
+        let terbuka = SalesFilter {
+            rentang: Rentang::Tanggal {
+                dari: Some(tgl(2026, 11, 8)),
+                sampai: None,
+            },
+            ..SalesFilter::default()
+        };
+        assert!(terbuka.sebelumnya().is_none());
+    }
 }

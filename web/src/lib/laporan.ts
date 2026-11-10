@@ -19,8 +19,15 @@ export const JENIS = [
   { nilai: 'pre_order', label: 'Pre-order' },
 ] as const;
 
+/** Nilai `periode` bila rentang tanggal dipilih sendiri lewat `dari`/`sampai`. */
+export const PERIODE_TANGGAL = 'custom';
+
 export interface Saringan {
+  /** Salah satu `PERIODE`, atau `PERIODE_TANGGAL` bila `dari`/`sampai` terisi. */
   periode: string;
+  /** `YYYY-MM-DD` atau kosong; hanya terisi bila `periode` adalah `PERIODE_TANGGAL`, dan kosong berarti sisi itu tak dibatasi. */
+  dari: string;
+  sampai: string;
   /** String kosong berarti "semua". */
   metode: string;
   jenis: string;
@@ -40,11 +47,26 @@ function sah(nilai: string | null, pilihan: readonly { nilai: string }[]): strin
   return nilai && pilihan.some((p) => p.nilai === nilai) ? nilai : '';
 }
 
+/** Tanggal `YYYY-MM-DD` yang benar-benar ada di kalender (bukan sekadar berbentuk), selain itu kosong. */
+function tanggalSah(nilai: string | null): string {
+  if (!nilai || !/^\d{4}-\d{2}-\d{2}$/.test(nilai)) return '';
+  const d = new Date(`${nilai}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === nilai ? nilai : '';
+}
+
 /** Nilai saringan dari URL yang tak dikenal dibuang di sini agar backend tak menerima tebakan dari URL ketikan tangan. */
 export function bacaSaringan(url: URL): Saringan {
   const p = url.searchParams;
+  let dari = tanggalSah(p.get('dari'));
+  let sampai = tanggalSah(p.get('sampai'));
+  // Tanggal terbalik ditukar, bukan ditolak: pengguna jelas bermaksud rentang itu, dan backend menolak dari > sampai.
+  if (dari && sampai && dari > sampai) [dari, sampai] = [sampai, dari];
+  // Tanggal yang terisi menang atas pilihan periode, supaya form tanpa JavaScript tak diam-diam mengabaikannya.
+  const tanggal = Boolean(dari || sampai);
   return {
-    periode: sah(p.get('periode'), PERIODE) || PERIODE_BAKU,
+    periode: tanggal ? PERIODE_TANGGAL : sah(p.get('periode'), PERIODE) || PERIODE_BAKU,
+    dari,
+    sampai,
     metode: sah(p.get('metode'), METODE),
     jenis: sah(p.get('jenis'), JENIS),
     top_periode: sah(p.get('top_periode'), PERIODE),
@@ -60,10 +82,15 @@ export interface Jendela {
 /** Saringan sebagai query untuk backend; tanpa `terlaris` backend memakai ukuran bakunya. */
 export function kueriApi(s: Saringan, penjualan: Jendela, terlaris?: Jendela): string {
   const q = new URLSearchParams({
-    period: s.periode,
     sales_limit: String(penjualan.batas),
     sales_offset: String(penjualan.lewati),
   });
+  if (s.periode === PERIODE_TANGGAL) {
+    if (s.dari) q.set('from', s.dari);
+    if (s.sampai) q.set('to', s.sampai);
+  } else {
+    q.set('period', s.periode);
+  }
   if (terlaris) {
     q.set('top_limit', String(terlaris.batas));
     q.set('top_offset', String(terlaris.lewati));
@@ -78,19 +105,44 @@ export function kueriApi(s: Saringan, penjualan: Jendela, terlaris?: Jendela): s
 /** Saringan sebagai query untuk tautan di dalam aplikasi. */
 export function kueriHalaman(s: Saringan): string {
   const q = new URLSearchParams();
-  if (s.periode !== PERIODE_BAKU) q.set('periode', s.periode);
+  if (s.periode === PERIODE_TANGGAL) {
+    if (s.dari) q.set('dari', s.dari);
+    if (s.sampai) q.set('sampai', s.sampai);
+  } else if (s.periode !== PERIODE_BAKU) {
+    q.set('periode', s.periode);
+  }
   if (s.metode) q.set('metode', s.metode);
   if (s.jenis) q.set('jenis', s.jenis);
   if (s.top_periode) q.set('top_periode', s.top_periode);
   return q.toString();
 }
 
-export function labelPeriode(nilai: string): string {
-  return PERIODE.find((p) => p.nilai === nilai)?.label ?? nilai;
+const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+/** `2026-11-05` menjadi `5 Nov 2026`. */
+function labelTanggal(nilai: string): string {
+  const [tahun, bulan, hari] = nilai.split('-').map(Number);
+  return `${hari} ${BULAN[bulan - 1]} ${tahun}`;
+}
+
+/** Nama rentang untuk judul kartu dan CSV: label periode, atau tanggal pilihan. */
+export function labelPeriode(s: Saringan): string {
+  if (s.periode !== PERIODE_TANGGAL) return PERIODE.find((p) => p.nilai === s.periode)?.label ?? s.periode;
+  if (s.dari && s.sampai) return s.dari === s.sampai ? labelTanggal(s.dari) : `${labelTanggal(s.dari)} – ${labelTanggal(s.sampai)}`;
+  return s.dari ? `Sejak ${labelTanggal(s.dari)}` : `Sampai ${labelTanggal(s.sampai)}`;
+}
+
+/** Potongan nama berkas CSV untuk rentang ini. */
+export function kodePeriode(s: Saringan): string {
+  return s.periode === PERIODE_TANGGAL ? `${s.dari || 'awal'}_${s.sampai || 'kini'}` : s.periode;
 }
 
 export function labelMetode(nilai: string): string {
   return METODE.find((m) => m.nilai === nilai)?.label ?? nilai;
+}
+
+export function labelKanal(nilai: string): string {
+  return { toko: 'Offline (Toko)', shopee: 'Shopee', tiktok: 'Tokopedia' }[nilai] ?? nilai;
 }
 
 export function labelJenis(nilai: string): string {

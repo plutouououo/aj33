@@ -8,10 +8,12 @@ import {
   JENIS,
   METODE,
   PERIODE,
+  PERIODE_TANGGAL,
   bacaSaringan,
   kueriApi,
   kueriHalaman,
   labelJenis,
+  labelKanal,
   labelMetode,
   labelPeriode,
   nomorPesanan,
@@ -46,7 +48,7 @@ const kueri = kueriHalaman(saringan);
 const jumlahSaringan = [saringan.periode !== 'month', saringan.metode, saringan.jenis].filter(Boolean).length;
 const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
 
-const { summary, previous_summary, trend, expense_breakdown, top_products, top_products_total, sales } =
+const { summary, previous_summary, trend, channels, expense_breakdown, top_products, top_products_total, sales } =
   laporan;
 
 const terlarisTerakhir = Math.max(1, Math.ceil(top_products_total / TERLARIS_PER_HALAMAN));
@@ -83,6 +85,12 @@ function tinggi(nilai: number): string {
 
 const totalBeban = expense_breakdown.reduce((j, b) => j + b.amount, 0);
 
+const omzetKanal = channels.reduce((j, k) => j + k.revenue, 0);
+const labaKanal = channels.reduce((j, k) => j + k.profit, 0);
+// Laba kanal belum mengurangi tabel beban toko (tak dicatat per kanal); ongkir ditanggung toko sudah ada di laba kanal, jadi dikeluarkan dari beban agar tak terhitung dua kali.
+const bebanUmum = summary.expenses - channels.reduce((j, k) => j + k.shipping_subsidy, 0);
+const puncakLaba = Math.max(1, ...channels.map((k) => Math.abs(k.profit)));
+
 /** Marjin kotor: bagian omzet yang tersisa setelah harga pokok. */
 const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary.revenue) * 100 : 0;
 ---
@@ -108,7 +116,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     method="GET"
     id="saringan"
     action="#saringan"
-    class="kartu col-span-2 hidden gap-4 peer-checked:grid sm:grid-cols-2 md:grid lg:grid-cols-[12rem_12rem_12rem_1fr]"
+    class="kartu col-span-2 hidden gap-4 peer-checked:grid sm:grid-cols-2 md:grid lg:grid-cols-5"
   >
     <div>
       <label class="label" for="periode">Periode</label>
@@ -118,7 +126,21 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
             {p.label}
           </option>
         ))}
+        <option value={PERIODE_TANGGAL} selected={saringan.periode === PERIODE_TANGGAL}>
+          Pilih Tanggal
+        </option>
       </select>
+    </div>
+
+    {/* Tanggal yang terisi menang atas pilihan periode (lihat `bacaSaringan`); skrip kecil di bawah hanya menyelaraskan keduanya, tanpa JS formulir tetap jalan. */}
+    <div>
+      <label class="label" for="dari">Dari Tanggal</label>
+      <input class="kolom" type="date" id="dari" name="dari" value={saringan.dari} max={saringan.sampai || undefined} />
+    </div>
+
+    <div>
+      <label class="label" for="sampai">Sampai Tanggal</label>
+      <input class="kolom" type="date" id="sampai" name="sampai" value={saringan.sampai} min={saringan.dari || undefined} />
     </div>
 
     <div>
@@ -145,7 +167,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       </select>
     </div>
 
-    <div class="flex items-end gap-3">
+    <div class="flex items-end gap-3 sm:col-span-2 lg:col-span-5">
       <button class="tombol-halus max-md:w-full" type="submit">Terapkan</button>
       <a class="tombol-utama max-md:hidden" href={tautanEkspor} download>↓ Ekspor CSV</a>
     </div>
@@ -171,7 +193,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <span class="kartu-angka-label !text-white/80">Omzet Barang</span>
       <span class="kartu-angka-nilai">{rupiah(summary.revenue)}</span>
       <span class="kartu-angka-bantu !text-white/70">
-        {labelPeriode(saringan.periode)} · ongkir {rupiah(summary.shipping)} di luar angka ini{summary.shipping_subsidy > 0 && ` · ongkir ditanggung toko ${rupiah(summary.shipping_subsidy)} masuk beban`}
+        {labelPeriode(saringan)} · ongkir {rupiah(summary.shipping)} di luar angka ini{summary.shipping_subsidy > 0 && ` · ongkir ditanggung toko ${rupiah(summary.shipping_subsidy)} masuk beban`}
       </span>
     </div>
 
@@ -287,6 +309,86 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
 
   <div class="mb-6 grid gap-4 lg:grid-cols-2">
     <section class="kartu">
+      <h2 class="mb-1 text-base font-bold">Omzet per Kanal</h2>
+      <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
+        {labelPeriode(saringan)} · total {rupiah(omzetKanal)}
+      </p>
+
+      <ul class="space-y-4">
+        {channels.map((k) => {
+          const bagian = omzetKanal > 0 ? (k.revenue / omzetKanal) * 100 : 0;
+          return (
+            <li>
+              <div class="flex items-baseline justify-between gap-4 text-sm">
+                <span class="min-w-0 truncate font-medium">{labelKanal(k.channel)}</span>
+                <span class="shrink-0 tabular-nums">
+                  {rupiah(k.revenue)}
+                  <span class="ml-2 text-xs text-[var(--color-teks-lembut)]">{bagian.toFixed(0)}%</span>
+                </span>
+              </div>
+              <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--color-garis-lembut)]">
+                <div class="h-full rounded-full bg-merah-600" style={`width:${bagian}%`} />
+              </div>
+              <p class="mt-1 text-xs text-[var(--color-teks-lembut)]">{k.transaction_count} order</p>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+
+    {/* Laba kanal = omzet − harga pokok − potongan platform − ongkir ditanggung toko; beban toko umum tak bisa dibagi per kanal, jadi dikurangkan di baris penutup agar totalnya sama dengan kartu Laba. */}
+    <section class="kartu">
+      <h2 class="mb-1 text-base font-bold">Laba per Kanal</h2>
+      <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
+        {labelPeriode(saringan)} · sebelum beban toko
+      </p>
+
+      <ul class="space-y-4">
+        {channels.map((k) => {
+          const lebar = (Math.abs(k.profit) / puncakLaba) * 100;
+          const marjinKanal = k.revenue > 0 ? (k.profit / k.revenue) * 100 : 0;
+          return (
+            <li>
+              <div class="flex items-baseline justify-between gap-4 text-sm">
+                <span class="min-w-0 truncate font-medium">{labelKanal(k.channel)}</span>
+                <span class={k.profit < 0 ? 'shrink-0 tabular-nums text-red-600' : 'shrink-0 tabular-nums'}>
+                  {rupiah(k.profit)}
+                  <span class="ml-2 text-xs text-[var(--color-teks-lembut)]">{marjinKanal.toFixed(1)}%</span>
+                </span>
+              </div>
+              <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--color-garis-lembut)]">
+                <div class={k.profit < 0 ? 'h-full rounded-full bg-red-400' : 'h-full rounded-full bg-merah-400'} style={`width:${lebar}%`} />
+              </div>
+              <p class="mt-1 text-xs text-[var(--color-teks-lembut)]">
+                Omzet {rupiah(k.revenue)} − pokok {rupiah(k.cogs)}
+                {k.platform_fees > 0 && ` − potongan ${rupiah(k.platform_fees)}`}
+                {k.shipping_subsidy > 0 && ` − ongkir toko ${rupiah(k.shipping_subsidy)}`}
+                {k.items_without_cost > 0 && ' · harga pokok belum lengkap'}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+
+      <dl class="mt-5 space-y-1 border-t border-[var(--color-garis)] pt-4 text-sm">
+        <div class="flex justify-between gap-4">
+          <dt class="text-[var(--color-teks-lembut)]">Jumlah laba kanal</dt>
+          <dd class="tabular-nums">{rupiah(labaKanal)}</dd>
+        </div>
+        <div class="flex justify-between gap-4">
+          <dt class="text-[var(--color-teks-lembut)]">Beban toko</dt>
+          <dd class="tabular-nums">− {rupiah(bebanUmum)}</dd>
+        </div>
+        <div class="flex justify-between gap-4 font-semibold">
+          <dt>Laba</dt>
+          <dd class={summary.profit < 0 ? 'tabular-nums text-red-600' : 'tabular-nums'}>{rupiah(summary.profit)}</dd>
+        </div>
+      </dl>
+    </section>
+  </div>
+
+  <div class="mb-6 grid gap-4 lg:grid-cols-2">
+    <section class="kartu">
       <h2 class="mb-1 text-base font-bold">Omzet dan Beban</h2>
       <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
         Enam bulan terakhir
@@ -328,7 +430,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     <section class="kartu">
       <h2 class="mb-1 text-base font-bold">Rincian Beban</h2>
       <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
-        {labelPeriode(saringan.periode)} · total {rupiah(totalBeban)}
+        {labelPeriode(saringan)} · total {rupiah(totalBeban)}
       </p>
 
       {
@@ -371,8 +473,13 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <form method="GET" class="flex items-center gap-2" action="#produk-terlaris">
         {saringan.metode && <input type="hidden" name="metode" value={saringan.metode} />}
         {saringan.jenis && <input type="hidden" name="jenis" value={saringan.jenis} />}
-        {saringan.periode !== 'month' && (
-          <input type="hidden" name="periode" value={saringan.periode} />
+        {saringan.periode === PERIODE_TANGGAL ? (
+          <>
+            {saringan.dari && <input type="hidden" name="dari" value={saringan.dari} />}
+            {saringan.sampai && <input type="hidden" name="sampai" value={saringan.sampai} />}
+          </>
+        ) : (
+          saringan.periode !== 'month' && <input type="hidden" name="periode" value={saringan.periode} />
         )}
         <select class="kolom !py-2 !text-xs" name="top_periode" aria-label="Periode Produk Terlaris">
           <option value="" selected={!saringan.top_periode}>
@@ -520,4 +627,23 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       )
     }
   </section>
+
+  <script is:inline>
+    (function () {
+      var periode = document.getElementById('periode');
+      var dari = document.getElementById('dari');
+      var sampai = document.getElementById('sampai');
+      if (!periode || !dari || !sampai) return;
+      periode.addEventListener('change', function () {
+        if (periode.value !== 'custom') { dari.value = ''; sampai.value = ''; }
+      });
+      [dari, sampai].forEach(function (el) {
+        el.addEventListener('change', function () {
+          if (dari.value || sampai.value) periode.value = 'custom';
+          dari.max = sampai.value || '';
+          sampai.min = dari.value || '';
+        });
+      });
+    })();
+  </script>
 </AppShell>

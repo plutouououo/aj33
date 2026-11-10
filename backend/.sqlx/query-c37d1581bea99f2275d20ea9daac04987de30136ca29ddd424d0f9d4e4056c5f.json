@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(SUM(ti.qty * p.variant_size), 0) AS \"kg!\"\n        FROM transaction_items ti\n        JOIN transactions t ON t.id = ti.transaction_id\n        JOIN products p ON p.id = ti.product_id\n        WHERE t.status = 'completed'\n          AND ($1::date IS NULL\n               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($3::text IS NULL OR t.payment_method = $3)\n          AND ($4::text IS NULL OR t.type = $4)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kg!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c37d1581bea99f2275d20ea9daac04987de30136ca29ddd424d0f9d4e4056c5f"
+}

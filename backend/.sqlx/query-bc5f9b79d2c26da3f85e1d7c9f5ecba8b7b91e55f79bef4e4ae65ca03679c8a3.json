@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(SUM(e.amount), 0) AS \"total!\"\n        FROM expenses e\n        WHERE ($1::date IS NULL OR e.expense_date >= $1)\n          AND ($2::date IS NULL OR e.expense_date <= $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bc5f9b79d2c26da3f85e1d7c9f5ecba8b7b91e55f79bef4e4ae65ca03679c8a3"
+}

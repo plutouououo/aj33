@@ -1,8 +1,8 @@
 //! Endpoint dasbor dan laporan khusus owner (omzet, laba, harga pokok adalah isi buku toko), dibatasi di sini bukan hanya di menu frontend.
 
 use super::repo::{
-    self, Counts, ExpenseSlice, LowStockProduct, MonthlyPoint, SaleRow, SalesFilter, SalesSummary,
-    StockValue, TopProduct, TransactionDetail,
+    self, hari_ini, ChannelSummary, Counts, ExpenseSlice, LowStockProduct, MonthlyPoint, Periode,
+    Rentang, SaleRow, SalesFilter, SalesSummary, StockValue, TopProduct, TransactionDetail,
 };
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
@@ -11,6 +11,7 @@ use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::routing::get;
 use axum::{Json, Router};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -38,6 +39,9 @@ const PENJUALAN_BAKU: i64 = 15;
 struct ReportQuery {
     /// `today`, `week`, `month`, `year`, atau `all`; kosong = bulan ini karena riwayat seluruhnya jarang menjawab pertanyaan siapa pun.
     period: Option<String>,
+    /// Awal dan akhir (termasuk) tanggal pilihan `YYYY-MM-DD` zona toko; bila salah satunya diisi, menggantikan `period`.
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
     payment_method: Option<String>,
     #[serde(rename = "type")]
     transaction_type: Option<String>,
@@ -51,14 +55,14 @@ struct ReportQuery {
     top_period: Option<String>,
 }
 
-/// Menerjemahkan periode ke satuan `date_trunc` berupa `&'static str`, sehingga teks pengguna tak pernah sampai ke query dan nilai tak dikenal ditolak.
-fn satuan_periode(period: Option<&str>) -> AppResult<Option<&'static str>> {
+/// Menerjemahkan nama periode ke `Rentang`; nilai tak dikenal ditolak agar salah ketik tak menjadi laporan kosong.
+fn rentang_periode(period: Option<&str>) -> AppResult<Rentang> {
     match period.unwrap_or("month") {
-        "today" => Ok(Some("day")),
-        "week" => Ok(Some("week")),
-        "month" => Ok(Some("month")),
-        "year" => Ok(Some("year")),
-        "all" => Ok(None),
+        "today" => Ok(Rentang::Periode(Periode::Hari)),
+        "week" => Ok(Rentang::Periode(Periode::Pekan)),
+        "month" => Ok(Rentang::Periode(Periode::Bulan)),
+        "year" => Ok(Rentang::Periode(Periode::Tahun)),
+        "all" => Ok(Rentang::Semua),
         lain => Err(AppError::bad_request(format!(
             "Periode '{lain}' tidak dikenal."
         ))),
@@ -86,7 +90,21 @@ fn pilihan(nilai: Option<String>, sah: &[&str], nama: &str) -> AppResult<Option<
 impl ReportQuery {
     /// Mengembalikan saringan utama, saringan Produk Terlaris (periode boleh beda, metode bayar dan jenis transaksi ikut saringan utama), dan jendela halaman kedua daftar.
     fn menjadi_filter(self) -> AppResult<(SalesFilter, SalesFilter, Halaman)> {
-        let period = satuan_periode(self.period.as_deref())?;
+        let rentang = if self.from.is_some() || self.to.is_some() {
+            if let (Some(dari), Some(sampai)) = (self.from, self.to) {
+                if dari > sampai {
+                    return Err(AppError::bad_request(
+                        "Tanggal awal tidak boleh setelah tanggal akhir.",
+                    ));
+                }
+            }
+            Rentang::Tanggal {
+                dari: self.from,
+                sampai: self.to,
+            }
+        } else {
+            rentang_periode(self.period.as_deref())?
+        };
         let payment_method = pilihan(
             self.payment_method,
             &["cash", "transfer", "ewallet"],
@@ -98,18 +116,17 @@ impl ReportQuery {
             "Jenis transaksi",
         )?;
 
+        let top_rentang = match self.top_period.as_deref() {
+            Some(p) => rentang_periode(Some(p))?,
+            None => rentang.clone(),
+        };
         let filter = SalesFilter {
-            period,
+            rentang,
             payment_method: payment_method.clone(),
             transaction_type: transaction_type.clone(),
         };
-
-        let top_period = match self.top_period.as_deref() {
-            Some(p) => satuan_periode(Some(p))?,
-            None => period,
-        };
         let top_filter = SalesFilter {
-            period: top_period,
+            rentang: top_rentang,
             payment_method,
             transaction_type,
         };
@@ -170,19 +187,19 @@ async fn dashboard(State(state): State<AppState>, user: CurrentUser) -> AppResul
 
     // Dasbor tanpa saringan metode bayar/jenis transaksi, jadi `SalesFilter::periode` pas, sama dengan `today_and_month` dengan jendela digeser satu hari/bulan.
     let yesterday_revenue =
-        repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Some("day")))
+        repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Periode::Hari))
             .await?
             .map(|s| s.revenue)
             .unwrap_or_default();
     let last_month_revenue =
-        repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Some("month")))
+        repo::sales_summary_previous(&state.pool, &SalesFilter::periode(Periode::Bulan))
             .await?
             .map(|s| s.revenue)
             .unwrap_or_default();
 
     // Daftar penjualan terakhir tanpa batas periode karena dasbor kosong sepanjang pagi tak memberi tahu apa pun.
     let recent_sales =
-        repo::recent_sales(&state.pool, &SalesFilter::periode(None), DASBOR_DAFTAR, 0).await?;
+        repo::recent_sales(&state.pool, &SalesFilter::default(), DASBOR_DAFTAR, 0).await?;
     let low_stock_products = repo::low_stock(&state.pool, DASBOR_DAFTAR).await?;
 
     Ok(Json(Dashboard {
@@ -208,6 +225,8 @@ struct SalesReport {
     /// Angka periode setara sebelumnya untuk kartu trend, `null` bila "Seluruh Waktu" (lihat `repo::sales_summary_previous`).
     previous_summary: Option<SalesSummary>,
     trend: Vec<MonthlyPoint>,
+    /// Omzet dan laba per kanal (toko, Shopee, Tokopedia) pada periode dan saringan yang sama dengan `summary`.
+    channels: Vec<ChannelSummary>,
     expense_breakdown: Vec<ExpenseSlice>,
     top_products: Vec<TopProduct>,
     /// Seluruh produk terlaris pada periodenya (bukan hanya halaman ini), dasar jumlah halaman.
@@ -230,6 +249,7 @@ async fn sales_report(
         summary: repo::sales_summary(&state.pool, &filter).await?,
         previous_summary: repo::sales_summary_previous(&state.pool, &filter).await?,
         trend: repo::monthly_trend(&state.pool, &filter).await?,
+        channels: repo::channel_summaries(&state.pool, &filter).await?,
         expense_breakdown: repo::expense_breakdown(&state.pool, &filter).await?,
         top_products: repo::top_products(
             &state.pool,
@@ -318,10 +338,7 @@ async fn sheet_harian(
     State(state): State<AppState>,
     Query(query): Query<HarianQuery>,
 ) -> AppResult<Json<LaporanHarian>> {
-    let tanggal = query.tanggal.unwrap_or_else(|| {
-        let jakarta = chrono::FixedOffset::east_opt(7 * 3600).expect("offset WIB sah");
-        chrono::Utc::now().with_timezone(&jakarta).date_naive()
-    });
+    let tanggal = query.tanggal.unwrap_or_else(hari_ini);
     let transaksi = repo::laporan_harian(&state.pool, tanggal).await?;
     let pengeluaran = repo::pengeluaran_harian(&state.pool, tanggal).await?;
     Ok(Json(LaporanHarian {

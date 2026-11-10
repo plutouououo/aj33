@@ -473,6 +473,20 @@ export interface MonthlyPoint {
   expenses: number;
 }
 
+/** Omzet dan laba satu kanal; tabel `expenses` tak ikut karena tak dicatat per kanal. */
+export interface ChannelSummary {
+  channel: SalesChannel;
+  revenue: number;
+  cogs: number;
+  platform_fees: number;
+  shipping_subsidy: number;
+  /** `revenue - cogs - platform_fees - shipping_subsidy`. */
+  profit: number;
+  transaction_count: number;
+  /** Selama bukan nol, `cogs` dan `profit` kanal ini adalah batas atas. */
+  items_without_cost: number;
+}
+
 export interface ExpenseSlice {
   category: string;
   amount: number;
@@ -504,6 +518,8 @@ export interface SalesReport {
   previous_summary: SalesSummary | null;
   /** Selalu enam bulan terakhir, tidak ikut saringan periode. */
   trend: MonthlyPoint[];
+  /** Selalu tiga kanal berurutan: toko, Shopee, Tokopedia. */
+  channels: ChannelSummary[];
   expense_breakdown: ExpenseSlice[];
   top_products: TopProduct[];
   /** Seluruh produk terlaris pada periodenya, bukan hanya halaman ini. */

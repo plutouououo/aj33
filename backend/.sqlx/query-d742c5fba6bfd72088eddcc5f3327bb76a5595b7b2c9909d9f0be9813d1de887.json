@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT x.category AS \"category!\", SUM(x.amount) AS \"amount!\"\n        FROM (\n            SELECT COALESCE(NULLIF(trim(e.category), ''), 'Lainnya') AS category,\n                   e.amount\n            FROM expenses e\n            WHERE ($1::date IS NULL OR e.expense_date >= $1)\n              AND ($2::date IS NULL OR e.expense_date <= $2)\n            UNION ALL\n            SELECT 'Ongkir ditanggung toko', t.shipping_subsidy\n            FROM transactions t\n            WHERE t.status = 'completed'\n              AND t.shipping_subsidy > 0\n              AND ($1::date IS NULL\n                   OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n              AND ($2::date IS NULL\n                   OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n              AND ($3::text IS NULL OR t.payment_method = $3)\n              AND ($4::text IS NULL OR t.type = $4)\n        ) x\n        GROUP BY 1\n        ORDER BY 2 DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "category!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "amount!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "d742c5fba6bfd72088eddcc5f3327bb76a5595b7b2c9909d9f0be9813d1de887"
+}

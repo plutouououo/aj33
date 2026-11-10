@@ -6,6 +6,7 @@ import {
   kueriApi,
   labelJenis,
   labelMetode,
+  kodePeriode,
   labelPeriode,
   nomorPesanan,
 } from '../../lib/laporan';
@@ -47,7 +48,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
 
   const isi = [
     baris(['Laporan Penjualan Toko Ayam Aneka Jaya 33']),
-    baris(['Periode', labelPeriode(saringan.periode)]),
+    baris(['Periode', labelPeriode(saringan)]),
     baris(['Metode bayar', saringan.metode ? labelMetode(saringan.metode) : 'Semua']),
     baris(['Jenis pembeli', saringan.jenis ? labelJenis(saringan.jenis) : 'Semua']),
     baris(['Diunduh', waktuEkspor(new Date().toISOString())]),
@@ -95,7 +96,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     ),
   ].join('\r\n');
 
-  const namaBerkas = `laporan-penjualan-${saringan.periode}-${waktuEkspor(new Date().toISOString()).slice(0, 10)}.csv`;
+  const namaBerkas = `laporan-penjualan-${kodePeriode(saringan)}-${waktuEkspor(new Date().toISOString()).slice(0, 10)}.csv`;
 
   return new Response(
     // BOM di depan agar Excel di Windows tak membaca berkas sebagai encoding lokal dan merusak nama non-ASCII.
