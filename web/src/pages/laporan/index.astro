@@ -215,7 +215,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <span class={summary.profit < 0 ? 'kartu-angka-nilai text-red-600' : 'kartu-angka-nilai'}>
         {rupiah(summary.profit)}
       </span>
-      <span class="kartu-angka-bantu">Omzet − harga pokok − beban − potongan Shopee</span>
+      <span class="kartu-angka-bantu">Omzet − harga pokok − beban − potongan marketplace</span>
     </div>
 
     <div class="kartu-angka">
@@ -237,7 +237,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <span class="kartu-angka-bantu">Marjin kotor {marjin.toFixed(1)}%</span>
     </div>
 
-    {/* Omzet Shopee di atas masih kotor seperti di struk; potongannya sudah dikurangkan dari kartu Laba, kartu ini hanya menjelaskan asal selisihnya. */}
+    {/* Omzet marketplace di atas masih kotor seperti di struk; potongannya sudah dikurangkan dari kartu Laba, kartu ini hanya menjelaskan asal selisihnya. */}
     <div class="kartu-angka">
       <div class="flex items-start justify-between gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-garis-lembut)] text-merah-700">
@@ -252,9 +252,9 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
           </span>
         )}
       </div>
-      <span class="kartu-angka-label">Potongan Shopee</span>
+      <span class="kartu-angka-label">Potongan Marketplace</span>
       <span class="kartu-angka-nilai">{rupiah(summary.platform_fees)}</span>
-      <span class="kartu-angka-bantu">Komisi + layanan + PPh + biaya proses pesanan Shopee</span>
+      <span class="kartu-angka-bantu">Komisi, biaya platform, PPh, dan biaya proses Shopee dan Tokopedia</span>
     </div>
 
     <div class="kartu-angka">

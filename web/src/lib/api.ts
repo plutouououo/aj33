@@ -180,15 +180,21 @@ export interface Category {
   name: string;
 }
 
-/** Pengaturan harga: batas grosir bawaan (baris dihargai grosir bila jumlah pack LEBIH dari angka ini) untuk produk yang tak mengatur batasnya sendiri, dan persen biaya Shopee bawaan. */
+/** Pengaturan harga: batas grosir bawaan (baris dihargai grosir bila jumlah pack LEBIH dari angka ini) untuk produk yang tak mengatur batasnya sendiri, dan persen biaya Shopee dan Tokopedia bawaan. */
 export interface PricingSettings {
   wholesale_threshold_qty: number;
   /** Pecahan (0,1725 = 17,25%), bukan persen. */
   shopee_commission_percent: number;
   shopee_service_percent: number;
+  /** "Biaya komisi platform" Tokopedia/TikTok, dari omzet barang. */
+  tiktok_commission_percent: number;
+  /** "Komisi dinamis" Tokopedia/TikTok. */
+  tiktok_dynamic_commission_percent: number;
+  /** "Biaya layanan logistik" Tokopedia/TikTok. */
+  tiktok_logistics_percent: number;
   /** Pecahan PPh final UMKM (tetap). */
   withholding_tax_percent: number;
-  /** Rupiah per transaksi Shopee (tetap). */
+  /** Rupiah per transaksi Shopee dan Tokopedia (tetap). */
   order_processing_fee: number;
 }
 
@@ -228,18 +234,24 @@ export interface Transaction {
   shipping_cost: number;
   /** Diskon ongkir: toko menanggung ongkir (beban toko) dan pembeli tidak membayarnya. */
   shipping_borne_by_store: boolean;
-  /** Untuk Shopee ini bukan yang dibayar pembeli melainkan uang yang cair ke toko setelah empat biaya platform dipotong; kanal lain tetap "yang dibayar pembeli". */
+  /** Untuk Shopee dan Tokopedia ini bukan yang dibayar pembeli melainkan uang yang cair ke toko setelah potongan platform; kanal toko tetap "yang dibayar pembeli". */
   total_amount: number;
   /** Nama field mengikuti `v2.payment.get_escrow_detail` Shopee (lihat `marketplace/shopee/client.rs` dan `pos::service`). */
-  /** Persentase `commission_fee` transaksi ini (pecahan, 0,1725 = 17,25%), nol selain Shopee, bisa diedit kasir per transaksi. */
+  /** Persentase `commission_fee` Shopee atau "Biaya komisi platform" Tokopedia (pecahan, 0,1725 = 17,25%), nol di kanal toko. */
   platform_commission_fee_percent: number;
   platform_commission_fee: number;
-  /** Persentase `service_fee` (program opsional seperti Gratis Ongkir Xtra/Star+), nol bila tak ikut, bisa diedit kasir. */
+  /** Persentase `service_fee` Shopee (program opsional seperti Gratis Ongkir Xtra/Star+), nol bila tak ikut dan di kanal lain. */
   platform_service_fee_percent: number;
   platform_service_fee: number;
-  /** `withholding_tax`: PPh final UMKM 0,5% dari omzet Shopee setelah diskon, tetap. */
+  /** "Komisi dinamis" Tokopedia, nol di kanal lain. */
+  platform_dynamic_commission_fee_percent: number;
+  platform_dynamic_commission_fee: number;
+  /** "Biaya layanan logistik" Tokopedia, nol di kanal lain. */
+  platform_logistics_fee_percent: number;
+  platform_logistics_fee: number;
+  /** `withholding_tax`: PPh final UMKM 0,5% dari omzet setelah diskon, tetap. */
   platform_withholding_tax: number;
-  /** `seller_order_processing_fee`: Rp1.250 tetap sekali per transaksi Shopee. */
+  /** `seller_order_processing_fee`: Rp1.250 tetap sekali per transaksi Shopee atau Tokopedia. */
   platform_order_processing_fee: number;
   amount_paid: number | null;
   change_amount: number | null;
@@ -567,12 +579,16 @@ export interface TransactionDetail {
   platform_commission_fee: number;
   platform_service_fee_percent: number;
   platform_service_fee: number;
+  platform_dynamic_commission_fee_percent: number;
+  platform_dynamic_commission_fee: number;
+  platform_logistics_fee_percent: number;
+  platform_logistics_fee: number;
   platform_withholding_tax: number;
   platform_order_processing_fee: number;
   /** Batas atas kalau `items_without_cost > 0`. */
   cogs: number;
   items_without_cost: number;
-  /** `subtotal - discount_amount - cogs` dikurangi seluruh potongan Shopee dan ongkir yang ditanggung toko; beban toko lain tak ikut karena milik periode, bukan transaksi. */
+  /** `subtotal - discount_amount - cogs` dikurangi seluruh potongan platform dan ongkir yang ditanggung toko; beban toko lain tak ikut karena milik periode, bukan transaksi. */
   net_profit: number;
   items: TransactionDetailItem[];
 }

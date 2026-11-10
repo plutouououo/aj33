@@ -54,9 +54,13 @@ try {
 const potonganPlatform = transaksi
   ? transaksi.platform_commission_fee +
     transaksi.platform_service_fee +
+    transaksi.platform_dynamic_commission_fee +
+    transaksi.platform_logistics_fee +
     transaksi.platform_withholding_tax +
     transaksi.platform_order_processing_fee
   : 0;
+
+const namaMarketplace = transaksi?.sales_channel === 'tiktok' ? 'Tokopedia' : 'Shopee';
 
 const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
 ---
@@ -248,7 +252,7 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
                       </td>
                     </tr>
                   )}
-                  {transaksi.sales_channel === 'shopee' && (
+                  {transaksi.sales_channel !== 'toko' && (
                     <Fragment>
                       <tr>
                         <td class="py-1 text-[var(--color-teks-lembut)]">
@@ -268,6 +272,26 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
                           </td>
                         </tr>
                       )}
+                      {transaksi.platform_dynamic_commission_fee > 0 && (
+                        <tr>
+                          <td class="py-1 text-[var(--color-teks-lembut)]">
+                            Komisi Dinamis ({(transaksi.platform_dynamic_commission_fee_percent * 100).toFixed(2)}%)
+                          </td>
+                          <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
+                            -{rupiah(transaksi.platform_dynamic_commission_fee)}
+                          </td>
+                        </tr>
+                      )}
+                      {transaksi.platform_logistics_fee > 0 && (
+                        <tr>
+                          <td class="py-1 text-[var(--color-teks-lembut)]">
+                            Biaya Layanan Logistik ({(transaksi.platform_logistics_fee_percent * 100).toFixed(2)}%)
+                          </td>
+                          <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
+                            -{rupiah(transaksi.platform_logistics_fee)}
+                          </td>
+                        </tr>
+                      )}
                       <tr>
                         <td class="py-1 text-[var(--color-teks-lembut)]">PPh UMKM (0,5%)</td>
                         <td class="py-1 text-right tabular-nums text-[var(--color-teks-lembut)]">
@@ -284,7 +308,7 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
                   )}
                   <tr class="border-t border-[var(--color-garis)] font-bold">
                     <td class="py-1.5">
-                      {transaksi.sales_channel === 'shopee' ? 'Estimasi Total Penghasilan' : 'Total'}
+                      {transaksi.sales_channel !== 'toko' ? 'Estimasi Total Penghasilan' : 'Total'}
                     </td>
                     <td class="py-1.5 text-right tabular-nums">{rupiah(transaksi.total_amount)}</td>
                   </tr>
@@ -325,9 +349,9 @@ const nomor = transaksi ? nomorPesanan(transaksi.id) : null;
                     <td class="py-1">Harga Pokok</td>
                     <td class="py-1 text-right tabular-nums">-{rupiah(transaksi.cogs)}</td>
                   </tr>
-                  {transaksi.sales_channel === 'shopee' && (
+                  {transaksi.sales_channel !== 'toko' && (
                     <tr>
-                      <td class="py-1">Potongan Shopee (komisi, layanan, PPh, biaya proses)</td>
+                      <td class="py-1">Potongan {namaMarketplace} (komisi, biaya platform, PPh, biaya proses)</td>
                       <td class="py-1 text-right tabular-nums">-{rupiah(potonganPlatform)}</td>
                     </tr>
                   )}

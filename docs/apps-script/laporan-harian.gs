@@ -32,8 +32,12 @@ const WARNA = {
   tosca: '#134f5c',
 };
 
-// Blok tambahan di kanan Tokopedia: rincian potongan Shopee sebaris dengan blok Shopee, dan daftar pengeluaran hari itu.
-const POTONGAN = { nama: 36, komisi: 37, layanan: 38, pph: 39, proses: 40, total: 41 };
+// Blok tambahan di kanan Tokopedia: rincian potongan Shopee dan Tokopedia sebaris dengan blok kanalnya, dan daftar pengeluaran hari itu.
+// `mulai` adalah kolom nama; kolom potongan menyusul sesuai urutan `kolom` (kunci field transaksi, judul), lalu kolom Total.
+const POTONGAN = [
+  { kanal: 'shopee', judul: 'Potongan Shopee', mulai: 36, kolom: [['komisi', 'Komisi'], ['layanan', 'Layanan'], ['pph', 'PPh 0,5%'], ['biaya_proses', 'Biaya proses']] },
+  { kanal: 'tiktok', judul: 'Potongan Tokopedia', mulai: 47, kolom: [['komisi', 'Komisi'], ['komisi_dinamis', 'Komisi dinamis'], ['logistik', 'Layanan logistik'], ['pph', 'PPh 0,5%'], ['biaya_proses', 'Biaya proses']] },
+];
 const KELUAR = { keterangan: 43, kategori: 44, jumlah: 45, kapasitas: 10 };
 
 const FORMAT_UANG = '#,##0';
@@ -63,7 +67,9 @@ function sinkronTanggal(tanggal) {
   BLOK.forEach(function (b) {
     tulisBlok(sheet, b, data.transaksi.filter(function (t) { return t.kanal === b.kanal; }));
   });
-  tulisPotongan(sheet, data.transaksi.filter(function (t) { return t.kanal === 'shopee'; }));
+  POTONGAN.forEach(function (p) {
+    tulisPotongan(sheet, p, data.transaksi.filter(function (t) { return t.kanal === p.kanal; }));
+  });
   tulisPengeluaran(sheet, data);
   tulisRingkasan(sheet, data.transaksi);
   aturLebarKolom(sheet);
@@ -169,36 +175,39 @@ function tulisBlok(sheet, b, transaksi) {
   });
 }
 
-function tulisPotongan(sheet, transaksi) {
-  const P = POTONGAN;
-  const jumlah = Math.max(BLOK[1].kapasitas, transaksi.length);
+/** Rincian potongan satu marketplace sebaris dengan blok kanalnya; kapasitas baris mengikuti blok kanal itu. */
+function tulisPotongan(sheet, p, transaksi) {
+  const kapasitas = BLOK.filter(function (b) { return b.kanal === p.kanal; })[0].kapasitas;
+  const jumlah = Math.max(kapasitas, transaksi.length);
   const akhir = AWAL + jumlah - 1;
+  const awalFee = p.mulai + 1;
+  const akhirFee = p.mulai + p.kolom.length;
+  const kolTotal = akhirFee + 1;
+  const lebar = p.kolom.length + 2;
+
   const baris = [];
   for (let i = 0; i < jumlah; i++) {
     const r = AWAL + i;
     const t = transaksi[i];
-    baris.push([
-      t ? t.pelanggan || '' : '',
-      t ? Number(t.komisi) : '',
-      t ? Number(t.layanan) : '',
-      t ? Number(t.pph) : '',
-      t ? Number(t.biaya_proses) : '',
-      '=SUM(' + huruf(P.komisi) + r + ':' + huruf(P.proses) + r + ')',
-    ]);
+    const sel = [t ? t.pelanggan || '' : ''];
+    p.kolom.forEach(function (k) { sel.push(t ? Number(t[k[0]]) : ''); });
+    sel.push('=SUM(' + huruf(awalFee) + r + ':' + huruf(akhirFee) + r + ')');
+    baris.push(sel);
   }
-  sheet.getRange(AWAL, P.nama, jumlah, 6).setValues(baris);
+  sheet.getRange(AWAL, p.mulai, jumlah, lebar).setValues(baris);
 
-  sheet.getRange(5, P.nama, 1, 6).setValues([['Potongan Shopee', 'Komisi', 'Layanan', 'PPh 0,5%', 'Biaya proses', 'Total']]);
-  warnai(sheet, huruf(P.nama) + '5:' + huruf(P.total) + '5', WARNA.peach, { tengah: true, tebal: true });
-  sheet.getRange(4, P.nama).setValue('Total potongan');
-  for (let kol = P.komisi; kol <= P.total; kol++) {
+  const judul = [p.judul].concat(p.kolom.map(function (k) { return k[1]; }), ['Total']);
+  sheet.getRange(5, p.mulai, 1, lebar).setValues([judul]);
+  warnai(sheet, huruf(p.mulai) + '5:' + huruf(kolTotal) + '5', WARNA.peach, { tengah: true, tebal: true });
+  sheet.getRange(4, p.mulai).setValue('Total potongan');
+  for (let kol = awalFee; kol <= kolTotal; kol++) {
     sheet.getRange(4, kol).setFormula('=SUM(' + huruf(kol) + AWAL + ':' + huruf(kol) + akhir + ')');
   }
-  warnai(sheet, huruf(P.nama) + '4:' + huruf(P.total) + '4', WARNA.biru, { teks: '#ffffff', tebal: true });
-  warnai(sheet, huruf(P.nama) + AWAL + ':' + huruf(P.proses) + akhir, WARNA.hijauMuda);
-  warnai(sheet, huruf(P.total) + AWAL + ':' + huruf(P.total) + akhir, WARNA.hijauSedang, { tebal: true });
-  garis(sheet.getRange(5, P.nama, jumlah + 1, 6));
-  sheet.getRange(4, P.komisi, jumlah + 2, 5).setNumberFormat(FORMAT_UANG_STRIP);
+  warnai(sheet, huruf(p.mulai) + '4:' + huruf(kolTotal) + '4', WARNA.biru, { teks: '#ffffff', tebal: true });
+  warnai(sheet, huruf(p.mulai) + AWAL + ':' + huruf(akhirFee) + akhir, WARNA.hijauMuda);
+  warnai(sheet, huruf(kolTotal) + AWAL + ':' + huruf(kolTotal) + akhir, WARNA.hijauSedang, { tebal: true });
+  garis(sheet.getRange(5, p.mulai, jumlah + 1, lebar));
+  sheet.getRange(4, awalFee, jumlah + 2, p.kolom.length + 1).setNumberFormat(FORMAT_UANG_STRIP);
 }
 
 function tulisPengeluaran(sheet, data) {
@@ -292,8 +301,10 @@ function aturLebarKolom(sheet) {
     sheet.setColumnWidth(b.modal, 90);
     sheet.setColumnWidth(b.profit, 90);
   });
-  sheet.setColumnWidth(POTONGAN.nama, 110);
-  for (let kol = POTONGAN.komisi; kol <= POTONGAN.total; kol++) sheet.setColumnWidth(kol, 85);
+  POTONGAN.forEach(function (p) {
+    sheet.setColumnWidth(p.mulai, 110);
+    for (let kol = p.mulai + 1; kol <= p.mulai + p.kolom.length + 1; kol++) sheet.setColumnWidth(kol, 85);
+  });
   sheet.setColumnWidth(KELUAR.keterangan, 220);
   sheet.setColumnWidth(KELUAR.kategori, 100);
   sheet.setColumnWidth(KELUAR.jumlah, 90);

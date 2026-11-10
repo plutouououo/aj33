@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT tiktok_commission_percent, tiktok_dynamic_commission_percent, tiktok_logistics_percent\n        FROM pricing_settings\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tiktok_commission_percent",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "tiktok_dynamic_commission_percent",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 2,
+        "name": "tiktok_logistics_percent",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9eb2239b8f7e3d9ea2ffbf0cf8045a9522ff27a1f86e20c74364e65a698c0481"
+}

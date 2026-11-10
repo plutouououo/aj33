@@ -278,7 +278,15 @@ Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 
 - Persen komisi (bawaan 17,25%) dan biaya layanan (bawaan 0%) Shopee tak lagi diisi di kasir: owner mengaturnya di Pengaturan › Harga (`PATCH /api/settings/shopee-fees`, pecahan 0..1; GET lewat `/api/settings/pricing`). `checkout` memakainya bila request tak menyebut persen sendiri, dan menyimpan persen itu di transaksi sehingga mengubah pengaturan tak mengubah transaksi lama. PPh 0,5% dan biaya proses Rp1.250 tetap di kode.
 - Biaya proses Rp1.250 baru tampil dan dihitung setelah keranjang berisi (sebelumnya "Estimasi Total Penghasilan" kosong tampil -Rp1.250).
-- Kanal Tokopedia/TikTok kini berisian sama dengan Shopee: tanpa ongkir, tanpa pilihan metode (dipaksa e-wallet), tanpa "uang diterima". Backend (`SalesChannel::marketplace`) mengabaikan ongkir dan menolak tunai untuk kedua kanal. Biaya platform Tokopedia belum ada, jadi labelnya tetap "Total".
+- Kanal Tokopedia/TikTok kini berisian sama dengan Shopee: tanpa ongkir, tanpa pilihan metode (dipaksa e-wallet), tanpa "uang diterima". Backend (`SalesChannel::marketplace`) mengabaikan ongkir dan menolak tunai untuk kedua kanal. Potongan Tokopedia ada sejak migrasi 0038 (bagian berikut).
+
+### Potongan Tokopedia / TikTok Shop (migrasi 0038)
+
+- Dasarnya "Detail Penyelesaian Pembayaran" satu pesanan: harga barang Rp60.000 cair Rp46.870, dengan biaya komisi platform 4.650 (7,75%), biaya layanan logistik 3.030 (5,05%), komisi dinamis 3.900 (6,5%), biaya pemrosesan pesanan 1.250, dan PPh 300 (0,5%). Ongkir ditanggung platform dan asuransi Rp500 dibayar pembeli, jadi keduanya di luar hitungan.
+- Persen diatur owner di Pengaturan › Harga (`PATCH /api/settings/tiktok-fees`, kolom `pricing_settings.tiktok_*_percent`) dan disimpan per transaksi di `platform_commission_fee_percent`, `platform_dynamic_commission_fee_percent`, `platform_logistics_fee_percent` (dua yang terakhir kolom baru), jadi mengubah pengaturan tak mengubah transaksi lama. PPh 0,5% dan Rp1.250 sama dengan Shopee. Hitungannya satu fungsi, `pos::service::Potongan::hitung`, dan `total_amount` kanal Tokopedia kini uang yang cair, seperti Shopee.
+- **Angka logistik 5,05% berasal dari satu contoh** (3.030 dari 60.000); bila di pesanan lain biayanya ternyata tak sebanding harga (mis. bergantung berat paket atau ongkir), cocokkan lalu ubah persennya atau minta kolom tersendiri. Batas maksimum komisi per pesanan, bila ada, belum dimodelkan.
+- `transactions.platform_fee_total` (kolom turunan) menjumlahkan keenam potongan dan dipakai ringkasan, ringkasan per kanal, dan laba transaksi di laporan. Transaksi Tokopedia lama (sebelum migrasi) tetap bernilai penuh tanpa potongan.
+- Kasir: `PERSEN_KANAL` di `kasir.astro` (dikirim ke skrip lewat `data-persen-kanal`) harus tetap sama dengan `Persen` di `pos/service.rs`.
 
 ### Pesanan Shopee dari label pengiriman (migrasi 0027)
 
@@ -502,7 +510,7 @@ Apps Script (`docs/apps-script/laporan-harian.gs`) menarik `GET /sheet/harian?ta
 
 - Alur: Apps Script → Caddy → web `/sheet/harian` (penerus, tanpa cookie) → backend `/api/sheet/harian`. Backend memeriksa `Authorization: Bearer` terhadap env `SHEET_TOKEN` (kosong = endpoint mati, 404); token ini hanya membuka endpoint baca itu.
 - Pasang: `openssl rand -hex 32` → `SHEET_TOKEN` di `/etc/aj33/backend.env` (dan `backend/.env` lokal), restart backend; di sheet, Extensions › Apps Script, tempel berkas, isi Script properties `URL_APP` (mis. `https://domain-toko`) dan `TOKEN_SHEET` (nilai yang sama), jalankan `pasangPemicu()` sekali dan setujui izinnya.
-- Kolom: Cash = omzet barang (`subtotal - discount`), Item 1..5 = harga pokok per produk (lebih dari 5 produk dijumlahkan ke Item 5), Bersih = `total_amount` (hanya Shopee). Profit offline/Tokopedia = Cash − Modal, Shopee = Bersih − Modal; PPh offline mengurangi profit baris (di aplikasi PPh toko adalah beban) dan juga ditampilkan terpisah di C2:C3.
+- Kolom: Cash = omzet barang (`subtotal - discount`), Item 1..5 = harga pokok per produk (lebih dari 5 produk dijumlahkan ke Item 5), Bersih = `total_amount` (Shopee dan Tokopedia, sudah dipotong platform). Profit offline = Cash − Modal, Shopee dan Tokopedia = Bersih − Modal; PPh offline mengurangi profit baris (di aplikasi PPh toko adalah beban) dan juga ditampilkan terpisah di C2:C3.
 - Tab ditimpa tiap sinkron, jadi edit manual di tab hari berjalan akan hilang; hari lampau tidak disentuh.
-- Blok tambahan di kanan Tokopedia: Potongan Shopee per pesanan (kolom AJ–AO, sebaris dengan blok Shopee) dan Pengeluaran hari itu (AQ–AS, dari tabel `expenses` plus subsidi ongkir transaksi). Profit offline sudah dikurangi PPh per baris (beban toko, seperti di aplikasi), jadi Profit Bersih (V2) = Total Profit − pengeluaran.
+- Blok tambahan di kanan Tokopedia: Potongan Shopee per pesanan (kolom AJ–AO, sebaris dengan blok Shopee), Pengeluaran hari itu (AQ–AS, dari tabel `expenses` plus subsidi ongkir transaksi), dan Potongan Tokopedia (AU–BA: komisi, komisi dinamis, layanan logistik, PPh, biaya proses, total; definisinya di array `POTONGAN` skrip). Profit offline sudah dikurangi PPh per baris (beban toko, seperti di aplikasi), jadi Profit Bersih (V2) = Total Profit − pengeluaran.
 - Nama pelanggan dan Modal berwarna merah bila ada barang tanpa harga beli (`modal_tidak_lengkap`), artinya profit baris itu batas atas.

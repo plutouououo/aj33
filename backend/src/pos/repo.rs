@@ -43,9 +43,15 @@ pub struct Transaction {
     /// Persentase biaya layanan Shopee (program opsional seperti Gratis Ongkir Xtra/Star+), nol bila tak ikut (`service_fee` di API Shopee).
     pub platform_service_fee_percent: Decimal,
     pub platform_service_fee: Decimal,
+    /// "Komisi dinamis" Tokopedia/TikTok (migrasi 0038), nol selain kanal itu.
+    pub platform_dynamic_commission_fee_percent: Decimal,
+    pub platform_dynamic_commission_fee: Decimal,
+    /// "Biaya layanan logistik" Tokopedia/TikTok (migrasi 0038), nol selain kanal itu.
+    pub platform_logistics_fee_percent: Decimal,
+    pub platform_logistics_fee: Decimal,
     /// PPh final UMKM (`withholding_tax` Shopee): 0,5% omzet setelah diskon, tetap dan tak bisa diedit kasir.
     pub platform_withholding_tax: Decimal,
-    /// Rp1.250 tetap sekali per transaksi Shopee (`seller_order_processing_fee`).
+    /// Rp1.250 tetap sekali per transaksi Shopee atau Tokopedia (`seller_order_processing_fee`).
     pub platform_order_processing_fee: Decimal,
     pub amount_paid: Option<Decimal>,
     pub change_amount: Option<Decimal>,
@@ -72,6 +78,10 @@ struct TransactionHead {
     platform_commission_fee: Decimal,
     platform_service_fee_percent: Decimal,
     platform_service_fee: Decimal,
+    platform_dynamic_commission_fee_percent: Decimal,
+    platform_dynamic_commission_fee: Decimal,
+    platform_logistics_fee_percent: Decimal,
+    platform_logistics_fee: Decimal,
     platform_withholding_tax: Decimal,
     platform_order_processing_fee: Decimal,
     amount_paid: Option<Decimal>,
@@ -111,6 +121,10 @@ async fn lengkapi(pool: &PgPool, head: TransactionHead) -> AppResult<Transaction
         platform_commission_fee: head.platform_commission_fee,
         platform_service_fee_percent: head.platform_service_fee_percent,
         platform_service_fee: head.platform_service_fee,
+        platform_dynamic_commission_fee_percent: head.platform_dynamic_commission_fee_percent,
+        platform_dynamic_commission_fee: head.platform_dynamic_commission_fee,
+        platform_logistics_fee_percent: head.platform_logistics_fee_percent,
+        platform_logistics_fee: head.platform_logistics_fee,
         platform_withholding_tax: head.platform_withholding_tax,
         platform_order_processing_fee: head.platform_order_processing_fee,
         amount_paid: head.amount_paid,
@@ -130,6 +144,8 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Transaction
                shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
+               platform_dynamic_commission_fee_percent, platform_dynamic_commission_fee,
+               platform_logistics_fee_percent, platform_logistics_fee,
                platform_withholding_tax, platform_order_processing_fee,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
@@ -155,6 +171,8 @@ pub async fn find_by_idempotency_key(pool: &PgPool, key: &str) -> AppResult<Opti
                shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
+               platform_dynamic_commission_fee_percent, platform_dynamic_commission_fee,
+               platform_logistics_fee_percent, platform_logistics_fee,
                platform_withholding_tax, platform_order_processing_fee,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions
@@ -209,11 +227,15 @@ pub struct NewTransaction {
     pub shipping_cost: Decimal,
     pub shipping_borne_by_store: bool,
     pub total_amount: Decimal,
-    /// Nol selain kanal Shopee (migrasi 0018); nama field mengikuti `v2.payment.get_escrow_detail`.
+    /// Nol di kanal toko (migrasi 0018, 0038); nama field mengikuti `v2.payment.get_escrow_detail`.
     pub platform_commission_fee_percent: Decimal,
     pub platform_commission_fee: Decimal,
     pub platform_service_fee_percent: Decimal,
     pub platform_service_fee: Decimal,
+    pub platform_dynamic_commission_fee_percent: Decimal,
+    pub platform_dynamic_commission_fee: Decimal,
+    pub platform_logistics_fee_percent: Decimal,
+    pub platform_logistics_fee: Decimal,
     pub platform_withholding_tax: Decimal,
     pub platform_order_processing_fee: Decimal,
     pub amount_paid: Option<Decimal>,
@@ -232,9 +254,12 @@ pub async fn insert_transaction(
              sales_channel, subtotal, shipping_cost, shipping_borne_by_store, total_amount,
              platform_commission_fee_percent, platform_commission_fee,
              platform_service_fee_percent, platform_service_fee,
+             platform_dynamic_commission_fee_percent, platform_dynamic_commission_fee,
+             platform_logistics_fee_percent, platform_logistics_fee,
              platform_withholding_tax, platform_order_processing_fee,
              amount_paid, change_amount)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                $19, $20, $21, $22)
         RETURNING id
         "#,
         input.idempotency_key,
@@ -251,6 +276,10 @@ pub async fn insert_transaction(
         input.platform_commission_fee,
         input.platform_service_fee_percent,
         input.platform_service_fee,
+        input.platform_dynamic_commission_fee_percent,
+        input.platform_dynamic_commission_fee,
+        input.platform_logistics_fee_percent,
+        input.platform_logistics_fee,
         input.platform_withholding_tax,
         input.platform_order_processing_fee,
         input.amount_paid,
@@ -289,6 +318,8 @@ pub async fn list_transactions(pool: &PgPool, limit: i64) -> AppResult<Vec<Trans
                shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
+               platform_dynamic_commission_fee_percent, platform_dynamic_commission_fee,
+               platform_logistics_fee_percent, platform_logistics_fee,
                platform_withholding_tax, platform_order_processing_fee,
                amount_paid, change_amount, status, created_at AS "created_at!"
         FROM transactions

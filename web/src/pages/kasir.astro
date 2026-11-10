@@ -25,11 +25,11 @@ const KANAL = [
 
 type Kanal = (typeof KANAL)[number]['nilai'];
 
-/** Biaya Shopee satu transaksi, nama field mengikuti `get_escrow_detail` dan sama dengan hitungan `pos/service.rs`, dihitung ulang di sini agar kasir melihatnya sebelum simpan; persen komisi dan layanan diatur owner di Pengaturan › Harga. */
-const SHOPEE_WITHHOLDING_TAX_PERSEN = 0.5;
-const SHOPEE_ORDER_PROCESSING_FEE = 1250;
+/** Potongan marketplace satu transaksi sama dengan hitungan `pos/service.rs`, dihitung ulang di sini agar kasir melihatnya sebelum simpan; persen komisi, layanan, komisi dinamis, dan logistik diatur owner di Pengaturan › Harga. */
+const PPH_UMKM_PERSEN = 0.5;
+const BIAYA_PROSES_PESANAN = 1250;
 
-/** Shopee dan Tokopedia: uang sudah diterima lewat e-wallet marketplace, jadi tanpa ongkir, metode bayar, maupun uang diterima. */
+/** Shopee dan Tokopedia: uang sudah diterima lewat e-wallet marketplace, jadi tanpa ongkir, metode bayar, maupun uang diterima, dan Total adalah penghasilan setelah potongan platform. */
 const adalahMarketplace = (k: Kanal): boolean => k !== 'toko';
 
 /** Aritmetika bilangan bulat (basis × basis poin) agar pembulatan ,50 ke atas sama persis dengan `rupiah_bulat` di `pos/service.rs`, bukan `Math.round` float. */
@@ -286,31 +286,50 @@ const ongkirAngka = adalahMarketplace(kanalIsi) ? 0 : Math.max(0, Number(ongkirI
 const diskonOngkirAngka = gratisOngkirIsi ? ongkirAngka : 0;
 
 // Pecahan pengaturan (0,1725) jadi persen tampil (17,25); toFixed membuang sisa float.
-const commissionPersenAngka = Number((pengaturanHarga.shopee_commission_percent * 100).toFixed(2));
-const servicePersenAngka = Number((pengaturanHarga.shopee_service_percent * 100).toFixed(2));
+const persenTampil = (pecahan: number): number => Number((pecahan * 100).toFixed(2));
 
-// Basis potongan Shopee adalah omzet barang, sama dengan `basis_fee` di `pos/service.rs`.
-const basisFeeShopee = totalBelanja;
-const biayaKomisiAngka =
-  kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, commissionPersenAngka) : 0;
-const biayaLayananAngka =
-  kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, servicePersenAngka) : 0;
-const biayaWithholdingTaxAngka =
-  kanalIsi === 'shopee' ? biayaPersenRupiah(basisFeeShopee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
+/** Persen potongan tiap kanal, sama dengan `Persen` di `pos/service.rs`: komisi dua kanal, layanan hanya Shopee, komisi dinamis dan logistik hanya Tokopedia, toko nol. */
+const PERSEN_KANAL = {
+  toko: { komisi: 0, layanan: 0, dinamis: 0, logistik: 0 },
+  shopee: {
+    komisi: persenTampil(pengaturanHarga.shopee_commission_percent),
+    layanan: persenTampil(pengaturanHarga.shopee_service_percent),
+    dinamis: 0,
+    logistik: 0,
+  },
+  tiktok: {
+    komisi: persenTampil(pengaturanHarga.tiktok_commission_percent),
+    layanan: 0,
+    dinamis: persenTampil(pengaturanHarga.tiktok_dynamic_commission_percent),
+    logistik: persenTampil(pengaturanHarga.tiktok_logistics_percent),
+  },
+} satisfies Record<Kanal, { komisi: number; layanan: number; dinamis: number; logistik: number }>;
+const persenIni = PERSEN_KANAL[kanalIsi];
+
+// Basis potongan adalah omzet barang, sama dengan `subtotal` di `Potongan::hitung` pada `pos/service.rs`.
+const biayaKomisiAngka = biayaPersenRupiah(totalBelanja, persenIni.komisi);
+const biayaLayananAngka = biayaPersenRupiah(totalBelanja, persenIni.layanan);
+const biayaDinamisAngka = biayaPersenRupiah(totalBelanja, persenIni.dinamis);
+const biayaLogistikAngka = biayaPersenRupiah(totalBelanja, persenIni.logistik);
+const biayaWithholdingTaxAngka = adalahMarketplace(kanalIsi)
+  ? biayaPersenRupiah(totalBelanja, PPH_UMKM_PERSEN)
+  : 0;
 // Tanpa barang belum ada pesanan yang diproses, jadi biaya Rp1.250 baru ikut setelah keranjang terisi.
 const biayaOrderProcessingAngka =
-  kanalIsi === 'shopee' && keranjang.length > 0 ? SHOPEE_ORDER_PROCESSING_FEE : 0;
+  adalahMarketplace(kanalIsi) && keranjang.length > 0 ? BIAYA_PROSES_PESANAN : 0;
 
 /** Nominal pengurang ditulis "-Rp1.250", tetapi nol ditulis polos agar tak tampak "-Rp0". */
 const minusRupiah = (n: number): string => (n > 0 ? `-${rupiah(n)}` : rupiah(0));
 
-// Untuk Shopee angka ini bukan yang dibayar pembeli melainkan setelah empat biaya platform, labelnya berganti ke "Estimasi Total Penghasilan"; rumusnya satu untuk semua kanal.
+// Untuk marketplace angka ini bukan yang dibayar pembeli melainkan setelah potongan platform, labelnya berganti ke "Estimasi Total Penghasilan"; rumusnya satu untuk semua kanal.
 const totalTagihan =
   totalBelanja -
   diskonOngkirAngka +
   ongkirAngka -
   biayaKomisiAngka -
   biayaLayananAngka -
+  biayaDinamisAngka -
+  biayaLogistikAngka -
   biayaWithholdingTaxAngka -
   biayaOrderProcessingAngka;
 const tunai = metode === 'cash';
@@ -431,8 +450,7 @@ function ringkasBatch(p: Product): string {
     action="#struk"
     id="borang-kasir"
     data-transaksi={bolehTransaksi ? 'ya' : 'tidak'}
-    data-komisi-persen={commissionPersenAngka}
-    data-layanan-persen={servicePersenAngka}
+    data-persen-kanal={JSON.stringify(PERSEN_KANAL)}
     class="flex flex-col gap-4 lg:h-[calc(100dvh-var(--tinggi-topbar)-3rem)] lg:flex-row lg:items-start"
   >
     <input type="hidden" name="idempotency_key" value={kunci} />
@@ -1106,15 +1124,15 @@ function ringkasBatch(p: Product): string {
                 {rupiah(ongkirAngka)}
               </span>
             </div>
-            {/* Keempat biaya mengurangi Total untuk Shopee karena kasir mencatat pesanan yang uangnya sudah diterima, jadi yang relevan adalah yang cair ke toko; nama field mengikuti `get_escrow_detail`. */}
+            {/* Potongan platform mengurangi Total untuk marketplace karena kasir mencatat pesanan yang uangnya sudah diterima, jadi yang relevan adalah yang cair ke toko; nama baris mengikuti rincian penyelesaian Shopee dan Tokopedia. */}
             <div
               class:list={[
                 'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
-                kanalIsi === 'shopee' ? '' : 'hidden',
+                adalahMarketplace(kanalIsi) ? '' : 'hidden',
               ]}
               data-baris-biaya-komisi
             >
-              <span>Biaya Komisi (<span data-biaya-komisi-persen>{commissionPersenAngka}</span>%)</span>
+              <span>Biaya Komisi (<span data-biaya-komisi-persen>{persenIni.komisi}</span>%)</span>
               <span class="tabular-nums text-merah-700" data-biaya-komisi-tampil>
                 {minusRupiah(biayaKomisiAngka)}
               </span>
@@ -1126,7 +1144,7 @@ function ringkasBatch(p: Product): string {
               ]}
               data-baris-biaya-layanan
             >
-              <span>Biaya Layanan (<span data-biaya-layanan-persen>{servicePersenAngka}</span>%)</span>
+              <span>Biaya Layanan (<span data-biaya-layanan-persen>{persenIni.layanan}</span>%)</span>
               <span class="tabular-nums text-merah-700" data-biaya-layanan-tampil>
                 {minusRupiah(biayaLayananAngka)}
               </span>
@@ -1134,7 +1152,31 @@ function ringkasBatch(p: Product): string {
             <div
               class:list={[
                 'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
-                kanalIsi === 'shopee' ? '' : 'hidden',
+                kanalIsi === 'tiktok' ? '' : 'hidden',
+              ]}
+              data-baris-biaya-dinamis
+            >
+              <span>Komisi Dinamis (<span data-biaya-dinamis-persen>{persenIni.dinamis}</span>%)</span>
+              <span class="tabular-nums text-merah-700" data-biaya-dinamis-tampil>
+                {minusRupiah(biayaDinamisAngka)}
+              </span>
+            </div>
+            <div
+              class:list={[
+                'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
+                kanalIsi === 'tiktok' ? '' : 'hidden',
+              ]}
+              data-baris-biaya-logistik
+            >
+              <span>Biaya Layanan Logistik (<span data-biaya-logistik-persen>{persenIni.logistik}</span>%)</span>
+              <span class="tabular-nums text-merah-700" data-biaya-logistik-tampil>
+                {minusRupiah(biayaLogistikAngka)}
+              </span>
+            </div>
+            <div
+              class:list={[
+                'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
+                adalahMarketplace(kanalIsi) ? '' : 'hidden',
               ]}
               data-baris-biaya-pph
             >
@@ -1146,7 +1188,7 @@ function ringkasBatch(p: Product): string {
             <div
               class:list={[
                 'flex items-baseline justify-between gap-3 text-[var(--color-teks-lembut)]',
-                kanalIsi === 'shopee' ? '' : 'hidden',
+                adalahMarketplace(kanalIsi) ? '' : 'hidden',
               ]}
               data-baris-biaya-proses
             >
@@ -1158,7 +1200,7 @@ function ringkasBatch(p: Product): string {
 
             <div class="kotak-total">
               <p class="font-medium text-merah-700" data-label-total>
-                {kanalIsi === 'shopee' ? 'Estimasi Total Penghasilan' : 'Total'}
+                {adalahMarketplace(kanalIsi) ? 'Estimasi Total Penghasilan' : 'Total'}
               </p>
               <p class="kotak-total-angka" data-total>{rupiah(totalTagihan)}</p>
             </div>
@@ -1248,12 +1290,12 @@ function ringkasBatch(p: Product): string {
                     </td>
                   </tr>
                 )}
-                {/* Untuk Shopee keempat biaya sudah mengurangi Total; ditulis sebagai baris struk biasa supaya penjumlahannya terlihat seperti Diskon dan Ongkos kirim. */}
-                {struk.sales_channel === 'shopee' && (
+                {/* Untuk marketplace potongan platform sudah mengurangi Total; ditulis sebagai baris struk biasa supaya penjumlahannya terlihat seperti Diskon dan Ongkos kirim. */}
+                {struk.sales_channel !== 'toko' && (
                   <Fragment>
                     <tr>
                       <td class="py-0.5">
-                        Biaya Komisi ({struk.platform_commission_fee_percent * 100}%)
+                        Biaya Komisi ({persenTampil(struk.platform_commission_fee_percent)}%)
                       </td>
                       <td class="py-0.5 text-right tabular-nums">
                         -{rupiah(struk.platform_commission_fee)}
@@ -1262,10 +1304,30 @@ function ringkasBatch(p: Product): string {
                     {struk.platform_service_fee > 0 && (
                       <tr>
                         <td class="py-0.5">
-                          Biaya Layanan ({struk.platform_service_fee_percent * 100}%)
+                          Biaya Layanan ({persenTampil(struk.platform_service_fee_percent)}%)
                         </td>
                         <td class="py-0.5 text-right tabular-nums">
                           -{rupiah(struk.platform_service_fee)}
+                        </td>
+                      </tr>
+                    )}
+                    {struk.platform_dynamic_commission_fee > 0 && (
+                      <tr>
+                        <td class="py-0.5">
+                          Komisi Dinamis ({persenTampil(struk.platform_dynamic_commission_fee_percent)}%)
+                        </td>
+                        <td class="py-0.5 text-right tabular-nums">
+                          -{rupiah(struk.platform_dynamic_commission_fee)}
+                        </td>
+                      </tr>
+                    )}
+                    {struk.platform_logistics_fee > 0 && (
+                      <tr>
+                        <td class="py-0.5">
+                          Biaya Layanan Logistik ({persenTampil(struk.platform_logistics_fee_percent)}%)
+                        </td>
+                        <td class="py-0.5 text-right tabular-nums">
+                          -{rupiah(struk.platform_logistics_fee)}
                         </td>
                       </tr>
                     )}
@@ -1285,7 +1347,7 @@ function ringkasBatch(p: Product): string {
                 )}
                 <tr class="font-bold">
                   <td class="py-0.5">
-                    {struk.sales_channel === 'shopee' ? 'Estimasi Total Penghasilan' : 'Total'}
+                    {struk.sales_channel !== 'toko' ? 'Estimasi Total Penghasilan' : 'Total'}
                   </td>
                   <td class="py-0.5 text-right tabular-nums">{rupiah(struk.total_amount)}</td>
                 </tr>
@@ -1367,16 +1429,28 @@ function ringkasBatch(p: Product): string {
                     <td class="nota-kanan">-{rupiah(struk.shipping_cost)}</td>
                   </tr>
                 )}
-                {struk.sales_channel === 'shopee' && (
+                {struk.sales_channel !== 'toko' && (
                   <Fragment>
                     <tr>
-                      <td>Biaya Komisi ({struk.platform_commission_fee_percent * 100}%)</td>
+                      <td>Biaya Komisi ({persenTampil(struk.platform_commission_fee_percent)}%)</td>
                       <td class="nota-kanan">-{rupiah(struk.platform_commission_fee)}</td>
                     </tr>
                     {struk.platform_service_fee > 0 && (
                       <tr>
-                        <td>Biaya Layanan ({struk.platform_service_fee_percent * 100}%)</td>
+                        <td>Biaya Layanan ({persenTampil(struk.platform_service_fee_percent)}%)</td>
                         <td class="nota-kanan">-{rupiah(struk.platform_service_fee)}</td>
+                      </tr>
+                    )}
+                    {struk.platform_dynamic_commission_fee > 0 && (
+                      <tr>
+                        <td>Komisi Dinamis ({persenTampil(struk.platform_dynamic_commission_fee_percent)}%)</td>
+                        <td class="nota-kanan">-{rupiah(struk.platform_dynamic_commission_fee)}</td>
+                      </tr>
+                    )}
+                    {struk.platform_logistics_fee > 0 && (
+                      <tr>
+                        <td>Biaya Layanan Logistik ({persenTampil(struk.platform_logistics_fee_percent)}%)</td>
+                        <td class="nota-kanan">-{rupiah(struk.platform_logistics_fee)}</td>
                       </tr>
                     )}
                     <tr>
@@ -1390,7 +1464,7 @@ function ringkasBatch(p: Product): string {
                   </Fragment>
                 )}
                 <tr class="nota-total">
-                  <td>{struk.sales_channel === 'shopee' ? 'Estimasi Total Penghasilan' : 'Total'}</td>
+                  <td>{struk.sales_channel !== 'toko' ? 'Estimasi Total Penghasilan' : 'Total'}</td>
                   <td class="nota-kanan">{rupiah(struk.total_amount)}</td>
                 </tr>
                 {struk.amount_paid !== null && (
@@ -1448,9 +1522,10 @@ function ringkasBatch(p: Product): string {
       maximumFractionDigits: 0,
     });
 
-    // PPh dan biaya proses sama dengan frontmatter dan `pos/service.rs` (tiga tempat harus ikut berubah); persen komisi dan layanan datang dari pengaturan lewat data- di form.
-    var SHOPEE_WITHHOLDING_TAX_PERSEN = 0.5;
-    var SHOPEE_ORDER_PROCESSING_FEE = 1250;
+    // PPh dan biaya proses sama dengan frontmatter dan `pos/service.rs` (tiga tempat harus ikut berubah); persen per kanal datang dari pengaturan lewat data- di form.
+    var PPH_UMKM_PERSEN = 0.5;
+    var BIAYA_PROSES_PESANAN = 1250;
+    var persenKanal = JSON.parse(borang.dataset.persenKanal || '{}');
 
     // Sama dengan `biayaPersenRupiah` di frontmatter dan `rupiah_bulat` di `pos/service.rs`: aritmetika bilangan bulat agar tak meleset di pembulatan ,50.
     function biayaPersenRupiah(basis, persen) {
@@ -1487,6 +1562,12 @@ function ringkasBatch(p: Product): string {
     var barisBiayaLayanan = borang.querySelector('[data-baris-biaya-layanan]');
     var selBiayaLayanan = borang.querySelector('[data-biaya-layanan-tampil]');
     var selBiayaLayananPersen = borang.querySelector('[data-biaya-layanan-persen]');
+    var barisBiayaDinamis = borang.querySelector('[data-baris-biaya-dinamis]');
+    var selBiayaDinamis = borang.querySelector('[data-biaya-dinamis-tampil]');
+    var selBiayaDinamisPersen = borang.querySelector('[data-biaya-dinamis-persen]');
+    var barisBiayaLogistik = borang.querySelector('[data-baris-biaya-logistik]');
+    var selBiayaLogistik = borang.querySelector('[data-biaya-logistik-tampil]');
+    var selBiayaLogistikPersen = borang.querySelector('[data-biaya-logistik-persen]');
     var barisBiayaPph = borang.querySelector('[data-baris-biaya-pph]');
     var selBiayaPph = borang.querySelector('[data-biaya-pph-tampil]');
     var barisBiayaProses = borang.querySelector('[data-baris-biaya-proses]');
@@ -1662,6 +1743,7 @@ function ringkasBatch(p: Product): string {
 
       // --- Pembayaran ---------------------------------------------------
       var isShopee = kanal() === 'shopee';
+      var isTiktok = kanal() === 'tiktok';
       var isMarketplace = kanal() !== 'toko';
 
       // Ongkir tidak berlaku untuk marketplace: kolom disembunyikan dan nilainya dipaksa nol agar sisa angka kanal Toko tidak ikut terhitung.
@@ -1676,30 +1758,32 @@ function ringkasBatch(p: Product): string {
       }
       if (blokMetodePilihan) blokMetodePilihan.classList.toggle('hidden', isMarketplace);
       if (blokMetodeShopee) blokMetodeShopee.classList.toggle('hidden', !isShopee);
-      if (blokMetodeTiktok) blokMetodeTiktok.classList.toggle('hidden', kanal() !== 'tiktok');
+      if (blokMetodeTiktok) blokMetodeTiktok.classList.toggle('hidden', !isTiktok);
       if (blokOngkir) blokOngkir.classList.toggle('hidden', isMarketplace);
       if (blokDibayar) blokDibayar.classList.toggle('hidden', isMarketplace);
       if (blokCepat) blokCepat.classList.toggle('hidden', isMarketplace);
 
-      // Persen dari pengaturan owner, ditulis server ke atribut form (sama dengan `commissionPersenAngka` di frontmatter).
-      var commissionPersen = parseFloat(borang.dataset.komisiPersen || '0');
-      var servicePersen = parseFloat(borang.dataset.layananPersen || '0');
+      // Persen dari pengaturan owner, ditulis server ke atribut form (sama dengan `PERSEN_KANAL` di frontmatter).
+      var persen = persenKanal[kanal()] || { komisi: 0, layanan: 0, dinamis: 0, logistik: 0 };
 
-      // Basis potongan Shopee: omzet barang, sama dengan `basis_fee` di `pos/service.rs`.
+      // Basis potongan: omzet barang, sama dengan `subtotal` di `Potongan::hitung` pada `pos/service.rs`.
       var basisFee = subtotal;
-      var biayaKomisi = isShopee ? biayaPersenRupiah(basisFee, commissionPersen) : 0;
-      var biayaLayanan = isShopee ? biayaPersenRupiah(basisFee, servicePersen) : 0;
-      var biayaPph = isShopee ? biayaPersenRupiah(basisFee, SHOPEE_WITHHOLDING_TAX_PERSEN) : 0;
+      var biayaKomisi = biayaPersenRupiah(basisFee, persen.komisi);
+      var biayaLayanan = biayaPersenRupiah(basisFee, persen.layanan);
+      var biayaDinamis = biayaPersenRupiah(basisFee, persen.dinamis);
+      var biayaLogistik = biayaPersenRupiah(basisFee, persen.logistik);
+      var biayaPph = isMarketplace ? biayaPersenRupiah(basisFee, PPH_UMKM_PERSEN) : 0;
       // Rp1.250 baru berlaku setelah ada barang di keranjang (sama dengan `biayaOrderProcessingAngka`).
-      var biayaProses = isShopee && jalur > 0 ? SHOPEE_ORDER_PROCESSING_FEE : 0;
+      var biayaProses = isMarketplace && jalur > 0 ? BIAYA_PROSES_PESANAN : 0;
 
       // Nol ditulis polos agar tak tampak "-Rp0" (sama dengan `minusRupiah` di frontmatter).
       function minusRupiah(n) {
         return n > 0 ? '-' + rupiah.format(n) : rupiah.format(0);
       }
 
-      // Untuk Shopee ini estimasi yang cair ke toko setelah empat potongan (bukan yang dibayar pembeli), makanya label berganti; `biaya` ongkir sudah nol sehingga rumusnya satu.
-      var total = subtotal - potongan + biaya - biayaKomisi - biayaLayanan - biayaPph - biayaProses;
+      // Untuk marketplace ini estimasi yang cair ke toko setelah potongan platform (bukan yang dibayar pembeli), makanya label berganti; `biaya` ongkir sudah nol sehingga rumusnya satu.
+      var total =
+        subtotal - potongan + biaya - biayaKomisi - biayaLayanan - biayaDinamis - biayaLogistik - biayaPph - biayaProses;
       var adaTunai = tunai();
 
       selSubtotal.textContent = rupiah.format(subtotal);
@@ -1707,31 +1791,23 @@ function ringkasBatch(p: Product): string {
       selDiskon.textContent = '-' + rupiah.format(potongan);
       if (barisOngkir) barisOngkir.classList.toggle('hidden', isMarketplace);
       selOngkir.textContent = rupiah.format(biaya);
-      if (labelTotal) labelTotal.textContent = isShopee ? 'Estimasi Total Penghasilan' : 'Total';
+      if (labelTotal) labelTotal.textContent = isMarketplace ? 'Estimasi Total Penghasilan' : 'Total';
       selTotal.textContent = rupiah.format(total);
 
-      if (barisBiayaKomisi && selBiayaKomisi) {
-        barisBiayaKomisi.classList.toggle('hidden', !isShopee);
-        if (isShopee) {
-          if (selBiayaKomisiPersen) selBiayaKomisiPersen.textContent = String(commissionPersen);
-          selBiayaKomisi.textContent = minusRupiah(biayaKomisi);
-        }
+      // Satu baris potongan: tampil hanya bila kanalnya mengenal komponen itu, dengan persen (bila ada) dan nominal minus.
+      function isiBiaya(baris, sel, selPersen, tampil, persenBaris, nilai) {
+        if (!baris || !sel) return;
+        baris.classList.toggle('hidden', !tampil);
+        if (!tampil) return;
+        if (selPersen) selPersen.textContent = String(persenBaris);
+        sel.textContent = minusRupiah(nilai);
       }
-      if (barisBiayaLayanan && selBiayaLayanan) {
-        barisBiayaLayanan.classList.toggle('hidden', !isShopee);
-        if (isShopee) {
-          if (selBiayaLayananPersen) selBiayaLayananPersen.textContent = String(servicePersen);
-          selBiayaLayanan.textContent = minusRupiah(biayaLayanan);
-        }
-      }
-      if (barisBiayaPph && selBiayaPph) {
-        barisBiayaPph.classList.toggle('hidden', !isShopee);
-        if (isShopee) selBiayaPph.textContent = minusRupiah(biayaPph);
-      }
-      if (barisBiayaProses && selBiayaProses) {
-        barisBiayaProses.classList.toggle('hidden', !isShopee);
-        if (isShopee) selBiayaProses.textContent = minusRupiah(biayaProses);
-      }
+      isiBiaya(barisBiayaKomisi, selBiayaKomisi, selBiayaKomisiPersen, isMarketplace, persen.komisi, biayaKomisi);
+      isiBiaya(barisBiayaLayanan, selBiayaLayanan, selBiayaLayananPersen, isShopee, persen.layanan, biayaLayanan);
+      isiBiaya(barisBiayaDinamis, selBiayaDinamis, selBiayaDinamisPersen, isTiktok, persen.dinamis, biayaDinamis);
+      isiBiaya(barisBiayaLogistik, selBiayaLogistik, selBiayaLogistikPersen, isTiktok, persen.logistik, biayaLogistik);
+      isiBiaya(barisBiayaPph, selBiayaPph, null, isMarketplace, 0, biayaPph);
+      isiBiaya(barisBiayaProses, selBiayaProses, null, isMarketplace, 0, biayaProses);
 
       // Kolom uang diterima hanya untuk tunai; dimatikan supaya angkanya tidak terkirim sebagai pembayaran yang tak pernah terjadi.
       dibayar.disabled = !adaTunai;

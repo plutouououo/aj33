@@ -61,7 +61,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     baris(['Harga pokok', summary.cogs]),
     baris(['Beban', summary.expenses]),
     baris([
-      'Potongan Shopee (komisi + layanan + PPh 0,5% + Rp1.250/transaksi)',
+      'Potongan marketplace (komisi + biaya platform + PPh 0,5% + Rp1.250/transaksi)',
       summary.platform_fees,
     ]),
     baris(['Laba', summary.profit]),

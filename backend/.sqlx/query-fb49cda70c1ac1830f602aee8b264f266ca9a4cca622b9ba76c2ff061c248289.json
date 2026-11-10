@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, idempotency_key, type AS transaction_type, customer_id,\n               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,\n               shipping_cost, shipping_borne_by_store, total_amount,\n               platform_commission_fee_percent, platform_commission_fee,\n               platform_service_fee_percent, platform_service_fee,\n               platform_withholding_tax, platform_order_processing_fee,\n               amount_paid, change_amount, status, created_at AS \"created_at!\"\n        FROM transactions\n        ORDER BY created_at DESC\n        LIMIT $1\n        ",
+  "query": "\n        SELECT id, idempotency_key, type AS transaction_type, customer_id,\n               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,\n               shipping_cost, shipping_borne_by_store, total_amount,\n               platform_commission_fee_percent, platform_commission_fee,\n               platform_service_fee_percent, platform_service_fee,\n               platform_dynamic_commission_fee_percent, platform_dynamic_commission_fee,\n               platform_logistics_fee_percent, platform_logistics_fee,\n               platform_withholding_tax, platform_order_processing_fee,\n               amount_paid, change_amount, status, created_at AS \"created_at!\"\n        FROM transactions\n        ORDER BY created_at DESC\n        LIMIT $1\n        ",
   "describe": {
     "columns": [
       {
@@ -85,31 +85,51 @@
       },
       {
         "ordinal": 16,
-        "name": "platform_withholding_tax",
+        "name": "platform_dynamic_commission_fee_percent",
         "type_info": "Numeric"
       },
       {
         "ordinal": 17,
-        "name": "platform_order_processing_fee",
+        "name": "platform_dynamic_commission_fee",
         "type_info": "Numeric"
       },
       {
         "ordinal": 18,
-        "name": "amount_paid",
+        "name": "platform_logistics_fee_percent",
         "type_info": "Numeric"
       },
       {
         "ordinal": 19,
-        "name": "change_amount",
+        "name": "platform_logistics_fee",
         "type_info": "Numeric"
       },
       {
         "ordinal": 20,
+        "name": "platform_withholding_tax",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 21,
+        "name": "platform_order_processing_fee",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 22,
+        "name": "amount_paid",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 23,
+        "name": "change_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 24,
         "name": "status",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 21,
+        "ordinal": 25,
         "name": "created_at!",
         "type_info": "Timestamptz"
       }
@@ -138,11 +158,15 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
+      false,
       true,
       true,
       false,
       false
     ]
   },
-  "hash": "e116650705f0f58e5a9660800f94b7e2346366216bf8ed79725daa19cee2c4a5"
+  "hash": "fb49cda70c1ac1830f602aee8b264f266ca9a4cca622b9ba76c2ff061c248289"
 }

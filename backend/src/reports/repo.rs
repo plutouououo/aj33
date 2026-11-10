@@ -122,7 +122,7 @@ pub struct SalesSummary {
     pub cogs: Decimal,
     /// Beban toko: tabel `expenses` ditambah `shipping_subsidy`.
     pub expenses: Decimal,
-    /// Jumlah `platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee` periode ini dari kolom tersimpan (migrasi 0017/0018); komisi, layanan, dan biaya proses nol selain Shopee, PPh juga terisi di toko.
+    /// Jumlah `platform_fee_total` (seluruh potongan Shopee dan Tokopedia plus PPh) periode ini dari kolom tersimpan (migrasi 0038); komisi, layanan, dan biaya proses nol di toko, PPh terisi di semua kanal.
     pub platform_fees: Decimal,
     /// `revenue - cogs - expenses - platform_fees`.
     pub profit: Decimal,
@@ -139,11 +139,7 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
                COALESCE(SUM(t.shipping_charged), 0) AS "shipping!",
                COALESCE(SUM(t.shipping_subsidy), 0) AS "shipping_subsidy!",
                COUNT(*)                          AS "count!",
-               COALESCE(
-                   SUM(t.platform_commission_fee + t.platform_service_fee
-                       + t.platform_withholding_tax + t.platform_order_processing_fee),
-                   0
-               )                                 AS "platform_fees!"
+               COALESCE(SUM(t.platform_fee_total), 0) AS "platform_fees!"
         FROM transactions t
         WHERE t.status = 'completed'
           AND ($1::date IS NULL
@@ -254,7 +250,7 @@ pub struct ChannelSummary {
     pub channel: String,
     pub revenue: Decimal,
     pub cogs: Decimal,
-    /// Komisi, layanan, PPh, dan biaya proses dari kolom tersimpan; PPh juga terisi di kanal toko (migrasi 0035).
+    /// Seluruh potongan platform (`platform_fee_total`); PPh juga terisi di kanal toko (migrasi 0035).
     pub platform_fees: Decimal,
     pub shipping_subsidy: Decimal,
     /// `revenue - cogs - platform_fees - shipping_subsidy`; tabel `expenses` tak ikut karena tak dicatat per kanal, jadi jumlah laba kanal lebih besar dari `SalesSummary::profit` sebesar beban itu.
@@ -276,11 +272,7 @@ pub async fn channel_summaries(
                COALESCE(SUM(t.subtotal - t.discount_amount), 0) AS "revenue!",
                COALESCE(SUM(t.shipping_subsidy), 0) AS "shipping_subsidy!",
                COUNT(*)                          AS "count!",
-               COALESCE(
-                   SUM(t.platform_commission_fee + t.platform_service_fee
-                       + t.platform_withholding_tax + t.platform_order_processing_fee),
-                   0
-               )                                 AS "platform_fees!"
+               COALESCE(SUM(t.platform_fee_total), 0) AS "platform_fees!"
         FROM transactions t
         WHERE t.status = 'completed'
           AND ($1::date IS NULL
@@ -729,12 +721,16 @@ pub struct TransactionDetail {
     pub platform_commission_fee: Decimal,
     pub platform_service_fee_percent: Decimal,
     pub platform_service_fee: Decimal,
+    pub platform_dynamic_commission_fee_percent: Decimal,
+    pub platform_dynamic_commission_fee: Decimal,
+    pub platform_logistics_fee_percent: Decimal,
+    pub platform_logistics_fee: Decimal,
     pub platform_withholding_tax: Decimal,
     pub platform_order_processing_fee: Decimal,
     /// Harga pokok baris yang keluar untuk transaksi ini, batas atas bila `items_without_cost > 0` (lihat `SalesSummary::cogs`).
     pub cogs: Decimal,
     pub items_without_cost: i64,
-    /// `subtotal - discount_amount - cogs - (platform_commission_fee + platform_service_fee + platform_withholding_tax + platform_order_processing_fee) - ongkir ditanggung toko`; beban toko lain tak ikut karena milik periode.
+    /// `subtotal - discount_amount - cogs - platform_fee_total - ongkir ditanggung toko`; beban toko lain tak ikut karena milik periode.
     pub net_profit: Decimal,
     pub items: Vec<TransactionDetailItem>,
 }
@@ -766,8 +762,13 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
                t.platform_commission_fee         AS "platform_commission_fee!",
                t.platform_service_fee_percent    AS "platform_service_fee_percent!",
                t.platform_service_fee            AS "platform_service_fee!",
+               t.platform_dynamic_commission_fee_percent AS "platform_dynamic_commission_fee_percent!",
+               t.platform_dynamic_commission_fee AS "platform_dynamic_commission_fee!",
+               t.platform_logistics_fee_percent  AS "platform_logistics_fee_percent!",
+               t.platform_logistics_fee          AS "platform_logistics_fee!",
                t.platform_withholding_tax        AS "platform_withholding_tax!",
-               t.platform_order_processing_fee   AS "platform_order_processing_fee!"
+               t.platform_order_processing_fee   AS "platform_order_processing_fee!",
+               t.platform_fee_total              AS "platform_fee_total!"
         FROM transactions t
         LEFT JOIN customers c ON c.id = t.customer_id
         JOIN users u ON u.id = t.cashier_user_id
@@ -824,11 +825,6 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
     .fetch_one(pool)
     .await?;
 
-    let platform_fees = head.platform_commission_fee
-        + head.platform_service_fee
-        + head.platform_withholding_tax
-        + head.platform_order_processing_fee;
-
     Ok(Some(TransactionDetail {
         id: head.id,
         created_at: head.created_at,
@@ -853,6 +849,10 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
         platform_commission_fee: head.platform_commission_fee,
         platform_service_fee_percent: head.platform_service_fee_percent,
         platform_service_fee: head.platform_service_fee,
+        platform_dynamic_commission_fee_percent: head.platform_dynamic_commission_fee_percent,
+        platform_dynamic_commission_fee: head.platform_dynamic_commission_fee,
+        platform_logistics_fee_percent: head.platform_logistics_fee_percent,
+        platform_logistics_fee: head.platform_logistics_fee,
         platform_withholding_tax: head.platform_withholding_tax,
         platform_order_processing_fee: head.platform_order_processing_fee,
         cogs: pokok.cogs,
@@ -860,7 +860,7 @@ pub async fn transaction_detail(pool: &PgPool, id: Uuid) -> AppResult<Option<Tra
         net_profit: head.subtotal
             - head.discount_amount
             - pokok.cogs
-            - platform_fees
+            - head.platform_fee_total
             - head.shipping_subsidy,
         items,
     }))
@@ -982,11 +982,15 @@ pub struct BarisHarian {
     pub pelanggan: Option<String>,
     /// Omzet barang `subtotal - discount_amount`, kolom Cash di template.
     pub bruto: Decimal,
-    /// Uang yang benar-benar cair: `total_amount` (sudah dipotong komisi, layanan, PPh, dan biaya proses untuk Shopee).
+    /// Uang yang benar-benar cair: `total_amount` (sudah dipotong semua potongan platform untuk Shopee dan Tokopedia).
     pub bersih: Decimal,
     pub pph: Decimal,
     pub komisi: Decimal,
     pub layanan: Decimal,
+    /// Komisi dinamis Tokopedia, nol di kanal lain.
+    pub komisi_dinamis: Decimal,
+    /// Biaya layanan logistik Tokopedia, nol di kanal lain.
+    pub logistik: Decimal,
     pub biaya_proses: Decimal,
     /// Ongkir yang ditanggung toko pada transaksi ini; beban harian yang tak ada di tabel `expenses`.
     pub subsidi_ongkir: Decimal,
@@ -1039,6 +1043,8 @@ pub async fn laporan_harian(
                t.platform_withholding_tax  AS "pph!",
                t.platform_commission_fee   AS "komisi!",
                t.platform_service_fee      AS "layanan!",
+               t.platform_dynamic_commission_fee AS "komisi_dinamis!",
+               t.platform_logistics_fee    AS "logistik!",
                t.platform_order_processing_fee AS "biaya_proses!",
                t.shipping_subsidy          AS "subsidi_ongkir!"
         FROM transactions t
@@ -1095,6 +1101,8 @@ pub async fn laporan_harian(
                 id: t.id,
                 komisi: t.komisi,
                 layanan: t.layanan,
+                komisi_dinamis: t.komisi_dinamis,
+                logistik: t.logistik,
                 biaya_proses: t.biaya_proses,
                 subsidi_ongkir: t.subsidi_ongkir,
                 kanal: t.kanal,

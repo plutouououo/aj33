@@ -1,5 +1,5 @@
 ---
-/** Pengaturan harga: batas grosir bawaan untuk produk yang tak mengatur batasnya sendiri (jumlah pack lebih dari batas memakai harga grosir kanalnya) dan persen komisi/layanan Shopee yang jadi bawaan kasir. */
+/** Pengaturan harga: batas grosir bawaan untuk produk yang tak mengatur batasnya sendiri (jumlah pack lebih dari batas memakai harga grosir kanalnya) dan persen potongan Shopee dan Tokopedia yang jadi bawaan kasir. */
 import Galat from '../../components/Galat.astro';
 import PengaturanShell from '../../layouts/PengaturanShell.astro';
 import { api, ApiRequestError, type PricingSettings } from '../../lib/api';
@@ -14,6 +14,9 @@ let sukses: string | null = null;
 let isiBatas: string | null = null;
 let isiKomisi: string | null = null;
 let isiLayanan: string | null = null;
+let isiKomisiTiktok: string | null = null;
+let isiDinamis: string | null = null;
+let isiLogistik: string | null = null;
 
 /** Persen dari form (17,25) jadi pecahan backend (0,1725); `null` bila bukan angka 0–100. */
 function keDesimal(isi: string): number | null {
@@ -46,6 +49,32 @@ if (Astro.request.method === 'POST') {
         galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan biaya Shopee.';
       }
     }
+  } else if (aksi === 'biaya-tiktok') {
+    isiKomisiTiktok = String(form.get('tiktok_commission_percent') ?? '').trim();
+    isiDinamis = String(form.get('tiktok_dynamic_commission_percent') ?? '').trim();
+    isiLogistik = String(form.get('tiktok_logistics_percent') ?? '').trim();
+    const komisi = keDesimal(isiKomisiTiktok);
+    const dinamis = keDesimal(isiDinamis);
+    const logistik = keDesimal(isiLogistik);
+
+    if (komisi === null || dinamis === null || logistik === null) {
+      galat = 'Persentase biaya Tokopedia harus berupa angka 0 sampai 100.';
+    } else {
+      try {
+        await api<PricingSettings>('/settings/tiktok-fees', {
+          method: 'PATCH',
+          token,
+          body: {
+            tiktok_commission_percent: komisi,
+            tiktok_dynamic_commission_percent: dinamis,
+            tiktok_logistics_percent: logistik,
+          },
+        });
+        return Astro.redirect(sesudahAksi(Astro.url, 'simpan-biaya-tiktok'), 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan biaya Tokopedia.';
+      }
+    }
   } else {
     isiBatas = String(form.get('wholesale_threshold_qty') ?? '').trim();
     const batas = Number(isiBatas);
@@ -71,6 +100,7 @@ if (!galat) {
   sukses = pesanDari(Astro.url, {
     simpan: 'Batas grosir tersimpan. Berlaku untuk transaksi berikutnya.',
     'simpan-biaya': 'Biaya Shopee tersimpan. Jadi bawaan kasir untuk pesanan Shopee berikutnya.',
+    'simpan-biaya-tiktok': 'Biaya Tokopedia tersimpan. Jadi bawaan kasir untuk pesanan Tokopedia berikutnya.',
   });
 }
 
@@ -153,6 +183,66 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
     <button class="tombol-halus" type="submit">Simpan biaya Shopee</button>
   </form>
 
+  <form method="POST" class="kartu borang-tegak mb-6">
+    <input type="hidden" name="aksi" value="biaya-tiktok" />
+    <h2 class="font-semibold">Biaya Tokopedia / TikTok Shop</h2>
+    <p class="text-sm text-[var(--color-teks-lembut)]">
+      Ketiganya dihitung dari omzet barang, sama seperti rincian "Detail Penyelesaian Pembayaran" di aplikasi
+      penjual. Cocokkan dengan pesanan asli bila angkanya berubah.
+    </p>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="tiktok_commission_percent">Biaya komisi platform (%)</label>
+      <input
+        class="kolom tabular-nums"
+        id="tiktok_commission_percent"
+        name="tiktok_commission_percent"
+        type="number"
+        min="0"
+        max="100"
+        step="0.01"
+        inputmode="decimal"
+        value={isiKomisiTiktok ?? keTeksPersen(pengaturan.tiktok_commission_percent)}
+        required
+      />
+    </div>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="tiktok_dynamic_commission_percent">Komisi dinamis (%)</label>
+      <input
+        class="kolom tabular-nums"
+        id="tiktok_dynamic_commission_percent"
+        name="tiktok_dynamic_commission_percent"
+        type="number"
+        min="0"
+        max="100"
+        step="0.01"
+        inputmode="decimal"
+        value={isiDinamis ?? keTeksPersen(pengaturan.tiktok_dynamic_commission_percent)}
+        required
+      />
+    </div>
+
+    <div class="isian isian-pendek">
+      <label class="label" for="tiktok_logistics_percent">Biaya layanan logistik (%)</label>
+      <input
+        class="kolom tabular-nums"
+        id="tiktok_logistics_percent"
+        name="tiktok_logistics_percent"
+        type="number"
+        min="0"
+        max="100"
+        step="0.01"
+        inputmode="decimal"
+        value={isiLogistik ?? keTeksPersen(pengaturan.tiktok_logistics_percent)}
+        required
+      />
+      <p class="isian-bantu">Ongkir yang ditanggung platform tidak ikut dihitung; hanya biaya layanan ini.</p>
+    </div>
+
+    <button class="tombol-halus" type="submit">Simpan biaya Tokopedia</button>
+  </form>
+
   <section class="kartu borang-tegak mb-6">
     <h2 class="font-semibold">Biaya tetap</h2>
     <p class="text-sm text-[var(--color-teks-lembut)]">Ditetapkan sistem dan tidak bisa diubah.</p>
@@ -167,7 +257,7 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
         readonly
         disabled
       />
-      <p class="isian-bantu">Dari omzet barang, untuk kanal Toko dan Shopee. Di Toko menjadi beban toko, tidak mengurangi tagihan pembeli.</p>
+      <p class="isian-bantu">Dari omzet barang, untuk kanal Toko, Shopee, dan Tokopedia. Di Toko menjadi beban toko, tidak mengurangi tagihan pembeli.</p>
     </div>
 
     <div class="isian isian-pendek">
@@ -180,7 +270,7 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
         readonly
         disabled
       />
-      <p class="isian-bantu">Per transaksi, hanya untuk kanal Shopee.</p>
+      <p class="isian-bantu">Per transaksi, untuk kanal Shopee dan Tokopedia.</p>
     </div>
   </section>
 </PengaturanShell>
