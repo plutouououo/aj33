@@ -2,6 +2,7 @@
 import AppShell from '../../layouts/AppShell.astro';
 import Paginasi from '../../components/Paginasi.astro';
 import Peringatan from '../../components/Peringatan.astro';
+import TabLaporan from '../../components/TabLaporan.astro';
 import { api, type SalesReport } from '../../lib/api';
 import { hitungTren, kg, labelTren, rupiah, waktu } from '../../lib/format';
 import {
@@ -12,6 +13,7 @@ import {
   bacaSaringan,
   kueriApi,
   kueriHalaman,
+  kueriPeriodeHalaman,
   labelJenis,
   labelKanal,
   labelMetode,
@@ -47,6 +49,8 @@ const kueri = kueriHalaman(saringan);
 // Penanda di tombol Filter ponsel: hanya saringan utama, periode baku (Bulan Ini) tidak dihitung.
 const jumlahSaringan = [saringan.periode !== 'month', saringan.metode, saringan.jenis].filter(Boolean).length;
 const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
+const kueriPeriode = kueriPeriodeHalaman(saringan).toString();
+const tautanBeban = `/laporan/beban${kueriPeriode ? `?${kueriPeriode}` : ''}`;
 
 const { summary, previous_summary, trend, channels, expense_breakdown, top_products, top_products_total, sales } =
   laporan;
@@ -95,7 +99,9 @@ const puncakLaba = Math.max(1, ...channels.map((k) => Math.abs(k.profit)));
 const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary.revenue) * 100 : 0;
 ---
 
-<AppShell judul="Laporan Penjualan" user={user}>
+<AppShell judul="Laporan · Ringkasan" user={user}>
+  <TabLaporan saringan={saringan} />
+
   {/* Saringan dikirim sebagai GET agar keadaan laporan ada di URL (bisa di-bookmark, dibagikan) dan tombol ekspor membaca periode yang sama; di ponsel formnya dibuka tombol Filter lewat checkbox `peer` (tanpa JS, seperti laci sidebar). */}
   <div class="mb-5 grid grid-cols-2 gap-2 md:block">
     <input type="checkbox" id="buka-saringan" class="peer sr-only" />
@@ -428,15 +434,21 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     </section>
 
     <section class="kartu">
-      <h2 class="mb-1 text-base font-bold">Rincian Beban</h2>
-      <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
-        {labelPeriode(saringan)} · total {rupiah(totalBeban)}
-      </p>
+      <div class="mb-5 flex items-start justify-between gap-3">
+        <div>
+          <h2 class="mb-1 text-base font-bold">Rincian Beban</h2>
+          <p class="text-xs text-[var(--color-teks-lembut)]">
+            {labelPeriode(saringan)} · total {rupiah(totalBeban)}
+          </p>
+        </div>
+        <a class="aksi-baris shrink-0" href={tautanBeban}>Catat beban →</a>
+      </div>
 
       {
         expense_breakdown.length === 0 ? (
           <p class="py-12 text-center text-sm text-[var(--color-teks-lembut)]">
             Belum ada beban tercatat pada periode ini.
+            <a class="block font-medium text-merah-700 hover:underline" href={tautanBeban}>Catat gaji, sewa, listrik, dan lainnya →</a>
           </p>
         ) : (
           <ul class="space-y-3">

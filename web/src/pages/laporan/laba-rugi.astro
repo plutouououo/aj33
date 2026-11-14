@@ -1,0 +1,187 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import Peringatan from '../../components/Peringatan.astro';
+import SaringanPeriode from '../../components/SaringanPeriode.astro';
+import TabLaporan from '../../components/TabLaporan.astro';
+import { api, type LabaRugi, type ProfitLossReport } from '../../lib/api';
+import { hitungTren, labelTren, rupiah, waktu } from '../../lib/format';
+import { PERIODE_TANGGAL, bacaSaringan, kueriPeriodeApi, kueriPeriodeHalaman, labelPeriode } from '../../lib/laporan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const saringan = bacaSaringan(Astro.url);
+const laporan = await api<ProfitLossReport>(`/reports/profit-loss?${kueriPeriodeApi(saringan)}`, { token });
+const { current: kini, previous: lalu } = laporan;
+
+const labelKini = labelPeriode(saringan);
+const labelLalu =
+  laporan.previous_from && laporan.previous_to
+    ? labelPeriode({ ...saringan, periode: PERIODE_TANGGAL, dari: laporan.previous_from, sampai: laporan.previous_to })
+    : '';
+// Periode baku (Bulan Ini, dst.) berjalan sampai hari ini sedangkan pembandingnya penuh, jadi selisihnya wajar besar di awal periode.
+const masihBerjalan = lalu !== null && saringan.periode !== PERIODE_TANGGAL;
+
+type Baris =
+  | { jenis: 'judul'; label: string }
+  | { jenis: 'beban-kosong' }
+  | { jenis: 'pos'; label: string; nilai: (l: LabaRugi) => number; kurang?: boolean; selalu?: boolean }
+  | { jenis: 'subtotal' | 'total'; label: string; nilai: (l: LabaRugi) => number; marjin?: boolean; kurang?: boolean };
+
+/** Beban per kategori kedua periode, urut dari yang terbesar periode ini supaya baris pembanding tak hilang bila kategorinya kosong sekarang. */
+const kategori = [...new Set([...kini.operating_expenses, ...(lalu?.operating_expenses ?? [])].map((b) => b.category))];
+const bebanKategori = (l: LabaRugi, k: string) => l.operating_expenses.find((b) => b.category === k)?.amount ?? 0;
+const bebanLalu = (k: string) => (lalu ? bebanKategori(lalu, k) : 0);
+kategori.sort((a, b) => bebanKategori(kini, b) - bebanKategori(kini, a) || bebanLalu(b) - bebanLalu(a));
+
+const BARIS: Baris[] = [
+  { jenis: 'judul', label: 'Penjualan' },
+  { jenis: 'pos', label: 'Penjualan kotor', nilai: (l) => l.gross_sales, selalu: true },
+  { jenis: 'pos', label: 'Diskon', nilai: (l) => l.discounts, kurang: true },
+  { jenis: 'subtotal', label: 'Penjualan bersih', nilai: (l) => l.net_sales },
+  { jenis: 'pos', label: 'Harga pokok penjualan', nilai: (l) => l.cogs, kurang: true, selalu: true },
+  { jenis: 'subtotal', label: 'Laba kotor', nilai: (l) => l.gross_profit, marjin: true },
+
+  { jenis: 'judul', label: 'Biaya penjualan' },
+  { jenis: 'pos', label: 'Komisi platform', nilai: (l) => l.commission_fee, kurang: true },
+  { jenis: 'pos', label: 'Komisi dinamis', nilai: (l) => l.dynamic_commission_fee, kurang: true },
+  { jenis: 'pos', label: 'Biaya layanan', nilai: (l) => l.service_fee, kurang: true },
+  { jenis: 'pos', label: 'Biaya layanan logistik', nilai: (l) => l.logistics_fee, kurang: true },
+  { jenis: 'pos', label: 'Biaya proses pesanan', nilai: (l) => l.order_processing_fee, kurang: true },
+  { jenis: 'pos', label: 'Ongkir ditanggung toko', nilai: (l) => l.shipping_subsidy, kurang: true },
+  { jenis: 'subtotal', label: 'Jumlah biaya penjualan', nilai: (l) => l.selling_costs, kurang: true },
+
+  { jenis: 'judul', label: 'Beban operasional' },
+  ...(kategori.length === 0 ? [{ jenis: 'beban-kosong' } as const] : []),
+  ...kategori.map((k): Baris => ({ jenis: 'pos', label: k, nilai: (l) => bebanKategori(l, k), kurang: true, selalu: true })),
+  { jenis: 'subtotal', label: 'Jumlah beban operasional', nilai: (l) => l.operating_expenses_total, kurang: true },
+
+  { jenis: 'subtotal', label: 'Laba sebelum pajak', nilai: (l) => l.profit_before_tax },
+  { jenis: 'pos', label: 'PPh final UMKM', nilai: (l) => l.withholding_tax, kurang: true, selalu: true },
+  { jenis: 'total', label: 'Laba bersih', nilai: (l) => l.net_profit, marjin: true },
+];
+
+const tampil = BARIS.filter((b) => b.jenis !== 'pos' || b.selalu || b.nilai(kini) !== 0 || (lalu !== null && b.nilai(lalu) !== 0));
+
+/** Potongan ditulis dalam kurung seperti laporan keuangan; nol ditulis tanda pisah agar baris kosong tak terbaca sebagai angka. */
+function angkaPos(n: number, kurang = false): string {
+  if (n === 0) return '—';
+  return kurang ? `(${rupiah(n)})` : rupiah(n);
+}
+
+function marjin(l: LabaRugi, n: number): string {
+  return l.net_sales > 0 ? `${((n / l.net_sales) * 100).toFixed(1)}%` : '—';
+}
+
+const kueriBeban = kueriPeriodeHalaman(saringan).toString();
+const tautanBeban = `/laporan/beban${kueriBeban ? `?${kueriBeban}` : ''}`;
+const dicetak = waktu(new Date().toISOString());
+---
+
+<AppShell judul="Laporan · Laba Rugi" user={user}>
+  <TabLaporan saringan={saringan} />
+  <SaringanPeriode saringan={saringan} />
+
+  {
+    kini.items_without_cost > 0 && (
+      <Peringatan class="mb-5 print:hidden">
+        {kini.items_without_cost} baris penjualan keluar dari batch yang harga belinya belum diisi.
+        Selama itu, <strong>harga pokok terlalu kecil dan semua laba di bawah terlalu besar</strong>.
+      </Peringatan>
+    )
+  }
+
+  <section class="kartu-rapat lembar-cetak overflow-x-auto">
+    <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-garis)] px-5 py-4">
+      <div>
+        <h2 class="text-base font-bold">Laporan Laba Rugi</h2>
+        <p class="text-xs text-[var(--color-teks-lembut)]">
+          {labelKini}{lalu && ` · dibandingkan ${labelLalu}`} · {kini.transaction_count} transaksi
+        </p>
+        <p class="hidden text-xs text-[var(--color-teks-lembut)] print:block">Dicetak {dicetak}</p>
+      </div>
+      <button type="button" class="tombol-halus hanya-js print:hidden" data-cetak>Cetak / Simpan PDF</button>
+    </div>
+
+    <table class="w-full min-w-[22rem] text-sm">
+      <thead>
+        <tr class="text-xs font-semibold uppercase tracking-wider text-[var(--color-teks-lembut)]">
+          <th class="px-5 py-3 text-left">Keterangan</th>
+          <th class="px-5 py-3 text-right">{labelKini}</th>
+          {lalu && <th class="px-5 py-3 text-right">{labelLalu}</th>}
+          {lalu && <th class="px-5 py-3 text-right max-sm:hidden">Perubahan</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {
+          tampil.map((b) => {
+            if (b.jenis === 'judul') {
+              return (
+                <tr>
+                  <th colspan={lalu ? 4 : 2} class="border-t border-[var(--color-garis)] px-5 pb-1 pt-4 text-left text-xs font-semibold uppercase tracking-wider text-merah-700">
+                    {b.label}
+                  </th>
+                </tr>
+              );
+            }
+            if (b.jenis === 'beban-kosong') {
+              return (
+                <tr>
+                  <td colspan={lalu ? 4 : 2} class="py-1.5 pl-8 pr-5 text-xs text-[var(--color-teks-lembut)]">
+                    Belum ada beban tercatat, jadi laba bersih belum dikurangi gaji, sewa, listrik, dan sebagainya.{' '}
+                    <a class="font-medium text-merah-700 hover:underline print:hidden" href={tautanBeban}>Catat beban →</a>
+                  </td>
+                </tr>
+              );
+            }
+            const n = b.nilai(kini);
+            const m = lalu ? b.nilai(lalu) : null;
+            const tren = labelTren(hitungTren(n, m)) || '—';
+            if (b.jenis === 'pos') {
+              return (
+                <tr>
+                  <td class="py-1.5 pl-8 pr-5">{b.label}</td>
+                  <td class="sel-angka px-5 py-1.5">{angkaPos(n, b.kurang)}</td>
+                  {lalu && <td class="sel-angka px-5 py-1.5 text-[var(--color-teks-lembut)]">{angkaPos(m!, b.kurang)}</td>}
+                  {lalu && <td class="sel-angka px-5 py-1.5 text-xs text-[var(--color-teks-lembut)] max-sm:hidden">{tren}</td>}
+                </tr>
+              );
+            }
+            const total = b.jenis === 'total';
+            return (
+              <tr class={total ? 'border-t-2 border-[var(--color-teks)] bg-[var(--color-garis-lembut)]' : 'border-t border-[var(--color-garis)]'}>
+                <td class:list={['px-5 py-2.5', total ? 'text-base font-bold' : 'font-semibold']}>
+                  {b.label}
+                  {b.marjin && <span class="ml-2 text-xs font-normal text-[var(--color-teks-lembut)]">marjin {marjin(kini, n)}</span>}
+                </td>
+                <td class:list={['sel-angka px-5 py-2.5', total ? 'text-base font-bold' : 'font-semibold', n < 0 && 'text-red-600']}>
+                  {b.kurang ? angkaPos(n, true) : rupiah(n)}
+                </td>
+                {lalu && (
+                  <td class:list={['sel-angka px-5 py-2.5 font-semibold text-[var(--color-teks-lembut)]', m! < 0 && 'text-red-600']}>
+                    {b.kurang ? angkaPos(m!, true) : rupiah(m!)}
+                  </td>
+                )}
+                {lalu && <td class="sel-angka px-5 py-2.5 text-xs text-[var(--color-teks-lembut)] max-sm:hidden">{tren}</td>}
+              </tr>
+            );
+          })
+        }
+      </tbody>
+    </table>
+
+    <ul class="space-y-1 border-t border-[var(--color-garis)] px-5 py-4 text-xs text-[var(--color-teks-lembut)]">
+      <li>Penjualan adalah harga barang; ongkir yang dibayar pembeli tidak termasuk.</li>
+      <li>Belanja stok tidak muncul sebagai beban: nilainya masuk harga pokok saat barangnya terjual.</li>
+      {masihBerjalan && <li>{labelKini} masih berjalan sampai hari ini, sedangkan {labelLalu} dihitung penuh.</li>}
+    </ul>
+  </section>
+
+  <script is:inline>
+    (function () {
+      document.documentElement.dataset.js = 'ya';
+      var tombol = document.querySelector('[data-cetak]');
+      if (tombol) tombol.addEventListener('click', function () { window.print(); });
+    })();
+  </script>
+</AppShell>

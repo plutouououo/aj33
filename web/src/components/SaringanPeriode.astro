@@ -1,0 +1,64 @@
+---
+/** Form GET periode (pilihan baku atau rentang tanggal) untuk laporan yang hanya mengenal waktu; isian tambahan lewat slot, dan tanggal yang terisi menang atas pilihan periode seperti `bacaSaringan`. */
+import { PERIODE, PERIODE_TANGGAL, type Saringan } from '../lib/laporan';
+
+interface Props {
+  saringan: Saringan;
+  /** Kelas kolom grid layar lebar, menyesuaikan banyaknya isian slot. */
+  kolom?: string;
+}
+
+const { saringan, kolom = 'lg:grid-cols-[12rem_10rem_10rem_auto]' } = Astro.props;
+---
+
+<form method="GET" class:list={['kartu mb-5 grid gap-4 sm:grid-cols-3 print:hidden', kolom]}>
+  <div>
+    <label class="label" for="periode">Periode</label>
+    <select class="kolom" id="periode" name="periode">
+      {PERIODE.map((p) => (
+        <option value={p.nilai} selected={saringan.periode === p.nilai}>
+          {p.label}
+        </option>
+      ))}
+      <option value={PERIODE_TANGGAL} selected={saringan.periode === PERIODE_TANGGAL}>
+        Pilih Tanggal
+      </option>
+    </select>
+  </div>
+
+  <div>
+    <label class="label" for="dari">Dari Tanggal</label>
+    <input class="kolom" type="date" id="dari" name="dari" value={saringan.dari} max={saringan.sampai || undefined} />
+  </div>
+
+  <div>
+    <label class="label" for="sampai">Sampai Tanggal</label>
+    <input class="kolom" type="date" id="sampai" name="sampai" value={saringan.sampai} min={saringan.dari || undefined} />
+  </div>
+
+  <slot />
+
+  <div class="flex items-end">
+    <button class="tombol-halus max-sm:w-full" type="submit">Terapkan</button>
+  </div>
+</form>
+
+{/* Hanya menyelaraskan pilihan periode dengan tanggal; tanpa JS formulir tetap benar karena tanggal yang terisi selalu menang. */}
+<script is:inline>
+  (function () {
+    var periode = document.getElementById('periode');
+    var dari = document.getElementById('dari');
+    var sampai = document.getElementById('sampai');
+    if (!periode || !dari || !sampai) return;
+    periode.addEventListener('change', function () {
+      if (periode.value !== 'custom') { dari.value = ''; sampai.value = ''; }
+    });
+    [dari, sampai].forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (dari.value || sampai.value) periode.value = 'custom';
+        dari.max = sampai.value || '';
+        sampai.min = dari.value || '';
+      });
+    });
+  })();
+</script>

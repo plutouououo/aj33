@@ -79,18 +79,23 @@ export interface Jendela {
   lewati: number;
 }
 
-/** Saringan sebagai query untuk backend; tanpa `terlaris` backend memakai ukuran bakunya. */
-export function kueriApi(s: Saringan, penjualan: Jendela, terlaris?: Jendela): string {
-  const q = new URLSearchParams({
-    sales_limit: String(penjualan.batas),
-    sales_offset: String(penjualan.lewati),
-  });
+/** Hanya rentang waktu saringan sebagai query backend (`period` atau `from`/`to`), untuk laporan yang tak mengenal metode bayar dan jenis pembeli seperti laba rugi dan beban. */
+export function kueriPeriodeApi(s: Saringan): URLSearchParams {
+  const q = new URLSearchParams();
   if (s.periode === PERIODE_TANGGAL) {
     if (s.dari) q.set('from', s.dari);
     if (s.sampai) q.set('to', s.sampai);
   } else {
     q.set('period', s.periode);
   }
+  return q;
+}
+
+/** Saringan sebagai query untuk backend; tanpa `terlaris` backend memakai ukuran bakunya. */
+export function kueriApi(s: Saringan, penjualan: Jendela, terlaris?: Jendela): string {
+  const q = kueriPeriodeApi(s);
+  q.set('sales_limit', String(penjualan.batas));
+  q.set('sales_offset', String(penjualan.lewati));
   if (terlaris) {
     q.set('top_limit', String(terlaris.batas));
     q.set('top_offset', String(terlaris.lewati));
@@ -102,8 +107,8 @@ export function kueriApi(s: Saringan, penjualan: Jendela, terlaris?: Jendela): s
   return q.toString();
 }
 
-/** Saringan sebagai query untuk tautan di dalam aplikasi. */
-export function kueriHalaman(s: Saringan): string {
+/** Hanya rentang waktu saringan sebagai query tautan, dibawa tab laporan agar pindah tab tak mengganti periode. */
+export function kueriPeriodeHalaman(s: Saringan): URLSearchParams {
   const q = new URLSearchParams();
   if (s.periode === PERIODE_TANGGAL) {
     if (s.dari) q.set('dari', s.dari);
@@ -111,6 +116,12 @@ export function kueriHalaman(s: Saringan): string {
   } else if (s.periode !== PERIODE_BAKU) {
     q.set('periode', s.periode);
   }
+  return q;
+}
+
+/** Saringan sebagai query untuk tautan di dalam aplikasi. */
+export function kueriHalaman(s: Saringan): string {
+  const q = kueriPeriodeHalaman(s);
   if (s.metode) q.set('metode', s.metode);
   if (s.jenis) q.set('jenis', s.jenis);
   if (s.top_periode) q.set('top_periode', s.top_periode);

@@ -126,7 +126,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
                    flex-col border-r border-[var(--color-garis)] bg-white
                    transition-[width,transform] peer-checked:translate-x-0
                    peer-focus-visible:ring-2 peer-focus-visible:ring-merah-600
-                   md:z-20 md:translate-x-0"
+                   md:z-20 md:translate-x-0 print:hidden"
           >
             <div class="flex items-center gap-2.5 px-4 py-4">
               {/* Di layar lebar logo ikut menciutkan/melebarkan sidebar; di ponsel tidak berfungsi karena laci selalu selebar penuh. */}
@@ -226,9 +226,9 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             </button>
           </aside>
 
-          <div class="flex min-w-0 flex-1 flex-col transition-[margin] md:ml-[var(--lebar-sidebar)]">
+          <div class="flex min-w-0 flex-1 flex-col transition-[margin] md:ml-[var(--lebar-sidebar)] print:ml-0">
             {/* Menempel di atas dengan z-[15]: di atas elemen sticky konten (z-10) tapi di bawah tirai dan laci menu (z-20/30). */}
-            <header data-jejak-area="topbar" class="sticky top-0 z-[15] flex h-[var(--tinggi-topbar)] items-center justify-between gap-3 border-b border-[var(--color-garis)] bg-white px-4 md:gap-4 md:px-6">
+            <header data-jejak-area="topbar" class="print:hidden sticky top-0 z-[15] flex h-[var(--tinggi-topbar)] items-center justify-between gap-3 border-b border-[var(--color-garis)] bg-white px-4 md:gap-4 md:px-6">
               <div class="flex min-w-0 items-center gap-2">
                 {/* Pemicu laci berupa `<label>`, bukan `<button>`, karena yang menggerakkannya adalah checkbox di atas. */}
                 <label
@@ -270,7 +270,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             </header>
 
             {/* Padding lebih rapat di ponsel; bilah menempel (.bilah-tab, .bilah-aksi, .bilah-bawah) membatalkannya dengan margin negatif, jadi keduanya harus berubah bersamaan (lihat theme.css). */}
-            <main class="flex-1 px-4 pt-4 pb-[calc(1rem+var(--tinggi-tab-bawah))] md:px-6 md:py-6">
+            <main class="flex-1 px-4 pt-4 pb-[calc(1rem+var(--tinggi-tab-bawah))] md:px-6 md:py-6 print:p-0">
               <slot />
             </main>
           </div>
@@ -280,7 +280,7 @@ const inisial = user?.name.trim().charAt(0).toUpperCase() ?? '?';
             aria-label="Navigasi cepat"
             data-jejak-area="tab-bawah"
             class="fixed inset-x-0 bottom-0 z-[15] grid h-[var(--tinggi-tab-bawah)] auto-cols-fr grid-flow-col
-                   border-t border-[var(--color-garis)] bg-white pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:hidden"
+                   border-t border-[var(--color-garis)] bg-white pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:hidden print:hidden"
           >
             {tabTampil.map((m) => (
               <a

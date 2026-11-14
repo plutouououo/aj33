@@ -660,4 +660,8 @@
     top: 0;
     width: 100%;
   }
+  /* Halaman laporan cetak (mis. laba rugi) dicetak apa adanya; kerangka aplikasi dan saringan disembunyikan lewat `print:hidden`. */
+  body:has(.lembar-cetak) * {
+    visibility: visible;
+  }
 }

@@ -41,6 +41,13 @@ export function waktuEkspor(iso: string): string {
   return WAKTU_EKSPOR.format(new Date(iso));
 }
 
+const TANGGAL_ISO = new Intl.DateTimeFormat('sv-SE', { dateStyle: 'short', timeZone: ZONA });
+
+/** Tanggal hari ini `YYYY-MM-DD` pada zona toko, untuk nilai awal dan batas isian tanggal. */
+export function hariIni(): string {
+  return TANGGAL_ISO.format(new Date());
+}
+
 const TANGGAL = new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' });
 
 /** Tanggal tanpa jam, untuk nilai `DATE` seperti kedaluwarsa batch. */

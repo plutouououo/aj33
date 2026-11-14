@@ -1,0 +1,318 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import Galat from '../../components/Galat.astro';
+import Paginasi from '../../components/Paginasi.astro';
+import SaringanPeriode from '../../components/SaringanPeriode.astro';
+import TabLaporan from '../../components/TabLaporan.astro';
+import { api, ApiRequestError, type Expense, type ExpenseList } from '../../lib/api';
+import { hariIni, rupiah, tanggal } from '../../lib/format';
+import { bacaSaringan, kueriPeriodeApi, kueriPeriodeHalaman, labelPeriode } from '../../lib/laporan';
+import { pesanDari, sesudahAksi } from '../../lib/pesan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const PER_HALAMAN = 25;
+
+let galat: string | null = null;
+let sukses: string | null = null;
+
+interface Isian {
+  id: string;
+  expense_date: string;
+  category: string;
+  amount: string;
+  description: string;
+}
+
+// Isian yang gagal disimpan dikembalikan ke form agar angka yang sudah diketik tak hilang.
+let isian: Isian | null = null;
+
+/** URL halaman ini tanpa mode ubah, tujuan sesudah simpan/hapus dan tombol Batal. */
+function tanpaUbah(): URL {
+  const u = new URL(Astro.url);
+  u.searchParams.delete('ubah');
+  u.searchParams.delete('pesan');
+  u.hash = '';
+  return u;
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = String(form.get('aksi') ?? '');
+  const id = String(form.get('id') ?? '').trim();
+
+  if (aksi === 'simpan') {
+    isian = {
+      id,
+      expense_date: String(form.get('expense_date') ?? '').trim(),
+      category: String(form.get('category') ?? ''),
+      amount: String(form.get('amount') ?? '').trim(),
+      description: String(form.get('description') ?? ''),
+    };
+    const jumlah = Number(isian.amount);
+
+    // Hanya bentuk isian yang diperiksa di sini, karena tanggal atau angka rusak ditolak axum sebelum sampai ke pesan backend yang ramah.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(isian.expense_date)) {
+      galat = 'Tanggal beban wajib diisi.';
+    } else if (isian.amount === '' || !Number.isFinite(jumlah)) {
+      galat = 'Jumlah beban wajib diisi dengan angka.';
+    } else {
+      try {
+        await api(id ? `/expenses/${encodeURIComponent(id)}` : '/expenses', {
+          method: id ? 'PATCH' : 'POST',
+          token,
+          body: {
+            expense_date: isian.expense_date,
+            category: isian.category,
+            amount: jumlah,
+            description: isian.description.trim() || undefined,
+          },
+        });
+        return Astro.redirect(sesudahAksi(tanpaUbah(), id ? 'ubah' : 'tambah'), 303);
+      } catch (err) {
+        galat = err instanceof ApiRequestError ? err.message : 'Gagal menyimpan beban.';
+      }
+    }
+  } else if (aksi === 'hapus') {
+    try {
+      await api(`/expenses/${encodeURIComponent(id)}`, { method: 'DELETE', token });
+      return Astro.redirect(sesudahAksi(tanpaUbah(), 'hapus'), 303);
+    } catch (err) {
+      galat = err instanceof ApiRequestError ? err.message : 'Gagal menghapus beban.';
+    }
+  } else {
+    galat = 'Aksi tidak dikenal.';
+  }
+}
+
+if (!galat) {
+  sukses = pesanDari(Astro.url, {
+    tambah: 'Beban tercatat.',
+    ubah: 'Perubahan beban tersimpan.',
+    hapus: 'Beban dihapus.',
+  });
+}
+
+const saringan = bacaSaringan(Astro.url);
+const halaman = Math.max(1, Math.floor(Number(Astro.url.searchParams.get('halaman'))) || 1);
+let kategori = Astro.url.searchParams.get('kategori')?.trim() ?? '';
+
+async function ambilDaftar(kat: string): Promise<ExpenseList> {
+  const q = kueriPeriodeApi(saringan);
+  q.set('page', String(halaman));
+  q.set('limit', String(PER_HALAMAN));
+  if (kat) q.set('category', kat);
+  return api<ExpenseList>(`/expenses?${q}`, { token });
+}
+
+let daftar: ExpenseList;
+try {
+  daftar = await ambilDaftar(kategori);
+} catch (err) {
+  // Kategori di URL ketikan tangan yang tak dikenal backend: tampilkan semua beban beserta alasannya, bukan halaman galat.
+  if (!kategori || !(err instanceof ApiRequestError) || err.status !== 400) throw err;
+  galat ??= err.message;
+  kategori = '';
+  daftar = await ambilDaftar('');
+}
+
+// Mode ubah dibuka lewat `?ubah=<id>` supaya tautan Ubah di tabel bekerja tanpa JS.
+const idUbah = Astro.url.searchParams.get('ubah')?.trim() ?? '';
+let sunting: Expense | null = null;
+if (idUbah && !isian) {
+  try {
+    sunting = await api<Expense>(`/expenses/${encodeURIComponent(idUbah)}`, { token });
+  } catch (err) {
+    if (!(err instanceof ApiRequestError) || (err.status !== 404 && err.status !== 400)) throw err;
+    galat ??= 'Beban yang mau diubah tidak ditemukan; mungkin sudah dihapus.';
+  }
+}
+
+const nilai: Isian = isian ?? {
+  id: sunting?.id ?? '',
+  expense_date: sunting?.expense_date ?? hariIni(),
+  category: sunting?.category ?? '',
+  amount: sunting ? String(sunting.amount) : '',
+  description: sunting?.description ?? '',
+};
+const modeUbah = nilai.id !== '';
+
+const halamanTerakhir = Math.max(1, Math.ceil(daftar.total / daftar.limit));
+const dari = daftar.total === 0 ? 0 : (daftar.page - 1) * daftar.limit + 1;
+const sampai = Math.min(daftar.page * daftar.limit, daftar.total);
+
+/** Kueri halaman ini tanpa mode ubah dan pesan, dengan halaman daftar yang diminta. */
+function tautanHalaman(ke: number): string {
+  const p = kueriPeriodeHalaman(saringan);
+  if (kategori) p.set('kategori', kategori);
+  if (ke > 1) p.set('halaman', String(ke));
+  const q = p.toString();
+  return `/laporan/beban${q ? `?${q}` : ''}#daftar-beban`;
+}
+
+function tautanUbah(id: string): string {
+  const p = kueriPeriodeHalaman(saringan);
+  if (kategori) p.set('kategori', kategori);
+  if (halaman > 1) p.set('halaman', String(halaman));
+  p.set('ubah', id);
+  return `/laporan/beban?${p}#catat-beban`;
+}
+
+const batal = tanpaUbah();
+const tautanBatal = `${batal.pathname}${batal.search}`;
+---
+
+<AppShell judul="Laporan · Beban" user={user}>
+  <TabLaporan saringan={saringan} />
+
+  <Galat pesan={galat} class="mb-4" />
+  {sukses && <p class="sukses mb-4">{sukses}</p>}
+
+  <section class="kartu sasaran-bagian mb-5" id="catat-beban">
+    <h2 class="mb-1 text-base font-bold">{modeUbah ? 'Ubah Beban' : 'Catat Beban'}</h2>
+    <p class="isian-bantu mb-4">
+      Biaya menjalankan toko: gaji, sewa, listrik, kemasan, bensin, iklan. Belanja stok ayam
+      <strong>tidak</strong> dicatat di sini, karena nilainya sudah masuk Harga Pokok lewat harga beli
+      batch saat barangnya terjual. Potongan marketplace, PPh, dan ongkir ditanggung toko juga sudah
+      dihitung otomatis dari transaksi.
+    </p>
+
+    <form method="POST" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-[10rem_14rem_10rem_1fr_auto]">
+      <input type="hidden" name="aksi" value="simpan" />
+      {modeUbah && <input type="hidden" name="id" value={nilai.id} />}
+
+      <div>
+        <label class="label" for="expense_date">Tanggal</label>
+        <input
+          class="kolom"
+          type="date"
+          id="expense_date"
+          name="expense_date"
+          value={nilai.expense_date}
+          max={hariIni()}
+          required
+        />
+      </div>
+
+      <div>
+        <label class="label" for="category">Kategori</label>
+        <select class="kolom" id="category" name="category" required>
+          <option value="" selected={!nilai.category} disabled>Pilih kategori</option>
+          {daftar.categories.map((k) => (
+            <option value={k} selected={nilai.category === k}>
+              {k}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label class="label" for="amount">Jumlah (Rp)</label>
+        <input
+          class="kolom"
+          type="number"
+          id="amount"
+          name="amount"
+          value={nilai.amount}
+          min="1"
+          step="1"
+          inputmode="numeric"
+          required
+        />
+      </div>
+
+      <div>
+        <label class="label" for="description">Keterangan</label>
+        <input
+          class="kolom"
+          id="description"
+          name="description"
+          value={nilai.description}
+          maxlength="500"
+          placeholder="Mis. token listrik November; wajib untuk Lainnya"
+        />
+      </div>
+
+      <div class="flex items-end gap-2">
+        <button class="tombol-utama max-sm:w-full" type="submit">{modeUbah ? 'Simpan Perubahan' : 'Simpan'}</button>
+        {modeUbah && <a class="tombol-halus" href={tautanBatal}>Batal</a>}
+      </div>
+    </form>
+  </section>
+
+  <SaringanPeriode saringan={saringan} kolom="lg:grid-cols-[12rem_10rem_10rem_14rem_auto]">
+    <div>
+      <label class="label" for="kategori">Kategori</label>
+      <select class="kolom" id="kategori" name="kategori">
+        <option value="" selected={!kategori}>Semua Kategori</option>
+        {daftar.categories.map((k) => (
+          <option value={k} selected={kategori === k}>
+            {k}
+          </option>
+        ))}
+      </select>
+    </div>
+  </SaringanPeriode>
+
+  <div id="daftar-beban" data-daftar>
+    <div class="kartu-rapat overflow-x-auto">
+      <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
+        <h2 class="text-base font-bold">Beban {labelPeriode(saringan)}{kategori && ` · ${kategori}`}</h2>
+        <p class="text-sm">
+          Total <span class="font-semibold tabular-nums">{rupiah(daftar.total_amount)}</span>
+          <span class="text-xs text-[var(--color-teks-lembut)]"> · {daftar.total} catatan</span>
+        </p>
+      </div>
+
+      <table class="tabel tabel-kartu">
+        <thead>
+          <tr>
+            <th>Tanggal</th>
+            <th>Kategori</th>
+            <th>Keterangan</th>
+            <th class="text-right">Jumlah</th>
+            <th class="text-right">Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            daftar.data.map((e) => (
+              <tr class={e.id === nilai.id ? 'bg-merah-50' : undefined}>
+                <td data-judul class="whitespace-nowrap">{tanggal(e.expense_date)}</td>
+                <td data-label="Kategori">{e.category ?? 'Lainnya'}</td>
+                <td data-label="Keterangan" class="text-[var(--color-teks-lembut)]">{e.description ?? '—'}</td>
+                <td data-label="Jumlah" class="sel-angka font-semibold">{rupiah(e.amount)}</td>
+                <td class="whitespace-nowrap text-right">
+                  <a class="aksi-baris" href={tautanUbah(e.id)}>Ubah</a>
+                  <form method="POST" class="inline">
+                    <input type="hidden" name="aksi" value="hapus" />
+                    <input type="hidden" name="id" value={e.id} />
+                    <button class="aksi-baris" type="submit">Hapus</button>
+                  </form>
+                </td>
+              </tr>
+            ))
+          }
+          {
+            daftar.data.length === 0 && (
+              <tr>
+                <td colspan="5" class="py-12 text-center text-[var(--color-teks-lembut)]">
+                  Belum ada beban tercatat pada periode ini.
+                </td>
+              </tr>
+            )
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+      <p class="text-[var(--color-teks-lembut)]">
+        Menampilkan <span class="tabular-nums">{dari}–{sampai}</span> dari
+        <span class="tabular-nums"> {daftar.total}</span> catatan
+      </p>
+      <Paginasi halaman={daftar.page} {halamanTerakhir} tautan={tautanHalaman} />
+    </div>
+  </div>
+</AppShell>

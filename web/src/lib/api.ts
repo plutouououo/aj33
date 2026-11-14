@@ -540,6 +540,66 @@ export interface SalesReport {
   sales_limit: number;
 }
 
+/** Laba rugi bertingkat satu periode, bentuk `LabaRugi` di `reports/repo.rs`; `net_profit` sama dengan `SalesSummary.profit` periode yang sama. */
+export interface LabaRugi {
+  gross_sales: number;
+  discounts: number;
+  net_sales: number;
+  cogs: number;
+  gross_profit: number;
+  commission_fee: number;
+  dynamic_commission_fee: number;
+  service_fee: number;
+  logistics_fee: number;
+  order_processing_fee: number;
+  shipping_subsidy: number;
+  /** Jumlah enam potongan penjualan di atas. */
+  selling_costs: number;
+  /** Tabel beban per kategori, tanpa ongkir ditanggung toko. */
+  operating_expenses: ExpenseSlice[];
+  operating_expenses_total: number;
+  profit_before_tax: number;
+  /** PPh final UMKM yang tercatat per transaksi. */
+  withholding_tax: number;
+  net_profit: number;
+  transaction_count: number;
+  /** Selama bukan nol, harga pokok terlalu kecil dan semua laba batas atas. */
+  items_without_cost: number;
+}
+
+/** Bentuk `GET /reports/profit-loss`. Owner saja. */
+export interface ProfitLossReport {
+  current: LabaRugi;
+  /** `null` bila tak ada pembanding ("Seluruh Waktu" atau tanggal setengah terbuka). */
+  previous: LabaRugi | null;
+  /** Rentang pembanding `YYYY-MM-DD`, keduanya terisi bila `previous` ada. */
+  previous_from: string | null;
+  previous_to: string | null;
+}
+
+export interface Expense {
+  id: string;
+  /** `YYYY-MM-DD`. */
+  expense_date: string;
+  /** Baris lama boleh kosong; laporan menyebutnya "Lainnya". */
+  category: string | null;
+  amount: number;
+  description: string | null;
+  created_at: string;
+}
+
+/** Bentuk `GET /expenses`. Owner saja. */
+export interface ExpenseList {
+  data: Expense[];
+  page: number;
+  limit: number;
+  total: number;
+  /** Jumlah rupiah seluruh baris yang cocok, bukan hanya halaman ini. */
+  total_amount: number;
+  /** Pilihan kategori yang diterima backend, dalam urutan tampil. */
+  categories: string[];
+}
+
 /** Satu baris item pada detail transaksi. */
 export interface TransactionDetailItem {
   id: string;

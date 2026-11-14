@@ -1,0 +1,35 @@
+---
+/** Tab bagian laporan berupa tautan biasa (jalan tanpa JS) yang membawa periode aktif, agar pindah dari Ringkasan ke Laba Rugi tetap membaca rentang yang sama. */
+import { kueriPeriodeHalaman, type Saringan } from '../lib/laporan';
+
+interface Props {
+  saringan: Saringan;
+}
+
+const { saringan } = Astro.props;
+const path = Astro.url.pathname.replace(/\/$/, '') || '/';
+const kueri = kueriPeriodeHalaman(saringan).toString();
+
+const TAB = [
+  { href: '/laporan', label: 'Ringkasan' },
+  { href: '/laporan/laba-rugi', label: 'Laba Rugi' },
+  { href: '/laporan/beban', label: 'Beban' },
+];
+---
+
+<nav aria-label="Bagian laporan" class="mb-5 flex gap-1 overflow-x-auto print:hidden">
+  {
+    TAB.map((t) => {
+      const aktif = path === t.href;
+      return (
+        <a
+          href={kueri ? `${t.href}?${kueri}` : t.href}
+          aria-current={aktif ? 'page' : undefined}
+          class={aktif ? 'nav-tautan-aktif whitespace-nowrap' : 'nav-tautan whitespace-nowrap'}
+        >
+          {t.label}
+        </a>
+      );
+    })
+  }
+</nav>
