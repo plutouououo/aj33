@@ -288,6 +288,16 @@ Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 - `transactions.platform_fee_total` (kolom turunan) menjumlahkan keenam potongan dan dipakai ringkasan, ringkasan per kanal, dan laba transaksi di laporan. Transaksi Tokopedia lama (sebelum migrasi) tetap bernilai penuh tanpa potongan.
 - Kasir: `PERSEN_KANAL` di `kasir.astro` (dikirim ke skrip lewat `data-persen-kanal`) harus tetap sama dengan `Persen` di `pos/service.rs`.
 
+### Laporan keuangan: beban dan laba rugi (tanpa migrasi)
+
+Dasar risetnya di [`riset-laporan-keuangan.md`](riset-laporan-keuangan.md). `/laporan` kini bertab: Ringkasan, Laba Rugi, Beban; tab membawa periode aktif.
+
+- **Beban** (`/laporan/beban`, modul `backend/src/expenses/`): sebelumnya tabel `expenses` hanya dibaca laporan dan sheet harian, tak ada jalan untuk mengisinya. Kini `GET/POST /api/expenses`, `GET/PATCH/DELETE /api/expenses/{id}`, khusus owner. Kategori tetap (`KATEGORI` di `expenses/routes.rs`, dikirim ke form lewat `categories` agar satu sumber); "Lainnya" wajib berketerangan dan sama dengan nama laporan untuk kategori kosong. Tanggal tak boleh setelah hari ini (salah ketik tahun menghilangkan beban dari bulan berjalan).
+- **Yang sengaja bukan beban:** belanja stok (masuk harga pokok lewat harga beli batch saat terjual), potongan marketplace, PPh, dan ongkir ditanggung toko (semuanya tercatat per transaksi). Mencatatnya di Beban berarti menghitung dua kali; form menjelaskannya.
+- **Laba Rugi** (`/laporan/laba-rugi`, `GET /api/reports/profit-loss`): format bertingkat UMKM, Penjualan → HPP → Laba kotor → Biaya penjualan (enam potongan transaksi) → Beban operasional → Laba sebelum pajak → PPh final → Laba bersih, dibanding rentang setara sebelumnya (`previous_from`/`previous_to`). Hanya mengenal periode, bukan metode bayar/jenis pembeli.
+- **Invariant:** `LabaRugi.net_profit` = `SalesSummary.profit` untuk periode yang sama. Harga pokok keduanya lewat satu fungsi, `reports::repo::harga_pokok`; rentang periode lewat `reports::rentang_kueri` (dipakai juga oleh daftar beban). Sudah dicocokkan untuk tujuh periode di database lokal.
+- **Cetak:** tombol Cetak / Simpan PDF (JS kosmetik, Ctrl+P tetap jalan). Aturan cetak nota kasir menyembunyikan seluruh `body *`; halaman yang memuat `.lembar-cetak` dikecualikan di `theme.css`, dan kerangka `AppShell` (sidebar, topbar, tab bawah) memakai `print:hidden`.
+
 ### Pesanan Shopee dari label pengiriman (migrasi 0027)
 
 API Shopee tidak bisa dipakai, jadi pesanan masuk lewat PDF label ("Cetak
@@ -491,6 +501,14 @@ prepared statement, dan sqlx memakainya untuk tiap query.
   Passphrase harus diketik di terminal sungguhan, bukan lewat prompt Claude Code.
 - **Seed**: `scripts/seed-dev.sh` (akun contoh) dan `scripts/seed-perf.sh`
   (produk massal untuk uji performa). **Keduanya hanya untuk development.**
+- **Image `rust:1.90-bookworm` tanpa rustfmt/clippy**, jadi `scripts/cargo.sh fmt`
+  dan `clippy` gagal; jalankan `rustup component add rustfmt clippy` dulu di
+  container yang sama (`sh -c "rustup component add ... && cargo clippy ..."`).
+- **`cargo sqlx prepare` lewat volume `aj33-sqlx-bin` gagal** ("unrecognized
+  subcommand 'sqlx'"). Penggantinya: `cargo clean -p aj33-backend` lalu
+  `SQLX_OFFLINE_DIR=<folder kosong> cargo check --all-targets` dengan
+  `DATABASE_URL` lokal, kemudian ganti `backend/.sqlx/query-*.json` dengan isi
+  folder itu, dan pastikan `SQLX_OFFLINE=true cargo check --all-targets` lulus.
 
 ## Perintah verifikasi cepat
 
