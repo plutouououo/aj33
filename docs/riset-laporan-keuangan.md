@@ -131,10 +131,10 @@ Pola Shopify *Profit by product*: Produk · SKU · Terjual (pack) · Kg · Omzet
 |---|---|---|
 | P0 ✅ | Pencatatan beban (API + halaman) | Selesai 14 Nov 2026: modul `expenses`, `/laporan/beban` |
 | P0 ✅ | Laporan Laba Rugi + perbandingan periode + cetak | Selesai 14 Nov 2026: `/reports/profit-loss`, `/laporan/laba-rugi` |
-| P1 | Grafik dan tabel per hari mengikuti periode | Ubah `monthly_trend` menjadi deret berbutir dinamis |
-| P1 | Laba per produk | Perluas kueri `top_products` dengan HPP dan kg |
-| P1 | Uang masuk per metode bayar dan kanal | Kueri agregat baru |
-| P2 | Void & diskon, pembelian stok, stok terbuang | Butuh migrasi alasan penyesuaian |
+| P1 ✅ | Grafik dan tabel per hari mengikuti periode | Selesai 14 Nov 2026: `reports::repo::tren` |
+| P1 ✅ | Laba per produk | Selesai 14 Nov 2026: `/laporan/produk` |
+| P1 ✅ | Uang masuk per metode bayar dan kanal | Selesai 14 Nov 2026: `/laporan/uang-masuk` (metode bayar hanya untuk kanal toko) |
+| P2 ✅ | Void, pembelian stok, stok terbuang | Selesai 14 Nov 2026: migrasi 0039, `/laporan/stok`, `/laporan/void`; laporan diskon dibatalkan karena diskon umum tak ditulis lagi sejak migrasi 0023 |
 | P3 | Kas laci per shift | Tabel dan alur kasir baru |
 
 ## Sumber
