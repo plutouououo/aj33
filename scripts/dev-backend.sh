@@ -1,4 +1,4 @@
-#!/cd usr/bin/env bash
+#!/usr/bin/env bash
 # Menjalankan backend di container dengan Postgres docker-compose; DATABASE_URL harus menunjuk service `postgres`, bukan localhost:5433.
 set -euo pipefail
 
