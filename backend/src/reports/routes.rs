@@ -1,8 +1,9 @@
 //! Endpoint dasbor dan laporan khusus owner (omzet, laba, harga pokok adalah isi buku toko), dibatasi di sini bukan hanya di menu frontend.
 
 use super::repo::{
-    self, hari_ini, ChannelSummary, Counts, ExpenseSlice, LowStockProduct, MonthlyPoint, Periode,
-    Rentang, SaleRow, SalesFilter, SalesSummary, StockValue, TopProduct, TransactionDetail,
+    self, hari_ini, ChannelSummary, Counts, ExpenseSlice, LabaRugi, LowStockProduct, MonthlyPoint,
+    Periode, Rentang, SaleRow, SalesFilter, SalesSummary, StockValue, TopProduct,
+    TransactionDetail,
 };
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
@@ -21,6 +22,7 @@ pub fn router() -> Router<AppState> {
         .route("/dashboard", get(dashboard))
         .route("/reports/sales", get(sales_report))
         .route("/reports/sales/{id}", get(sales_transaction_detail))
+        .route("/reports/profit-loss", get(profit_loss))
         .route("/sheet/harian", get(sheet_harian))
 }
 
@@ -87,24 +89,32 @@ fn pilihan(nilai: Option<String>, sah: &[&str], nama: &str) -> AppResult<Option<
     }
 }
 
+/// Rentang dari kueri `period`/`from`/`to` yang sama untuk semua laporan; tanggal yang terisi menang atas `period`.
+pub fn rentang_kueri(
+    period: Option<&str>,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+) -> AppResult<Rentang> {
+    if from.is_none() && to.is_none() {
+        return rentang_periode(period);
+    }
+    if let (Some(dari), Some(sampai)) = (from, to) {
+        if dari > sampai {
+            return Err(AppError::bad_request(
+                "Tanggal awal tidak boleh setelah tanggal akhir.",
+            ));
+        }
+    }
+    Ok(Rentang::Tanggal {
+        dari: from,
+        sampai: to,
+    })
+}
+
 impl ReportQuery {
     /// Mengembalikan saringan utama, saringan Produk Terlaris (periode boleh beda, metode bayar dan jenis transaksi ikut saringan utama), dan jendela halaman kedua daftar.
     fn menjadi_filter(self) -> AppResult<(SalesFilter, SalesFilter, Halaman)> {
-        let rentang = if self.from.is_some() || self.to.is_some() {
-            if let (Some(dari), Some(sampai)) = (self.from, self.to) {
-                if dari > sampai {
-                    return Err(AppError::bad_request(
-                        "Tanggal awal tidak boleh setelah tanggal akhir.",
-                    ));
-                }
-            }
-            Rentang::Tanggal {
-                dari: self.from,
-                sampai: self.to,
-            }
-        } else {
-            rentang_periode(self.period.as_deref())?
-        };
+        let rentang = rentang_kueri(self.period.as_deref(), self.from, self.to)?;
         let payment_method = pilihan(
             self.payment_method,
             &["cash", "transfer", "ewallet"],
@@ -267,6 +277,52 @@ async fn sales_report(
         )
         .await?,
         sales_limit: halaman.sales_limit,
+    }))
+}
+
+// --- Laba rugi ---
+
+/// Laba rugi milik seluruh usaha, jadi hanya periode yang bisa dipilih (beban tak mengenal metode bayar maupun jenis pembeli).
+#[derive(Debug, Deserialize)]
+struct PeriodeQuery {
+    period: Option<String>,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProfitLossReport {
+    current: LabaRugi,
+    /// Rentang setara tepat sebelumnya, `null` bila tak punya pembanding (lihat `SalesFilter::sebelumnya`).
+    previous: Option<LabaRugi>,
+    /// Rentang pembanding agar halaman bisa menamainya tanpa meniru hitungan `sebelumnya`.
+    previous_from: Option<NaiveDate>,
+    previous_to: Option<NaiveDate>,
+}
+
+async fn profit_loss(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<PeriodeQuery>,
+) -> AppResult<Json<ProfitLossReport>> {
+    user.require(&[Role::Owner])?;
+
+    let filter = SalesFilter {
+        rentang: rentang_kueri(q.period.as_deref(), q.from, q.to)?,
+        ..SalesFilter::default()
+    };
+    let sebelumnya = filter.sebelumnya();
+    let previous = match &sebelumnya {
+        Some(f) => Some(repo::laba_rugi(&state.pool, f).await?),
+        None => None,
+    };
+    let (previous_from, previous_to) = sebelumnya.map(|f| f.jendela()).unwrap_or_default();
+
+    Ok(Json(ProfitLossReport {
+        current: repo::laba_rugi(&state.pool, &filter).await?,
+        previous,
+        previous_from,
+        previous_to,
     }))
 }
 

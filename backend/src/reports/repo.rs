@@ -37,6 +37,17 @@ pub enum Rentang {
     },
 }
 
+impl Rentang {
+    /// Batas tanggal (awal, akhir) untuk query; `None` berarti sisi itu tak dibatasi.
+    pub fn jendela(&self) -> (Option<NaiveDate>, Option<NaiveDate>) {
+        match self {
+            Rentang::Semua => (None, None),
+            Rentang::Periode(p) => (Some(awal_periode(*p, hari_ini())), None),
+            Rentang::Tanggal { dari, sampai } => (*dari, *sampai),
+        }
+    }
+}
+
 fn awal_periode(periode: Periode, hari: NaiveDate) -> NaiveDate {
     match periode {
         Periode::Hari => hari,
@@ -64,13 +75,8 @@ impl SalesFilter {
         }
     }
 
-    /// Batas tanggal (awal, akhir) untuk query; `None` berarti sisi itu tak dibatasi.
     pub fn jendela(&self) -> (Option<NaiveDate>, Option<NaiveDate>) {
-        match &self.rentang {
-            Rentang::Semua => (None, None),
-            Rentang::Periode(p) => (Some(awal_periode(*p, hari_ini())), None),
-            Rentang::Tanggal { dari, sampai } => (*dari, *sampai),
-        }
+        self.rentang.jendela()
     }
 
     /// Saringan yang sama untuk rentang pembanding tepat sebelumnya; `None` bila tak ada pembanding (seluruh waktu, atau tanggal pilihan yang salah satu sisinya kosong).
@@ -157,37 +163,7 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
     .fetch_one(pool)
     .await?;
 
-    let pokok = sqlx::query!(
-        r#"
-        SELECT COALESCE(
-                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)),
-                   0
-               ) AS "cogs!",
-               COUNT(*) FILTER (
-                   WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL
-               ) AS "tanpa_pokok!"
-        FROM stock_adjustments sa
-        JOIN transactions t ON t.id = sa.reference_id
-        LEFT JOIN product_batches pb ON pb.id = sa.batch_id
-        LEFT JOIN products p ON p.id = sa.product_id
-        WHERE sa.reason = 'sale'
-          AND sa.change_qty < 0
-          AND sa.reference_type = 'transaction'
-          AND t.status = 'completed'
-          AND ($1::date IS NULL
-               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
-          AND ($2::date IS NULL
-               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
-          AND ($3::text IS NULL OR t.payment_method = $3)
-          AND ($4::text IS NULL OR t.type = $4)
-        "#,
-        dari,
-        sampai,
-        filter.payment_method.as_deref(),
-        filter.transaction_type.as_deref()
-    )
-    .fetch_one(pool)
-    .await?;
+    let pokok = harga_pokok(pool, filter).await?;
 
     let terjual = sqlx::query_scalar!(
         r#"
@@ -237,6 +213,178 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
         platform_fees: penjualan.platform_fees,
         profit: penjualan.revenue - pokok.cogs - beban - penjualan.platform_fees,
         transaction_count: penjualan.count,
+        items_without_cost: pokok.tanpa_pokok,
+    })
+}
+
+/// Harga pokok barang terjual dan jumlah baris keluaran stok yang harga belinya kosong (dihitung nol).
+struct HargaPokok {
+    cogs: Decimal,
+    tanpa_pokok: i64,
+}
+
+/// Satu-satunya hitungan harga pokok periode, dipakai ringkasan dan laba rugi agar keduanya tak bisa berselisih.
+async fn harga_pokok(pool: &PgPool, filter: &SalesFilter) -> AppResult<HargaPokok> {
+    let (dari, sampai) = filter.jendela();
+    let row = sqlx::query!(
+        r#"
+        SELECT COALESCE(
+                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)),
+                   0
+               ) AS "cogs!",
+               COUNT(*) FILTER (
+                   WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL
+               ) AS "tanpa_pokok!"
+        FROM stock_adjustments sa
+        JOIN transactions t ON t.id = sa.reference_id
+        LEFT JOIN product_batches pb ON pb.id = sa.batch_id
+        LEFT JOIN products p ON p.id = sa.product_id
+        WHERE sa.reason = 'sale'
+          AND sa.change_qty < 0
+          AND sa.reference_type = 'transaction'
+          AND t.status = 'completed'
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
+        "#,
+        dari,
+        sampai,
+        filter.payment_method.as_deref(),
+        filter.transaction_type.as_deref()
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(HargaPokok {
+        cogs: row.cogs,
+        tanpa_pokok: row.tanpa_pokok,
+    })
+}
+
+/// Laba rugi bertingkat (format UMKM) satu periode; `net_profit` sama dengan `SalesSummary::profit` dengan saringan yang sama.
+#[derive(Debug, Serialize)]
+pub struct LabaRugi {
+    /// Jumlah `subtotal` sebelum diskon.
+    pub gross_sales: Decimal,
+    /// Diskon umum lama (tak lagi ditulis sejak migrasi 0023), tetap dilaporkan agar periode lama benar.
+    pub discounts: Decimal,
+    /// `gross_sales - discounts`, sama dengan omzet barang di seluruh laporan.
+    pub net_sales: Decimal,
+    pub cogs: Decimal,
+    pub gross_profit: Decimal,
+    pub commission_fee: Decimal,
+    /// Komisi dinamis Tokopedia.
+    pub dynamic_commission_fee: Decimal,
+    /// Biaya layanan Shopee.
+    pub service_fee: Decimal,
+    /// Biaya layanan logistik Tokopedia.
+    pub logistics_fee: Decimal,
+    pub order_processing_fee: Decimal,
+    pub shipping_subsidy: Decimal,
+    /// Jumlah enam baris di atas: biaya yang timbul karena berjualan, di luar beban operasional.
+    pub selling_costs: Decimal,
+    /// Tabel `expenses` per kategori, tanpa ongkir ditanggung toko (sudah di `selling_costs`).
+    pub operating_expenses: Vec<ExpenseSlice>,
+    pub operating_expenses_total: Decimal,
+    pub profit_before_tax: Decimal,
+    /// PPh final UMKM yang tercatat per transaksi di semua kanal.
+    pub withholding_tax: Decimal,
+    pub net_profit: Decimal,
+    pub transaction_count: i64,
+    /// Selama bukan nol, `cogs` terlalu kecil dan semua laba sesudahnya batas atas.
+    pub items_without_cost: i64,
+}
+
+pub async fn laba_rugi(pool: &PgPool, filter: &SalesFilter) -> AppResult<LabaRugi> {
+    let (dari, sampai) = filter.jendela();
+    let jual = sqlx::query!(
+        r#"
+        SELECT COALESCE(SUM(t.subtotal), 0)                        AS "gross_sales!",
+               COALESCE(SUM(t.discount_amount), 0)                 AS "discounts!",
+               COALESCE(SUM(t.platform_commission_fee), 0)         AS "commission_fee!",
+               COALESCE(SUM(t.platform_dynamic_commission_fee), 0) AS "dynamic_commission_fee!",
+               COALESCE(SUM(t.platform_service_fee), 0)            AS "service_fee!",
+               COALESCE(SUM(t.platform_logistics_fee), 0)          AS "logistics_fee!",
+               COALESCE(SUM(t.platform_order_processing_fee), 0)   AS "order_processing_fee!",
+               COALESCE(SUM(t.platform_withholding_tax), 0)        AS "withholding_tax!",
+               COALESCE(SUM(t.shipping_subsidy), 0)                AS "shipping_subsidy!",
+               COUNT(*)                                            AS "count!"
+        FROM transactions t
+        WHERE t.status = 'completed'
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
+        "#,
+        dari,
+        sampai,
+        filter.payment_method.as_deref(),
+        filter.transaction_type.as_deref()
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let pokok = harga_pokok(pool, filter).await?;
+
+    let beban = sqlx::query!(
+        r#"
+        SELECT COALESCE(NULLIF(trim(e.category), ''), 'Lainnya') AS "category!",
+               SUM(e.amount)                                     AS "amount!"
+        FROM expenses e
+        WHERE ($1::date IS NULL OR e.expense_date >= $1)
+          AND ($2::date IS NULL OR e.expense_date <= $2)
+        GROUP BY 1
+        ORDER BY 2 DESC
+        "#,
+        dari,
+        sampai
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let operating_expenses: Vec<ExpenseSlice> = beban
+        .into_iter()
+        .map(|r| ExpenseSlice {
+            category: r.category,
+            amount: r.amount,
+        })
+        .collect();
+    let operating_expenses_total: Decimal = operating_expenses.iter().map(|b| b.amount).sum();
+
+    let net_sales = jual.gross_sales - jual.discounts;
+    let gross_profit = net_sales - pokok.cogs;
+    let selling_costs = jual.commission_fee
+        + jual.dynamic_commission_fee
+        + jual.service_fee
+        + jual.logistics_fee
+        + jual.order_processing_fee
+        + jual.shipping_subsidy;
+    let profit_before_tax = gross_profit - selling_costs - operating_expenses_total;
+
+    Ok(LabaRugi {
+        gross_sales: jual.gross_sales,
+        discounts: jual.discounts,
+        net_sales,
+        cogs: pokok.cogs,
+        gross_profit,
+        commission_fee: jual.commission_fee,
+        dynamic_commission_fee: jual.dynamic_commission_fee,
+        service_fee: jual.service_fee,
+        logistics_fee: jual.logistics_fee,
+        order_processing_fee: jual.order_processing_fee,
+        shipping_subsidy: jual.shipping_subsidy,
+        selling_costs,
+        operating_expenses,
+        operating_expenses_total,
+        profit_before_tax,
+        withholding_tax: jual.withholding_tax,
+        net_profit: profit_before_tax - jual.withholding_tax,
+        transaction_count: jual.count,
         items_without_cost: pokok.tanpa_pokok,
     })
 }
