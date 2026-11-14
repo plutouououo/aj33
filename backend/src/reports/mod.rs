@@ -3,4 +3,5 @@
 mod repo;
 mod routes;
 
-pub use routes::router;
+pub use repo::hari_ini;
+pub use routes::{rentang_kueri, router};

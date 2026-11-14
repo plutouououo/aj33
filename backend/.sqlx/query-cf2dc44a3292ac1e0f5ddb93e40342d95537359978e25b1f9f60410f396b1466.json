@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*)                    AS \"count!\",\n               COALESCE(SUM(e.amount), 0)  AS \"total!\"\n        FROM expenses e\n        WHERE ($1::date IS NULL OR e.expense_date >= $1)\n          AND ($2::date IS NULL OR e.expense_date <= $2)\n          AND ($3::text IS NULL OR COALESCE(NULLIF(trim(e.category), ''), 'Lainnya') = $3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "total!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "cf2dc44a3292ac1e0f5ddb93e40342d95537359978e25b1f9f60410f396b1466"
+}

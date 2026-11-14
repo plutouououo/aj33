@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT e.id, e.expense_date, e.category, e.amount, e.description, e.created_at\n        FROM expenses e\n        WHERE ($1::date IS NULL OR e.expense_date >= $1)\n          AND ($2::date IS NULL OR e.expense_date <= $2)\n          AND ($3::text IS NULL OR COALESCE(NULLIF(trim(e.category), ''), 'Lainnya') = $3)\n        ORDER BY e.expense_date DESC, e.created_at DESC, e.id\n        LIMIT $4 OFFSET $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "expense_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "category",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "2ed49625e59b5d14d9f5ed9ca8bb5e2c9cf9ad29d47ba210b65277d3041f6d32"
+}
