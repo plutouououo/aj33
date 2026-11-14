@@ -1,7 +1,7 @@
 //! Query agregat laporan: hanya transaksi `completed`; omzet = `subtotal - discount_amount` (bukan `total_amount`); `profit` mengurangi `platform_fees` Shopee dari kolom tersimpan (migrasi 0017/0018).
 
 use crate::error::AppResult;
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use rust_decimal::Decimal;
 use serde::Serialize;
 use sqlx::PgPool;
@@ -130,7 +130,9 @@ pub struct SalesSummary {
     pub expenses: Decimal,
     /// Jumlah `platform_fee_total` (seluruh potongan Shopee dan Tokopedia plus PPh) periode ini dari kolom tersimpan (migrasi 0038); komisi, layanan, dan biaya proses nol di toko, PPh terisi di semua kanal.
     pub platform_fees: Decimal,
-    /// `revenue - cogs - expenses - platform_fees`.
+    /// Barang rusak, kedaluwarsa, atau hilang periode ini dinilai harga beli (lihat `kerugian_stok`); hanya periode yang menyaringnya, seperti tabel beban.
+    pub stock_loss: Decimal,
+    /// `revenue - cogs - expenses - platform_fees - stock_loss`.
     pub profit: Decimal,
     pub transaction_count: i64,
     /// Baris keluaran stok yang harga pokoknya belum diisi; selama bukan nol `cogs` dan `profit` adalah batas atas dan halaman mengatakannya.
@@ -202,6 +204,7 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
     .await?;
 
     let beban = beban + penjualan.shipping_subsidy;
+    let rugi = kerugian_stok(pool, filter).await?.total;
 
     Ok(SalesSummary {
         revenue: penjualan.revenue,
@@ -211,7 +214,8 @@ pub async fn sales_summary(pool: &PgPool, filter: &SalesFilter) -> AppResult<Sal
         cogs: pokok.cogs,
         expenses: beban,
         platform_fees: penjualan.platform_fees,
-        profit: penjualan.revenue - pokok.cogs - beban - penjualan.platform_fees,
+        stock_loss: rugi,
+        profit: penjualan.revenue - pokok.cogs - beban - penjualan.platform_fees - rugi,
         transaction_count: penjualan.count,
         items_without_cost: pokok.tanpa_pokok,
     })
@@ -264,6 +268,64 @@ async fn harga_pokok(pool: &PgPool, filter: &SalesFilter) -> AppResult<HargaPoko
     })
 }
 
+/// Kerugian stok satu alasan: barang yang dikurangi manual karena rusak, kedaluwarsa, atau hilang, dinilai dengan harga beli batchnya.
+#[derive(Debug, Serialize)]
+pub struct KerugianStokSlice {
+    /// `rusak`, `kedaluwarsa`, atau `hilang`.
+    pub reason: String,
+    pub qty: i64,
+    pub amount: Decimal,
+}
+
+#[derive(Debug)]
+struct KerugianStok {
+    per_alasan: Vec<KerugianStokSlice>,
+    total: Decimal,
+    tanpa_pokok: i64,
+}
+
+/// Satu-satunya hitungan kerugian stok, dipakai ringkasan, laba rugi, dan tab Stok; hanya periode yang menyaring karena barang terbuang tak punya metode bayar, dan `salah_catat` serta koreksi tanpa alasan tak ikut.
+async fn kerugian_stok(pool: &PgPool, filter: &SalesFilter) -> AppResult<KerugianStok> {
+    let (dari, sampai) = filter.jendela();
+    let rows = sqlx::query!(
+        r#"
+        SELECT sa.manual_reason AS "reason!",
+               SUM(ABS(sa.change_qty))::bigint AS "qty!",
+               COALESCE(SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)), 0) AS "amount!",
+               COUNT(*) FILTER (WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL) AS "tanpa_pokok!"
+        FROM stock_adjustments sa
+        LEFT JOIN product_batches pb ON pb.id = sa.batch_id
+        LEFT JOIN products p ON p.id = sa.product_id
+        WHERE sa.manual_reason IN ('rusak', 'kedaluwarsa', 'hilang')
+          AND ($1::date IS NULL
+               OR sa.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR sa.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+        GROUP BY sa.manual_reason
+        ORDER BY 3 DESC
+        "#,
+        dari,
+        sampai
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let total = rows.iter().map(|r| r.amount).sum();
+    let tanpa_pokok = rows.iter().map(|r| r.tanpa_pokok).sum();
+    Ok(KerugianStok {
+        per_alasan: rows
+            .into_iter()
+            .map(|r| KerugianStokSlice {
+                reason: r.reason,
+                qty: r.qty,
+                amount: r.amount,
+            })
+            .collect(),
+        total,
+        tanpa_pokok,
+    })
+}
+
 /// Laba rugi bertingkat (format UMKM) satu periode; `net_profit` sama dengan `SalesSummary::profit` dengan saringan yang sama.
 #[derive(Debug, Serialize)]
 pub struct LabaRugi {
@@ -289,6 +351,11 @@ pub struct LabaRugi {
     /// Tabel `expenses` per kategori, tanpa ongkir ditanggung toko (sudah di `selling_costs`).
     pub operating_expenses: Vec<ExpenseSlice>,
     pub operating_expenses_total: Decimal,
+    /// Barang dikurangi manual karena rusak, kedaluwarsa, atau hilang, dinilai harga beli; baris kerugian sendiri, bukan bagian harga pokok penjualan.
+    pub stock_losses: Vec<KerugianStokSlice>,
+    pub stock_loss_total: Decimal,
+    /// Baris kerugian stok tanpa harga beli (dihitung nol); selama bukan nol kerugiannya batas bawah.
+    pub stock_loss_without_cost: i64,
     pub profit_before_tax: Decimal,
     /// PPh final UMKM yang tercatat per transaksi di semua kanal.
     pub withholding_tax: Decimal,
@@ -364,7 +431,8 @@ pub async fn laba_rugi(pool: &PgPool, filter: &SalesFilter) -> AppResult<LabaRug
         + jual.logistics_fee
         + jual.order_processing_fee
         + jual.shipping_subsidy;
-    let profit_before_tax = gross_profit - selling_costs - operating_expenses_total;
+    let rugi = kerugian_stok(pool, filter).await?;
+    let profit_before_tax = gross_profit - selling_costs - operating_expenses_total - rugi.total;
 
     Ok(LabaRugi {
         gross_sales: jual.gross_sales,
@@ -381,6 +449,9 @@ pub async fn laba_rugi(pool: &PgPool, filter: &SalesFilter) -> AppResult<LabaRug
         selling_costs,
         operating_expenses,
         operating_expenses_total,
+        stock_losses: rugi.per_alasan,
+        stock_loss_total: rugi.total,
+        stock_loss_without_cost: rugi.tanpa_pokok,
         profit_before_tax,
         withholding_tax: jual.withholding_tax,
         net_profit: profit_before_tax - jual.withholding_tax,
@@ -544,67 +615,200 @@ pub async fn today_and_month(pool: &PgPool) -> AppResult<TodayAndMonth> {
     })
 }
 
-/// Satu bulan pada grafik tren.
-#[derive(Debug, Serialize)]
-pub struct MonthlyPoint {
-    /// `YYYY-MM`, dihitung pada zona toko.
-    pub month: String,
-    pub revenue: Decimal,
-    pub expenses: Decimal,
+/// Butir waktu grafik dan tabel tren, dipilih dari panjang rentang agar banyaknya batang tetap terbaca.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Butir {
+    #[serde(rename = "hour")]
+    Jam,
+    #[serde(rename = "day")]
+    Hari,
+    #[serde(rename = "month")]
+    Bulan,
 }
 
-/// Omzet dan beban enam bulan terakhir termasuk bulan kosong (`generate_series` di Postgres agar zona waktu tak ditiru); saringan periode tak ikut, lainnya ikut.
-pub async fn monthly_trend(pool: &PgPool, filter: &SalesFilter) -> AppResult<Vec<MonthlyPoint>> {
+impl Butir {
+    /// Satu hari per jam, sampai dua bulan per hari, selebihnya per bulan.
+    pub fn untuk(dari: NaiveDate, sampai: NaiveDate) -> Self {
+        match (sampai - dari).num_days() + 1 {
+            ..=1 => Self::Jam,
+            2..=62 => Self::Hari,
+            _ => Self::Bulan,
+        }
+    }
+
+    /// Nama satuan untuk `date_trunc` dan `interval` Postgres.
+    fn sql(self) -> &'static str {
+        match self {
+            Self::Jam => "hour",
+            Self::Hari => "day",
+            Self::Bulan => "month",
+        }
+    }
+
+    /// Awal batang pertama dan batang terakhir; butir bulan dibulatkan ke tanggal 1 agar tiap batang satu bulan utuh.
+    fn deret(self, dari: NaiveDate, sampai: NaiveDate) -> (NaiveDateTime, NaiveDateTime) {
+        let tengah_malam = |d: NaiveDate| d.and_hms_opt(0, 0, 0).expect("00:00 selalu ada");
+        match self {
+            Self::Jam => (
+                tengah_malam(dari),
+                sampai.and_hms_opt(23, 0, 0).expect("23:00 selalu ada"),
+            ),
+            Self::Hari => (tengah_malam(dari), tengah_malam(sampai)),
+            Self::Bulan => (
+                tengah_malam(dari.with_day(1).expect("tanggal 1 selalu ada")),
+                tengah_malam(sampai.with_day(1).expect("tanggal 1 selalu ada")),
+            ),
+        }
+    }
+}
+
+/// Satu batang tren; `expenses` berisi tabel beban plus ongkir ditanggung toko seperti `SalesSummary`, kecuali butir jam yang hanya memuat ongkir karena beban dicatat per tanggal.
+#[derive(Debug, Serialize)]
+pub struct TitikTren {
+    /// Awal batang pada zona toko, tanpa zona (`2026-11-14T00:00:00`).
+    pub start: NaiveDateTime,
+    pub revenue: Decimal,
+    pub cogs: Decimal,
+    pub platform_fees: Decimal,
+    pub expenses: Decimal,
+    /// Kerugian stok (lihat `kerugian_stok`) menurut waktu pencatatannya.
+    pub stock_loss: Decimal,
+    /// `revenue - cogs - platform_fees - expenses - stock_loss`; untuk butir hari dan bulan jumlah seluruh batang sama dengan `SalesSummary::profit`.
+    pub profit: Decimal,
+    pub transaction_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Tren {
+    pub granularity: Butir,
+    pub points: Vec<TitikTren>,
+}
+
+/// Rentang nyata saringan: sisi akhir yang terbuka berarti hari ini, sisi awal yang terbuka berarti hari pertama ada transaksi atau beban.
+async fn rentang_nyata(pool: &PgPool, filter: &SalesFilter) -> AppResult<(NaiveDate, NaiveDate)> {
+    let (dari, sampai) = filter.jendela();
+    let sampai = sampai.unwrap_or_else(hari_ini);
+    let dari = match dari {
+        Some(d) => d,
+        None => sqlx::query_scalar!(
+            r#"
+            SELECT LEAST(
+                       (SELECT min((t.created_at AT TIME ZONE 'Asia/Jakarta')::date)
+                        FROM transactions t WHERE t.status = 'completed'),
+                       (SELECT min(e.expense_date) FROM expenses e)
+                   ) AS awal
+            "#
+        )
+        .fetch_one(pool)
+        .await?
+        .unwrap_or(sampai),
+    };
+    Ok((dari.min(sampai), sampai))
+}
+
+/// Tren mengikuti saringan (periode, metode bayar, jenis pembeli) termasuk batang kosong; deret dibuat `generate_series` di Postgres agar zona waktu tak ditiru di Rust.
+pub async fn tren(pool: &PgPool, filter: &SalesFilter) -> AppResult<Tren> {
+    let (dari, sampai) = rentang_nyata(pool, filter).await?;
+    let butir = Butir::untuk(dari, sampai);
+    let (awal, akhir) = butir.deret(dari, sampai);
+
     let rows = sqlx::query!(
         r#"
-        WITH bulan AS (
-            SELECT generate_series(
-                date_trunc('month', now() AT TIME ZONE 'Asia/Jakarta') - INTERVAL '5 months',
-                date_trunc('month', now() AT TIME ZONE 'Asia/Jakarta'),
-                INTERVAL '1 month'
-            ) AS awal
+        WITH deret AS (
+            SELECT generate_series($1::timestamp, $2::timestamp, ('1 ' || $3)::interval) AS awal
+        ),
+        jual AS (
+            SELECT date_trunc($3, t.created_at AT TIME ZONE 'Asia/Jakarta') AS awal,
+                   SUM(t.subtotal - t.discount_amount) AS omzet,
+                   SUM(t.platform_fee_total)           AS potongan,
+                   SUM(t.shipping_subsidy)             AS subsidi,
+                   COUNT(*)                            AS jumlah
+            FROM transactions t
+            WHERE t.status = 'completed'
+              AND t.created_at >= $4::date::timestamp AT TIME ZONE 'Asia/Jakarta'
+              AND t.created_at < ($5::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta'
+              AND ($6::text IS NULL OR t.payment_method = $6)
+              AND ($7::text IS NULL OR t.type = $7)
+            GROUP BY 1
+        ),
+        pokok AS (
+            SELECT date_trunc($3, t.created_at AT TIME ZONE 'Asia/Jakarta') AS awal,
+                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS hpp
+            FROM stock_adjustments sa
+            JOIN transactions t ON t.id = sa.reference_id
+            LEFT JOIN product_batches pb ON pb.id = sa.batch_id
+            LEFT JOIN products p ON p.id = sa.product_id
+            WHERE sa.reason = 'sale'
+              AND sa.change_qty < 0
+              AND sa.reference_type = 'transaction'
+              AND t.status = 'completed'
+              AND t.created_at >= $4::date::timestamp AT TIME ZONE 'Asia/Jakarta'
+              AND t.created_at < ($5::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta'
+              AND ($6::text IS NULL OR t.payment_method = $6)
+              AND ($7::text IS NULL OR t.type = $7)
+            GROUP BY 1
+        ),
+        beban AS (
+            SELECT date_trunc($3, e.expense_date::timestamp) AS awal,
+                   SUM(e.amount) AS jumlah
+            FROM expenses e
+            WHERE $3 <> 'hour'
+              AND e.expense_date >= $4::date
+              AND e.expense_date <= $5::date
+            GROUP BY 1
+        ),
+        rugi AS (
+            SELECT date_trunc($3, sa.created_at AT TIME ZONE 'Asia/Jakarta') AS awal,
+                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS jumlah
+            FROM stock_adjustments sa
+            LEFT JOIN product_batches pb ON pb.id = sa.batch_id
+            LEFT JOIN products p ON p.id = sa.product_id
+            WHERE sa.manual_reason IN ('rusak', 'kedaluwarsa', 'hilang')
+              AND sa.created_at >= $4::date::timestamp AT TIME ZONE 'Asia/Jakarta'
+              AND sa.created_at < ($5::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta'
+            GROUP BY 1
         )
-        SELECT to_char(b.awal, 'YYYY-MM') AS "month!",
-               COALESCE((
-                   SELECT SUM(t.subtotal - t.discount_amount)
-                   FROM transactions t
-                   WHERE t.status = 'completed'
-                     AND t.created_at AT TIME ZONE 'Asia/Jakarta' >= b.awal
-                     AND t.created_at AT TIME ZONE 'Asia/Jakarta' < b.awal + INTERVAL '1 month'
-                     AND ($1::text IS NULL OR t.payment_method = $1)
-                     AND ($2::text IS NULL OR t.type = $2)
-               ), 0) AS "revenue!",
-               COALESCE((
-                   SELECT SUM(e.amount)
-                   FROM expenses e
-                   WHERE e.expense_date >= b.awal::date
-                     AND e.expense_date < (b.awal + INTERVAL '1 month')::date
-               ), 0) + COALESCE((
-                   SELECT SUM(t.shipping_subsidy)
-                   FROM transactions t
-                   WHERE t.status = 'completed'
-                     AND t.created_at AT TIME ZONE 'Asia/Jakarta' >= b.awal
-                     AND t.created_at AT TIME ZONE 'Asia/Jakarta' < b.awal + INTERVAL '1 month'
-                     AND ($1::text IS NULL OR t.payment_method = $1)
-                     AND ($2::text IS NULL OR t.type = $2)
-               ), 0) AS "expenses!"
-        FROM bulan b
-        ORDER BY b.awal
+        SELECT d.awal                                          AS "start!",
+               COALESCE(j.omzet, 0)                            AS "revenue!",
+               COALESCE(k.hpp, 0)                              AS "cogs!",
+               COALESCE(j.potongan, 0)                         AS "platform_fees!",
+               COALESCE(b.jumlah, 0) + COALESCE(j.subsidi, 0)  AS "expenses!",
+               COALESCE(r.jumlah, 0)                           AS "stock_loss!",
+               COALESCE(j.jumlah, 0)                           AS "count!"
+        FROM deret d
+        LEFT JOIN jual j ON j.awal = d.awal
+        LEFT JOIN pokok k ON k.awal = d.awal
+        LEFT JOIN beban b ON b.awal = d.awal
+        LEFT JOIN rugi r ON r.awal = d.awal
+        ORDER BY d.awal
         "#,
+        awal,
+        akhir,
+        butir.sql(),
+        dari,
+        sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref()
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows
-        .into_iter()
-        .map(|r| MonthlyPoint {
-            month: r.month,
-            revenue: r.revenue,
-            expenses: r.expenses,
-        })
-        .collect())
+    Ok(Tren {
+        granularity: butir,
+        points: rows
+            .into_iter()
+            .map(|r| TitikTren {
+                start: r.start,
+                profit: r.revenue - r.cogs - r.platform_fees - r.expenses - r.stock_loss,
+                revenue: r.revenue,
+                cogs: r.cogs,
+                platform_fees: r.platform_fees,
+                expenses: r.expenses,
+                stock_loss: r.stock_loss,
+                transaction_count: r.count,
+            })
+            .collect(),
+    })
 }
 
 /// Satu kategori beban.
@@ -661,7 +865,7 @@ pub async fn expense_breakdown(
         .collect())
 }
 
-/// Baris produk terlaris; `revenue` di sini harga barang sebelum diskon karena diskon melekat pada transaksi dan membaginya ke barang berarti mengarang angka yang tak ada di struk.
+/// Baris laba per produk; `revenue` di sini harga barang sebelum diskon karena diskon melekat pada transaksi dan membaginya ke barang berarti mengarang angka yang tak ada di struk.
 #[derive(Debug, Serialize)]
 pub struct TopProduct {
     pub product_id: Option<Uuid>,
@@ -669,41 +873,120 @@ pub struct TopProduct {
     pub name: String,
     pub sku: Option<String>,
     pub qty: i64,
+    /// Pack × ukuran; `null` bila produknya tak punya ukuran atau sudah dihapus.
+    pub sold_kg: Option<Decimal>,
     pub revenue: Decimal,
+    pub cogs: Decimal,
+    /// `revenue - cogs`: laba kotor, sebelum potongan marketplace yang melekat pada transaksi, bukan pada barang.
+    pub profit: Decimal,
+    /// Baris keluaran stok tanpa harga beli, atau 1 bila barang ini tak punya keluaran stok sama sekali (barang lepas, produk terhapus); selama bukan nol `cogs` dan `profit` adalah batas atas.
+    pub items_without_cost: i64,
+}
+
+/// Urutan daftar produk: terlaris untuk kartu Ringkasan, omzet/laba/marjin untuk tab Produk.
+#[derive(Debug, Clone, Copy)]
+pub enum UrutanProduk {
+    Terjual,
+    Omzet,
+    Laba,
+    Marjin,
+}
+
+impl UrutanProduk {
+    pub fn parse(nilai: Option<&str>) -> Option<Self> {
+        match nilai {
+            None | Some("" | "qty") => Some(Self::Terjual),
+            Some("revenue") => Some(Self::Omzet),
+            Some("profit") => Some(Self::Laba),
+            Some("margin") => Some(Self::Marjin),
+            Some(_) => None,
+        }
+    }
+
+    fn sql(self) -> &'static str {
+        match self {
+            Self::Terjual => "qty",
+            Self::Omzet => "revenue",
+            Self::Laba => "profit",
+            Self::Marjin => "margin",
+        }
+    }
 }
 
 pub async fn top_products(
     pool: &PgPool,
     filter: &SalesFilter,
+    urutan: UrutanProduk,
     limit: i64,
     offset: i64,
 ) -> AppResult<Vec<TopProduct>> {
     let (dari, sampai) = filter.jendela();
+    // Harga pokok dari keluaran stok per produk, dengan logika yang sama seperti `harga_pokok`.
     let rows = sqlx::query!(
         r#"
-        SELECT ti.product_id                        AS product_id,
-               max(ti.product_name_snapshot)        AS "name!",
-               max(p.sku)                           AS sku,
-               SUM(ti.qty)::bigint                  AS "qty!",
-               SUM(ti.subtotal)                     AS "revenue!"
-        FROM transaction_items ti
-        JOIN transactions t ON t.id = ti.transaction_id
-        LEFT JOIN products p ON p.id = ti.product_id
-        WHERE t.status = 'completed'
-          AND ($1::date IS NULL
-               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
-          AND ($2::date IS NULL
-               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
-          AND ($3::text IS NULL OR t.payment_method = $3)
-          AND ($4::text IS NULL OR t.type = $4)
-        GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END
-        ORDER BY "qty!" DESC, "revenue!" DESC, 1
-        LIMIT $5 OFFSET $6
+        WITH barang AS (
+            SELECT ti.product_id,
+                   max(ti.product_name_snapshot)  AS nama,
+                   SUM(ti.qty)::bigint            AS qty,
+                   SUM(ti.qty * p.variant_size)   AS kg,
+                   SUM(ti.subtotal)               AS omzet
+            FROM transaction_items ti
+            JOIN transactions t ON t.id = ti.transaction_id
+            LEFT JOIN products p ON p.id = ti.product_id
+            WHERE t.status = 'completed'
+              AND ($1::date IS NULL
+                   OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+              AND ($2::date IS NULL
+                   OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+              AND ($3::text IS NULL OR t.payment_method = $3)
+              AND ($4::text IS NULL OR t.type = $4)
+            GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END
+        ),
+        pokok AS (
+            SELECT sa.product_id,
+                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS hpp,
+                   COUNT(*) FILTER (
+                       WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL
+                   ) AS tanpa_pokok
+            FROM stock_adjustments sa
+            JOIN transactions t ON t.id = sa.reference_id
+            LEFT JOIN product_batches pb ON pb.id = sa.batch_id
+            LEFT JOIN products p ON p.id = sa.product_id
+            WHERE sa.reason = 'sale'
+              AND sa.change_qty < 0
+              AND sa.reference_type = 'transaction'
+              AND t.status = 'completed'
+              AND ($1::date IS NULL
+                   OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+              AND ($2::date IS NULL
+                   OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+              AND ($3::text IS NULL OR t.payment_method = $3)
+              AND ($4::text IS NULL OR t.type = $4)
+            GROUP BY sa.product_id
+        )
+        SELECT b.product_id                                AS product_id,
+               b.nama                                      AS "name!",
+               p.sku                                       AS sku,
+               b.qty                                       AS "qty!",
+               b.kg                                        AS sold_kg,
+               b.omzet                                     AS "revenue!",
+               COALESCE(k.hpp, 0)                          AS "cogs!",
+               CASE WHEN k.product_id IS NULL THEN 1 ELSE k.tanpa_pokok END AS "tanpa_pokok!"
+        FROM barang b
+        LEFT JOIN pokok k ON k.product_id = b.product_id
+        LEFT JOIN products p ON p.id = b.product_id
+        ORDER BY
+            CASE WHEN $5 = 'revenue' THEN b.omzet END DESC NULLS LAST,
+            CASE WHEN $5 = 'profit' THEN b.omzet - COALESCE(k.hpp, 0) END DESC NULLS LAST,
+            CASE WHEN $5 = 'margin' THEN (b.omzet - COALESCE(k.hpp, 0)) / NULLIF(b.omzet, 0) END DESC NULLS LAST,
+            b.qty DESC, b.omzet DESC, b.product_id, b.nama
+        LIMIT $6 OFFSET $7
         "#,
         dari,
         sampai,
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref(),
+        urutan.sql(),
         limit,
         offset
     )
@@ -717,9 +1000,74 @@ pub async fn top_products(
             name: r.name,
             sku: r.sku,
             qty: r.qty,
+            sold_kg: r.sold_kg,
+            profit: r.revenue - r.cogs,
             revenue: r.revenue,
+            cogs: r.cogs,
+            items_without_cost: r.tanpa_pokok,
         })
         .collect())
+}
+
+/// Uang yang diterima toko per kanal dan metode bayar dalam satu butir waktu.
+#[derive(Debug, Serialize)]
+pub struct BarisUangMasuk {
+    /// Awal butir pada zona toko, tanpa zona.
+    pub start: NaiveDateTime,
+    pub channel: String,
+    /// Bermakna hanya untuk kanal toko; pesanan marketplace selalu dibayar lewat platform.
+    pub payment_method: String,
+    pub transaction_count: i64,
+    pub revenue: Decimal,
+    /// Ongkir yang ditagih ke pembeli.
+    pub shipping: Decimal,
+    /// `total_amount`: tagihan pembeli di toko (PPh tak memotongnya), uang cair di marketplace.
+    pub received: Decimal,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UangMasuk {
+    /// Per hari sampai dua bulan, selebihnya per bulan (butir jam tak dipakai karena uang dicocokkan per hari).
+    pub granularity: Butir,
+    pub rows: Vec<BarisUangMasuk>,
+}
+
+/// Uang masuk per butir, kanal, dan metode bayar; hanya periode yang menyaring karena yang dicocokkan adalah seluruh uang toko.
+pub async fn uang_masuk(pool: &PgPool, filter: &SalesFilter) -> AppResult<UangMasuk> {
+    let (dari, sampai) = rentang_nyata(pool, filter).await?;
+    let butir = match Butir::untuk(dari, sampai) {
+        Butir::Jam => Butir::Hari,
+        lain => lain,
+    };
+
+    let rows = sqlx::query_as!(
+        BarisUangMasuk,
+        r#"
+        SELECT date_trunc($3, t.created_at AT TIME ZONE 'Asia/Jakarta') AS "start!",
+               t.sales_channel                      AS "channel!",
+               t.payment_method                     AS "payment_method!",
+               COUNT(*)                             AS "transaction_count!",
+               SUM(t.subtotal - t.discount_amount)  AS "revenue!",
+               SUM(t.shipping_charged)              AS "shipping!",
+               SUM(t.total_amount)                  AS "received!"
+        FROM transactions t
+        WHERE t.status = 'completed'
+          AND t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta'
+          AND t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta'
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2, 3
+        "#,
+        dari,
+        sampai,
+        butir.sql()
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(UangMasuk {
+        granularity: butir,
+        rows,
+    })
 }
 
 /// Jumlah baris produk terlaris tanpa batas, dasar jumlah halaman; harus mengelompokkan sama persis dengan `top_products`.
@@ -1263,6 +1611,313 @@ pub async fn laporan_harian(
         .collect())
 }
 
+// --- Stok: pembelian dan barang terbuang ---
+
+/// Jumlah pembelian stok periode: batch yang masuk lewat "Catat batch" atau impor (punya ledger `restock`), bukan batch yang lahir dari koreksi naik.
+#[derive(Debug, Serialize)]
+pub struct RingkasanPembelian {
+    pub batch_count: i64,
+    pub qty: i64,
+    /// Σ jumlah masuk × harga beli (cadangan `products.cost_price` seperti harga pokok).
+    pub value: Decimal,
+    /// Batch tanpa harga beli; selama bukan nol `value` batas bawah.
+    pub batches_without_cost: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BarisPembelian {
+    pub batch_id: Uuid,
+    pub product_id: Uuid,
+    pub name: String,
+    pub sku: Option<String>,
+    pub batch_number: Option<String>,
+    pub received_at: DateTime<Utc>,
+    pub quantity: i32,
+    pub remaining_qty: i32,
+    pub purchase_price: Option<Decimal>,
+    /// `quantity × purchase_price`; `null` bila harga beli kosong.
+    pub total: Option<Decimal>,
+}
+
+/// Satu pengurangan stok manual: kerugian (`rusak`, `kedaluwarsa`, `hilang`), `salah_catat`, atau `null` untuk koreksi lama dan edit massal yang tak beralasan.
+#[derive(Debug, Serialize)]
+pub struct BarisPengurangan {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub product_id: Uuid,
+    pub name: String,
+    pub sku: Option<String>,
+    pub qty: i32,
+    pub reason: Option<String>,
+    /// Jumlah × harga beli batch; `null` bila harga beli kosong.
+    pub value: Option<Decimal>,
+    pub adjusted_by: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LaporanStok {
+    pub purchases: RingkasanPembelian,
+    pub purchase_rows: Vec<BarisPembelian>,
+    pub losses: Vec<KerugianStokSlice>,
+    pub loss_total: Decimal,
+    pub loss_without_cost: i64,
+    pub reduction_rows: Vec<BarisPengurangan>,
+    /// Seluruh pengurangan manual periode ini, dasar jumlah halaman `reduction_rows`.
+    pub reduction_total: i64,
+}
+
+/// Jendela halaman dua daftar tab Stok.
+pub struct HalamanStok {
+    pub beli_limit: i64,
+    pub beli_offset: i64,
+    pub kurang_limit: i64,
+    pub kurang_offset: i64,
+}
+
+pub async fn laporan_stok(
+    pool: &PgPool,
+    filter: &SalesFilter,
+    h: &HalamanStok,
+) -> AppResult<LaporanStok> {
+    let (dari, sampai) = filter.jendela();
+
+    let ringkasan = sqlx::query_as!(
+        RingkasanPembelian,
+        r#"
+        SELECT COUNT(*)                                       AS "batch_count!",
+               COALESCE(SUM(pb.quantity), 0)::bigint          AS "qty!",
+               COALESCE(SUM(pb.quantity * COALESCE(pb.purchase_price, p.cost_price, 0)), 0) AS "value!",
+               COUNT(*) FILTER (WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL) AS "batches_without_cost!"
+        FROM product_batches pb
+        JOIN products p ON p.id = pb.product_id
+        WHERE EXISTS (SELECT 1 FROM stock_adjustments sa
+                      WHERE sa.batch_id = pb.id AND sa.reason = 'restock' AND sa.change_qty > 0)
+          AND ($1::date IS NULL
+               OR pb.received_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR pb.received_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+        "#,
+        dari,
+        sampai
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let purchase_rows = sqlx::query_as!(
+        BarisPembelian,
+        r#"
+        SELECT pb.id                 AS batch_id,
+               p.id                  AS product_id,
+               p.name                AS name,
+               p.sku                 AS sku,
+               pb.batch_number       AS batch_number,
+               pb.received_at        AS received_at,
+               pb.quantity           AS quantity,
+               pb.remaining_qty      AS remaining_qty,
+               COALESCE(pb.purchase_price, p.cost_price)                AS purchase_price,
+               pb.quantity * COALESCE(pb.purchase_price, p.cost_price)  AS total
+        FROM product_batches pb
+        JOIN products p ON p.id = pb.product_id
+        WHERE EXISTS (SELECT 1 FROM stock_adjustments sa
+                      WHERE sa.batch_id = pb.id AND sa.reason = 'restock' AND sa.change_qty > 0)
+          AND ($1::date IS NULL
+               OR pb.received_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR pb.received_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+        ORDER BY pb.received_at DESC, pb.id
+        LIMIT $3 OFFSET $4
+        "#,
+        dari,
+        sampai,
+        h.beli_limit,
+        h.beli_offset
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let rugi = kerugian_stok(pool, filter).await?;
+
+    let reduction_rows = sqlx::query_as!(
+        BarisPengurangan,
+        r#"
+        SELECT sa.id                  AS id,
+               sa.created_at          AS "created_at!",
+               p.id                   AS product_id,
+               p.name                 AS name,
+               p.sku                  AS sku,
+               ABS(sa.change_qty)     AS "qty!",
+               sa.manual_reason       AS reason,
+               ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price) AS value,
+               u.name                 AS "adjusted_by?"
+        FROM stock_adjustments sa
+        JOIN products p ON p.id = sa.product_id
+        LEFT JOIN product_batches pb ON pb.id = sa.batch_id
+        LEFT JOIN users u ON u.id = sa.adjusted_by_user_id
+        WHERE sa.reason = 'manual_adjustment'
+          AND sa.change_qty < 0
+          AND ($1::date IS NULL
+               OR sa.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR sa.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+        ORDER BY sa.created_at DESC, sa.id
+        LIMIT $3 OFFSET $4
+        "#,
+        dari,
+        sampai,
+        h.kurang_limit,
+        h.kurang_offset
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let reduction_total = sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(*) AS "jumlah!"
+        FROM stock_adjustments sa
+        WHERE sa.reason = 'manual_adjustment'
+          AND sa.change_qty < 0
+          AND ($1::date IS NULL
+               OR sa.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR sa.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+        "#,
+        dari,
+        sampai
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(LaporanStok {
+        purchases: ringkasan,
+        purchase_rows,
+        losses: rugi.per_alasan,
+        loss_total: rugi.total,
+        loss_without_cost: rugi.tanpa_pokok,
+        reduction_rows,
+        reduction_total,
+    })
+}
+
+// --- Void ---
+
+/// Transaksi yang dibatalkan, disaring menurut waktu pembatalan karena yang diawasi adalah kapan dan oleh siapa void terjadi.
+#[derive(Debug, Serialize)]
+pub struct BarisVoid {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub voided_at: DateTime<Utc>,
+    pub sales_channel: String,
+    pub cashier: Option<String>,
+    pub voided_by: Option<String>,
+    pub void_reason: Option<String>,
+    pub revenue: Decimal,
+    pub total_amount: Decimal,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VoidPerOrang {
+    /// Yang membatalkan; `null` bila akunnya sudah tak ada.
+    pub name: Option<String>,
+    pub count: i64,
+    pub revenue: Decimal,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LaporanVoid {
+    pub count: i64,
+    pub revenue: Decimal,
+    /// Transaksi selesai pada periode yang sama, pembanding persentase void.
+    pub completed_count: i64,
+    pub per_user: Vec<VoidPerOrang>,
+    pub rows: Vec<BarisVoid>,
+}
+
+pub async fn laporan_void(
+    pool: &PgPool,
+    filter: &SalesFilter,
+    limit: i64,
+    offset: i64,
+) -> AppResult<LaporanVoid> {
+    let (dari, sampai) = filter.jendela();
+
+    let per_user = sqlx::query_as!(
+        VoidPerOrang,
+        r#"
+        SELECT u.name                                     AS "name?",
+               COUNT(*)                                   AS "count!",
+               SUM(t.subtotal - t.discount_amount)        AS "revenue!"
+        FROM transactions t
+        LEFT JOIN users u ON u.id = t.voided_by
+        WHERE t.status = 'voided'
+          AND ($1::date IS NULL
+               OR t.voided_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.voided_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+        GROUP BY t.voided_by, u.name
+        ORDER BY 2 DESC, 1
+        "#,
+        dari,
+        sampai
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let rows = sqlx::query_as!(
+        BarisVoid,
+        r#"
+        SELECT t.id                                 AS id,
+               t.created_at                         AS "created_at!",
+               t.voided_at                          AS "voided_at!",
+               t.sales_channel                      AS "sales_channel!",
+               k.name                               AS "cashier?",
+               u.name                               AS "voided_by?",
+               t.void_reason                        AS void_reason,
+               t.subtotal - t.discount_amount       AS "revenue!",
+               t.total_amount                       AS total_amount
+        FROM transactions t
+        LEFT JOIN users k ON k.id = t.cashier_user_id
+        LEFT JOIN users u ON u.id = t.voided_by
+        WHERE t.status = 'voided'
+          AND ($1::date IS NULL
+               OR t.voided_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.voided_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+        ORDER BY t.voided_at DESC, t.id
+        LIMIT $3 OFFSET $4
+        "#,
+        dari,
+        sampai,
+        limit,
+        offset
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let completed_count = sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(*) AS "jumlah!"
+        FROM transactions t
+        WHERE t.status = 'completed'
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+        "#,
+        dari,
+        sampai
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(LaporanVoid {
+        count: per_user.iter().map(|o| o.count).sum(),
+        revenue: per_user.iter().map(|o| o.revenue).sum(),
+        completed_count,
+        per_user,
+        rows,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1305,6 +1960,40 @@ mod tests {
             (dari, sampai),
             (Some(tgl(2026, 11, 5)), Some(tgl(2026, 11, 7)))
         );
+    }
+
+    #[test]
+    fn butir_tren_mengikuti_panjang_rentang() {
+        let hari = tgl(2026, 11, 14);
+        assert_eq!(Butir::untuk(hari, hari), Butir::Jam);
+        assert_eq!(Butir::untuk(tgl(2026, 11, 13), hari), Butir::Hari);
+        assert_eq!(Butir::untuk(tgl(2026, 9, 14), hari), Butir::Hari);
+        assert_eq!(Butir::untuk(tgl(2026, 9, 13), hari), Butir::Bulan);
+    }
+
+    #[test]
+    fn deret_bulan_dibulatkan_ke_tanggal_satu_dan_deret_jam_sampai_pukul_23() {
+        let (awal, akhir) = Butir::Bulan.deret(tgl(2026, 3, 15), tgl(2026, 9, 20));
+        assert_eq!(awal, tgl(2026, 3, 1).and_hms_opt(0, 0, 0).unwrap());
+        assert_eq!(akhir, tgl(2026, 9, 1).and_hms_opt(0, 0, 0).unwrap());
+
+        let hari = tgl(2026, 11, 14);
+        let (awal, akhir) = Butir::Jam.deret(hari, hari);
+        assert_eq!(awal, hari.and_hms_opt(0, 0, 0).unwrap());
+        assert_eq!(akhir, hari.and_hms_opt(23, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn urutan_produk_menolak_nilai_asing() {
+        assert!(matches!(
+            UrutanProduk::parse(None),
+            Some(UrutanProduk::Terjual)
+        ));
+        assert!(matches!(
+            UrutanProduk::parse(Some("margin")),
+            Some(UrutanProduk::Marjin)
+        ));
+        assert!(UrutanProduk::parse(Some("acak")).is_none());
     }
 
     #[test]

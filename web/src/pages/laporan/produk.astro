@@ -1,0 +1,143 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import Paginasi from '../../components/Paginasi.astro';
+import Peringatan from '../../components/Peringatan.astro';
+import SaringanPeriode from '../../components/SaringanPeriode.astro';
+import TabLaporan from '../../components/TabLaporan.astro';
+import { api, type ProductReport } from '../../lib/api';
+import { kg, rupiah } from '../../lib/format';
+import { bacaSaringan, kueriPeriodeApi, kueriPeriodeHalaman, labelPeriode } from '../../lib/laporan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const PER_HALAMAN = 25;
+const URUTAN = [
+  { nilai: 'profit', label: 'Laba Terbesar' },
+  { nilai: 'margin', label: 'Marjin Tertinggi' },
+  { nilai: 'revenue', label: 'Omzet Terbesar' },
+  { nilai: 'qty', label: 'Paling Laku' },
+] as const;
+
+const saringan = bacaSaringan(Astro.url);
+const urutDiminta = Astro.url.searchParams.get('urut') ?? '';
+// Nilai asing dibuang ke baku agar backend tak menerima tebakan dari URL ketikan tangan.
+const urut = URUTAN.some((u) => u.nilai === urutDiminta) ? urutDiminta : 'profit';
+const halaman = Math.max(1, Math.floor(Number(Astro.url.searchParams.get('halaman'))) || 1);
+
+const q = kueriPeriodeApi(saringan);
+q.set('sort', urut);
+q.set('page', String(halaman));
+q.set('limit', String(PER_HALAMAN));
+const laporan = await api<ProductReport>(`/reports/products?${q}`, { token });
+
+const halamanTerakhir = Math.max(1, Math.ceil(laporan.total / laporan.limit));
+const dari = laporan.total === 0 ? 0 : (laporan.page - 1) * laporan.limit + 1;
+const sampai = Math.min(laporan.page * laporan.limit, laporan.total);
+const adaTanpaPokok = laporan.data.some((p) => p.items_without_cost > 0);
+
+function tautanHalaman(ke: number): string {
+  const p = kueriPeriodeHalaman(saringan);
+  if (urut !== 'profit') p.set('urut', urut);
+  if (ke > 1) p.set('halaman', String(ke));
+  const s = p.toString();
+  return `/laporan/produk${s ? `?${s}` : ''}#daftar-produk`;
+}
+
+function marjin(laba: number, omzet: number): string {
+  return omzet > 0 ? `${((laba / omzet) * 100).toFixed(1)}%` : '—';
+}
+---
+
+<AppShell judul="Laporan · Produk" user={user}>
+  <TabLaporan saringan={saringan} />
+
+  <SaringanPeriode saringan={saringan} kolom="lg:grid-cols-[12rem_10rem_10rem_12rem_auto]">
+    <div>
+      <label class="label" for="urut">Urutkan</label>
+      <select class="kolom" id="urut" name="urut">
+        {URUTAN.map((u) => (
+          <option value={u.nilai} selected={urut === u.nilai}>
+            {u.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  </SaringanPeriode>
+
+  <div id="daftar-produk" data-daftar>
+    {
+      adaTanpaPokok && (
+        <Peringatan class="mb-4">
+          Baris bertanda <strong>HPP belum lengkap</strong> punya penjualan yang harga belinya kosong
+          (atau barang tanpa stok di aplikasi), jadi laba dan marjinnya terlalu besar.
+        </Peringatan>
+      )
+    }
+
+    <div class="kartu-rapat overflow-x-auto">
+      <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
+        <h2 class="text-base font-bold">Laba per Produk · {labelPeriode(saringan)}</h2>
+        <p class="text-xs text-[var(--color-teks-lembut)]">
+          Laba kotor = omzet barang − harga pokok, sebelum potongan marketplace dan beban toko
+        </p>
+      </div>
+
+      <table class="tabel tabel-kartu">
+        <thead>
+          <tr>
+            <th>Produk</th>
+            <th class="text-right">Terjual</th>
+            <th class="text-right">Kg</th>
+            <th class="text-right">Omzet</th>
+            <th class="text-right">Harga Pokok</th>
+            <th class="text-right">Laba Kotor</th>
+            <th class="text-right">Marjin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            laporan.data.map((p) => (
+              <tr>
+                <td data-judul>
+                  {p.product_id ? (
+                    <a class="font-medium hover:underline" href={`/produk/${p.product_id}`}>{p.name}</a>
+                  ) : (
+                    <span class="font-medium">{p.name}</span>
+                  )}
+                  <span class="block text-xs text-[var(--color-teks-lembut)]">
+                    {p.sku ?? 'Tanpa SKU'}
+                    {p.items_without_cost > 0 && <span class="ml-1 font-medium text-kuning-700">· HPP belum lengkap</span>}
+                  </span>
+                </td>
+                <td data-label="Terjual" class="sel-angka">{p.qty}</td>
+                <td data-label="Kg" class="sel-angka text-[var(--color-teks-lembut)]">{p.sold_kg === null ? '—' : kg(p.sold_kg)}</td>
+                <td data-label="Omzet" class="sel-angka">{rupiah(p.revenue)}</td>
+                <td data-label="Harga Pokok" class="sel-angka text-[var(--color-teks-lembut)]">{rupiah(p.cogs)}</td>
+                <td data-label="Laba Kotor" class:list={['sel-angka font-semibold', p.profit < 0 && 'text-red-600']}>{rupiah(p.profit)}</td>
+                <td data-label="Marjin" class:list={['sel-angka', p.profit < 0 && 'text-red-600']}>{marjin(p.profit, p.revenue)}</td>
+              </tr>
+            ))
+          }
+          {
+            laporan.data.length === 0 && (
+              <tr>
+                <td colspan="7" class="py-12 text-center text-[var(--color-teks-lembut)]">
+                  Belum ada penjualan pada periode ini.
+                </td>
+              </tr>
+            )
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+      <p class="text-[var(--color-teks-lembut)]">
+        Menampilkan <span class="tabular-nums">{dari}–{sampai}</span> dari
+        <span class="tabular-nums"> {laporan.total}</span> produk
+      </p>
+      <Paginasi halaman={laporan.page} {halamanTerakhir} tautan={tautanHalaman} />
+    </div>
+  </div>
+</AppShell>

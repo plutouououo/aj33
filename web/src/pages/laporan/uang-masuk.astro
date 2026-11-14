@@ -1,0 +1,138 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import SaringanPeriode from '../../components/SaringanPeriode.astro';
+import TabLaporan from '../../components/TabLaporan.astro';
+import { api, type BarisUangMasuk, type UangMasuk } from '../../lib/api';
+import { rupiah } from '../../lib/format';
+import { bacaSaringan, kueriPeriodeApi, labelButir, labelPeriode } from '../../lib/laporan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const saringan = bacaSaringan(Astro.url);
+const laporan = await api<UangMasuk>(`/reports/cash-in?${kueriPeriodeApi(saringan)}`, { token });
+
+// Metode bayar hanya bermakna di toko; pesanan marketplace selalu dibayar lewat platform, jadi dikelompokkan per kanal saja.
+const SUMBER = [
+  { kunci: 'toko:cash', label: 'Tunai', ket: 'Uang di laci' },
+  { kunci: 'toko:transfer', label: 'Transfer', ket: 'Mutasi rekening' },
+  { kunci: 'toko:ewallet', label: 'E-wallet', ket: 'QRIS / dompet digital' },
+  { kunci: 'shopee', label: 'Shopee', ket: 'Cair setelah potongan' },
+  { kunci: 'tiktok', label: 'Tokopedia', ket: 'Cair setelah potongan' },
+] as const;
+
+function kunci(b: BarisUangMasuk): string {
+  return b.channel === 'toko' ? `toko:${b.payment_method}` : b.channel;
+}
+
+interface Jumlah {
+  order: number;
+  omzet: number;
+  ongkir: number;
+  diterima: number;
+}
+const kosong = (): Jumlah => ({ order: 0, omzet: 0, ongkir: 0, diterima: 0 });
+function tambah(j: Jumlah, b: BarisUangMasuk): void {
+  j.order += b.transaction_count;
+  j.omzet += b.revenue;
+  j.ongkir += b.shipping;
+  j.diterima += b.received;
+}
+
+const perSumber = new Map<string, Jumlah>(SUMBER.map((s) => [s.kunci, kosong()]));
+const perButir = new Map<string, Map<string, number>>();
+const total = kosong();
+for (const b of laporan.rows) {
+  const k = kunci(b);
+  if (!perSumber.has(k)) perSumber.set(k, kosong());
+  tambah(perSumber.get(k)!, b);
+  tambah(total, b);
+  const baris = perButir.get(b.start) ?? new Map<string, number>();
+  baris.set(k, (baris.get(k) ?? 0) + b.received);
+  perButir.set(b.start, baris);
+}
+const butir = laporan.granularity;
+---
+
+<AppShell judul="Laporan · Uang Masuk" user={user}>
+  <TabLaporan saringan={saringan} />
+  <SaringanPeriode saringan={saringan} />
+
+  <div class="mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
+    {SUMBER.map((s) => {
+      const j = perSumber.get(s.kunci)!;
+      const potongan = j.omzet + j.ongkir - j.diterima;
+      return (
+        <div class="kartu-angka">
+          <span class="kartu-angka-label">{s.label}</span>
+          <span class="kartu-angka-nilai">{rupiah(j.diterima)}</span>
+          <span class="kartu-angka-bantu">
+            {j.order} order · {s.ket}
+            {s.kunci.startsWith('toko') ? '' : potongan !== 0 && ` (dipotong ${rupiah(potongan)})`}
+          </span>
+        </div>
+      );
+    })}
+    <div class="kartu-angka bg-merah-600 text-white">
+      <span class="kartu-angka-label !text-white/80">Total Uang Masuk</span>
+      <span class="kartu-angka-nilai">{rupiah(total.diterima)}</span>
+      <span class="kartu-angka-bantu !text-white/70">{total.order} order · {labelPeriode(saringan)}</span>
+    </div>
+  </div>
+
+  <section class="kartu-rapat overflow-x-auto">
+    <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
+      <h2 class="text-base font-bold">Uang Masuk {butir === 'month' ? 'per Bulan' : 'per Hari'}</h2>
+      <p class="text-xs text-[var(--color-teks-lembut)]">Cocokkan dengan uang laci, mutasi rekening, dan saldo marketplace</p>
+    </div>
+
+    <table class="tabel min-w-[44rem]">
+      <thead>
+        <tr>
+          <th>{butir === 'month' ? 'Bulan' : 'Tanggal'}</th>
+          {SUMBER.map((s) => <th class="text-right">{s.label}</th>)}
+          <th class="text-right">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          [...perButir.entries()].map(([start, baris]) => (
+            <tr>
+              <td class="whitespace-nowrap">{labelButir(start, butir, true)}</td>
+              {SUMBER.map((s) => (
+                <td class="sel-angka">{baris.has(s.kunci) ? rupiah(baris.get(s.kunci)!) : <span class="text-[var(--color-teks-samar)]">—</span>}</td>
+              ))}
+              <td class="sel-angka font-semibold">{rupiah([...baris.values()].reduce((a, n) => a + n, 0))}</td>
+            </tr>
+          ))
+        }
+        {
+          perButir.size === 0 && (
+            <tr>
+              <td colspan={SUMBER.length + 2} class="py-12 text-center text-[var(--color-teks-lembut)]">
+                Belum ada uang masuk pada periode ini.
+              </td>
+            </tr>
+          )
+        }
+      </tbody>
+      {
+        perButir.size > 0 && (
+          <tfoot>
+            <tr class="border-t-2 border-[var(--color-garis)] font-semibold">
+              <td>Jumlah</td>
+              {SUMBER.map((s) => <td class="sel-angka">{rupiah(perSumber.get(s.kunci)!.diterima)}</td>)}
+              <td class="sel-angka">{rupiah(total.diterima)}</td>
+            </tr>
+          </tfoot>
+        )
+      }
+    </table>
+
+    <ul class="space-y-1 border-t border-[var(--color-garis)] px-5 py-4 text-xs text-[var(--color-teks-lembut)]">
+      <li>Toko: tagihan pembeli termasuk ongkir yang ditagih; PPh tidak memotongnya karena dibayar toko sendiri.</li>
+      <li>Shopee dan Tokopedia: uang yang cair setelah komisi, biaya layanan, biaya proses, dan PPh. Tanggal di sini tanggal pesanan, bukan tanggal dana dilepas marketplace.</li>
+      <li>Pesanan Tokopedia sebelum potongan dicatat (sebelum 10 Nov 2026) tercatat penuh tanpa potongan.</li>
+    </ul>
+  </section>
+</AppShell>

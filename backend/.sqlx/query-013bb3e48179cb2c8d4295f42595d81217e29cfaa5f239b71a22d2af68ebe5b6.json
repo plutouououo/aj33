@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH barang AS (\n            SELECT ti.product_id,\n                   max(ti.product_name_snapshot)  AS nama,\n                   SUM(ti.qty)::bigint            AS qty,\n                   SUM(ti.qty * p.variant_size)   AS kg,\n                   SUM(ti.subtotal)               AS omzet\n            FROM transaction_items ti\n            JOIN transactions t ON t.id = ti.transaction_id\n            LEFT JOIN products p ON p.id = ti.product_id\n            WHERE t.status = 'completed'\n              AND ($1::date IS NULL\n                   OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n              AND ($2::date IS NULL\n                   OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n              AND ($3::text IS NULL OR t.payment_method = $3)\n              AND ($4::text IS NULL OR t.type = $4)\n            GROUP BY ti.product_id, CASE WHEN ti.product_id IS NULL THEN ti.product_name_snapshot END\n        ),\n        pokok AS (\n            SELECT sa.product_id,\n                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS hpp,\n                   COUNT(*) FILTER (\n                       WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL\n                   ) AS tanpa_pokok\n            FROM stock_adjustments sa\n            JOIN transactions t ON t.id = sa.reference_id\n            LEFT JOIN product_batches pb ON pb.id = sa.batch_id\n            LEFT JOIN products p ON p.id = sa.product_id\n            WHERE sa.reason = 'sale'\n              AND sa.change_qty < 0\n              AND sa.reference_type = 'transaction'\n              AND t.status = 'completed'\n              AND ($1::date IS NULL\n                   OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n              AND ($2::date IS NULL\n                   OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n              AND ($3::text IS NULL OR t.payment_method = $3)\n              AND ($4::text IS NULL OR t.type = $4)\n            GROUP BY sa.product_id\n        )\n        SELECT b.product_id                                AS product_id,\n               b.nama                                      AS \"name!\",\n               p.sku                                       AS sku,\n               b.qty                                       AS \"qty!\",\n               b.kg                                        AS sold_kg,\n               b.omzet                                     AS \"revenue!\",\n               COALESCE(k.hpp, 0)                          AS \"cogs!\",\n               CASE WHEN k.product_id IS NULL THEN 1 ELSE k.tanpa_pokok END AS \"tanpa_pokok!\"\n        FROM barang b\n        LEFT JOIN pokok k ON k.product_id = b.product_id\n        LEFT JOIN products p ON p.id = b.product_id\n        ORDER BY\n            CASE WHEN $5 = 'revenue' THEN b.omzet END DESC NULLS LAST,\n            CASE WHEN $5 = 'profit' THEN b.omzet - COALESCE(k.hpp, 0) END DESC NULLS LAST,\n            CASE WHEN $5 = 'margin' THEN (b.omzet - COALESCE(k.hpp, 0)) / NULLIF(b.omzet, 0) END DESC NULLS LAST,\n            b.qty DESC, b.omzet DESC, b.product_id, b.nama\n        LIMIT $6 OFFSET $7\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "product_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "sku",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "qty!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "sold_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "cogs!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "tanpa_pokok!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      null,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "013bb3e48179cb2c8d4295f42595d81217e29cfaa5f239b71a22d2af68ebe5b6"
+}

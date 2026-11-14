@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) AS \"jumlah!\"\n        FROM transactions t\n        WHERE t.status = 'completed'\n          AND ($1::date IS NULL\n               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "jumlah!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4b6c2b19a03c1f3cfc97ad2cd9754c9e70061c7d3025ea9c3e8313b26e88580a"
+}

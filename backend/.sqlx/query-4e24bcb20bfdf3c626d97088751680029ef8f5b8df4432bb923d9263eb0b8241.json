@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) AS \"jumlah!\"\n        FROM stock_adjustments sa\n        WHERE sa.reason = 'manual_adjustment'\n          AND sa.change_qty < 0\n          AND ($1::date IS NULL\n               OR sa.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR sa.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "jumlah!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4e24bcb20bfdf3c626d97088751680029ef8f5b8df4432bb923d9263eb0b8241"
+}

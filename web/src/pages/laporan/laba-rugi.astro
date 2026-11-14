@@ -5,7 +5,14 @@ import SaringanPeriode from '../../components/SaringanPeriode.astro';
 import TabLaporan from '../../components/TabLaporan.astro';
 import { api, type LabaRugi, type ProfitLossReport } from '../../lib/api';
 import { hitungTren, labelTren, rupiah, waktu } from '../../lib/format';
-import { PERIODE_TANGGAL, bacaSaringan, kueriPeriodeApi, kueriPeriodeHalaman, labelPeriode } from '../../lib/laporan';
+import {
+  ALASAN_KOREKSI,
+  PERIODE_TANGGAL,
+  bacaSaringan,
+  kueriPeriodeApi,
+  kueriPeriodeHalaman,
+  labelPeriode,
+} from '../../lib/laporan';
 
 const user = Astro.locals.user!;
 const token = Astro.locals.token!;
@@ -21,6 +28,9 @@ const labelLalu =
     : '';
 // Periode baku (Bulan Ini, dst.) berjalan sampai hari ini sedangkan pembandingnya penuh, jadi selisihnya wajar besar di awal periode.
 const masihBerjalan = lalu !== null && saringan.periode !== PERIODE_TANGGAL;
+
+const ALASAN_RUGI = ALASAN_KOREKSI.filter((a) => a.nilai !== 'salah_catat');
+const adaRugi = kini.stock_loss_total !== 0 || (lalu?.stock_loss_total ?? 0) !== 0;
 
 type Baris =
   | { jenis: 'judul'; label: string }
@@ -56,6 +66,20 @@ const BARIS: Baris[] = [
   ...kategori.map((k): Baris => ({ jenis: 'pos', label: k, nilai: (l) => bebanKategori(l, k), kurang: true, selalu: true })),
   { jenis: 'subtotal', label: 'Jumlah beban operasional', nilai: (l) => l.operating_expenses_total, kurang: true },
 
+  // Bagian kerugian stok hanya muncul bila salah satu periode punya barang terbuang, supaya laporan tak dipenuhi baris nol.
+  ...(adaRugi
+    ? [
+        { jenis: 'judul', label: 'Kerugian stok' } as const,
+        ...ALASAN_RUGI.map((a): Baris => ({
+          jenis: 'pos',
+          label: a.label,
+          nilai: (l) => l.stock_losses.find((r) => r.reason === a.nilai)?.amount ?? 0,
+          kurang: true,
+        })),
+        { jenis: 'subtotal', label: 'Jumlah kerugian stok', nilai: (l: LabaRugi) => l.stock_loss_total, kurang: true } as const,
+      ]
+    : []),
+
   { jenis: 'subtotal', label: 'Laba sebelum pajak', nilai: (l) => l.profit_before_tax },
   { jenis: 'pos', label: 'PPh final UMKM', nilai: (l) => l.withholding_tax, kurang: true, selalu: true },
   { jenis: 'total', label: 'Laba bersih', nilai: (l) => l.net_profit, marjin: true },
@@ -87,6 +111,14 @@ const dicetak = waktu(new Date().toISOString());
       <Peringatan class="mb-5 print:hidden">
         {kini.items_without_cost} baris penjualan keluar dari batch yang harga belinya belum diisi.
         Selama itu, <strong>harga pokok terlalu kecil dan semua laba di bawah terlalu besar</strong>.
+      </Peringatan>
+    )
+  }
+  {
+    kini.stock_loss_without_cost > 0 && (
+      <Peringatan class="mb-5 print:hidden">
+        {kini.stock_loss_without_cost} catatan barang terbuang berasal dari batch tanpa harga beli dan dihitung nol,
+        jadi <strong>kerugian stok terlalu kecil</strong>.
       </Peringatan>
     )
   }
@@ -173,6 +205,7 @@ const dicetak = waktu(new Date().toISOString());
     <ul class="space-y-1 border-t border-[var(--color-garis)] px-5 py-4 text-xs text-[var(--color-teks-lembut)]">
       <li>Penjualan adalah harga barang; ongkir yang dibayar pembeli tidak termasuk.</li>
       <li>Belanja stok tidak muncul sebagai beban: nilainya masuk harga pokok saat barangnya terjual.</li>
+      {adaRugi && <li>Kerugian stok: barang yang dikurangi lewat Koreksi stok karena rusak, kedaluwarsa, atau hilang, dinilai dengan harga belinya.</li>}
       {masihBerjalan && <li>{labelKini} masih berjalan sampai hari ini, sedangkan {labelLalu} dihitung penuh.</li>}
     </ul>
   </section>

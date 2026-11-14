@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT date_trunc($3, t.created_at AT TIME ZONE 'Asia/Jakarta') AS \"start!\",\n               t.sales_channel                      AS \"channel!\",\n               t.payment_method                     AS \"payment_method!\",\n               COUNT(*)                             AS \"transaction_count!\",\n               SUM(t.subtotal - t.discount_amount)  AS \"revenue!\",\n               SUM(t.shipping_charged)              AS \"shipping!\",\n               SUM(t.total_amount)                  AS \"received!\"\n        FROM transactions t\n        WHERE t.status = 'completed'\n          AND t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta'\n          AND t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta'\n        GROUP BY 1, 2, 3\n        ORDER BY 1, 2, 3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "start!",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "payment_method!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "transaction_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "shipping!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "received!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4bfd7632aa5e783836056bf81ab242600932599b21bb1f3276c945b7e4b3f19b"
+}

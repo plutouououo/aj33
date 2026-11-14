@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT sa.manual_reason AS \"reason!\",\n               SUM(ABS(sa.change_qty))::bigint AS \"qty!\",\n               COALESCE(SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)), 0) AS \"amount!\",\n               COUNT(*) FILTER (WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL) AS \"tanpa_pokok!\"\n        FROM stock_adjustments sa\n        LEFT JOIN product_batches pb ON pb.id = sa.batch_id\n        LEFT JOIN products p ON p.id = sa.product_id\n        WHERE sa.manual_reason IN ('rusak', 'kedaluwarsa', 'hilang')\n          AND ($1::date IS NULL\n               OR sa.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR sa.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n        GROUP BY sa.manual_reason\n        ORDER BY 3 DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reason!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "qty!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "amount!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "tanpa_pokok!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "a7193d3b6621ff3dd3afe50a7a2e4f11396e659f88562a5125c4743492c75281"
+}

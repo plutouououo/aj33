@@ -1,9 +1,9 @@
 //! Endpoint dasbor dan laporan khusus owner (omzet, laba, harga pokok adalah isi buku toko), dibatasi di sini bukan hanya di menu frontend.
 
 use super::repo::{
-    self, hari_ini, ChannelSummary, Counts, ExpenseSlice, LabaRugi, LowStockProduct, MonthlyPoint,
-    Periode, Rentang, SaleRow, SalesFilter, SalesSummary, StockValue, TopProduct,
-    TransactionDetail,
+    self, hari_ini, ChannelSummary, Counts, ExpenseSlice, LabaRugi, LowStockProduct, Periode,
+    Rentang, SaleRow, SalesFilter, SalesSummary, StockValue, TopProduct, TransactionDetail, Tren,
+    UangMasuk, UrutanProduk,
 };
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
@@ -23,6 +23,10 @@ pub fn router() -> Router<AppState> {
         .route("/reports/sales", get(sales_report))
         .route("/reports/sales/{id}", get(sales_transaction_detail))
         .route("/reports/profit-loss", get(profit_loss))
+        .route("/reports/products", get(product_report))
+        .route("/reports/cash-in", get(cash_in))
+        .route("/reports/stock", get(stock_report))
+        .route("/reports/voids", get(void_report))
         .route("/sheet/harian", get(sheet_harian))
 }
 
@@ -234,7 +238,8 @@ struct SalesReport {
     summary: SalesSummary,
     /// Angka periode setara sebelumnya untuk kartu trend, `null` bila "Seluruh Waktu" (lihat `repo::sales_summary_previous`).
     previous_summary: Option<SalesSummary>,
-    trend: Vec<MonthlyPoint>,
+    /// Mengikuti seluruh saringan; butirnya (jam, hari, bulan) dipilih dari panjang periode.
+    trend: Tren,
     /// Omzet dan laba per kanal (toko, Shopee, Tokopedia) pada periode dan saringan yang sama dengan `summary`.
     channels: Vec<ChannelSummary>,
     expense_breakdown: Vec<ExpenseSlice>,
@@ -258,12 +263,13 @@ async fn sales_report(
     Ok(Json(SalesReport {
         summary: repo::sales_summary(&state.pool, &filter).await?,
         previous_summary: repo::sales_summary_previous(&state.pool, &filter).await?,
-        trend: repo::monthly_trend(&state.pool, &filter).await?,
+        trend: repo::tren(&state.pool, &filter).await?,
         channels: repo::channel_summaries(&state.pool, &filter).await?,
         expense_breakdown: repo::expense_breakdown(&state.pool, &filter).await?,
         top_products: repo::top_products(
             &state.pool,
             &top_filter,
+            UrutanProduk::Terjual,
             halaman.top_limit,
             halaman.top_offset,
         )
@@ -324,6 +330,157 @@ async fn profit_loss(
         previous_from,
         previous_to,
     }))
+}
+
+// --- Laba per produk ---
+
+#[derive(Debug, Deserialize)]
+struct ProductQuery {
+    period: Option<String>,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    /// `qty` (baku), `revenue`, `profit`, atau `margin`.
+    sort: Option<String>,
+    page: Option<i64>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProductReport {
+    data: Vec<TopProduct>,
+    page: i64,
+    limit: i64,
+    total: i64,
+}
+
+async fn product_report(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<ProductQuery>,
+) -> AppResult<Json<ProductReport>> {
+    user.require(&[Role::Owner])?;
+
+    let filter = SalesFilter {
+        rentang: rentang_kueri(q.period.as_deref(), q.from, q.to)?,
+        ..SalesFilter::default()
+    };
+    let urutan = UrutanProduk::parse(q.sort.as_deref()).ok_or_else(|| {
+        AppError::bad_request(format!(
+            "Urutan '{}' tidak dikenal.",
+            q.sort.as_deref().unwrap_or_default()
+        ))
+    })?;
+    let limit = q.limit.unwrap_or(25).clamp(1, TERLARIS_MAKS);
+    let page = q.page.unwrap_or(1).max(1);
+
+    Ok(Json(ProductReport {
+        data: repo::top_products(&state.pool, &filter, urutan, limit, (page - 1) * limit).await?,
+        page,
+        limit,
+        total: repo::top_products_count(&state.pool, &filter).await?,
+    }))
+}
+
+// --- Uang masuk ---
+
+async fn cash_in(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<PeriodeQuery>,
+) -> AppResult<Json<UangMasuk>> {
+    user.require(&[Role::Owner])?;
+
+    let filter = SalesFilter {
+        rentang: rentang_kueri(q.period.as_deref(), q.from, q.to)?,
+        ..SalesFilter::default()
+    };
+    Ok(Json(repo::uang_masuk(&state.pool, &filter).await?))
+}
+
+// --- Stok ---
+
+#[derive(Debug, Deserialize)]
+struct StockQuery {
+    period: Option<String>,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    purchase_limit: Option<i64>,
+    purchase_offset: Option<i64>,
+    reduction_limit: Option<i64>,
+    reduction_offset: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct StockReport {
+    /// Potret persediaan sekarang, bukan angka periode.
+    stock_value: StockValue,
+    #[serde(flatten)]
+    laporan: repo::LaporanStok,
+}
+
+/// Batas atas satu halaman daftar di tab Stok dan Void.
+const DAFTAR_MAKS: i64 = 100;
+const DAFTAR_BAKU: i64 = 10;
+
+fn halaman_daftar(limit: Option<i64>, offset: Option<i64>) -> (i64, i64) {
+    (
+        limit.unwrap_or(DAFTAR_BAKU).clamp(1, DAFTAR_MAKS),
+        offset.unwrap_or(0).max(0),
+    )
+}
+
+async fn stock_report(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<StockQuery>,
+) -> AppResult<Json<StockReport>> {
+    user.require(&[Role::Owner])?;
+
+    let filter = SalesFilter {
+        rentang: rentang_kueri(q.period.as_deref(), q.from, q.to)?,
+        ..SalesFilter::default()
+    };
+    let (beli_limit, beli_offset) = halaman_daftar(q.purchase_limit, q.purchase_offset);
+    let (kurang_limit, kurang_offset) = halaman_daftar(q.reduction_limit, q.reduction_offset);
+    let halaman = repo::HalamanStok {
+        beli_limit,
+        beli_offset,
+        kurang_limit,
+        kurang_offset,
+    };
+
+    Ok(Json(StockReport {
+        stock_value: repo::stock_value(&state.pool).await?,
+        laporan: repo::laporan_stok(&state.pool, &filter, &halaman).await?,
+    }))
+}
+
+// --- Void ---
+
+#[derive(Debug, Deserialize)]
+struct VoidQuery {
+    period: Option<String>,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+async fn void_report(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<VoidQuery>,
+) -> AppResult<Json<repo::LaporanVoid>> {
+    user.require(&[Role::Owner])?;
+
+    let filter = SalesFilter {
+        rentang: rentang_kueri(q.period.as_deref(), q.from, q.to)?,
+        ..SalesFilter::default()
+    };
+    let (limit, offset) = halaman_daftar(q.limit, q.offset);
+    Ok(Json(
+        repo::laporan_void(&state.pool, &filter, limit, offset).await?,
+    ))
 }
 
 // --- Detail transaksi ---

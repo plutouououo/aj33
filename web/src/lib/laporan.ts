@@ -130,6 +130,14 @@ export function kueriHalaman(s: Saringan): string {
 
 const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
+/** Label satu butir tren dari awalnya (`2026-11-14T08:00:00`, zona toko): `08.00`, `14 Nov`, atau `Nov 26`; `lengkap` menambah tahun pada butir hari. */
+export function labelButir(start: string, butir: 'hour' | 'day' | 'month', lengkap = false): string {
+  const [tahun, bulan, hari] = start.slice(0, 10).split('-').map(Number);
+  if (butir === 'hour') return `${start.slice(11, 13)}.00`;
+  if (butir === 'month') return `${BULAN[bulan - 1]} ${lengkap ? tahun : String(tahun).slice(2)}`;
+  return lengkap ? `${hari} ${BULAN[bulan - 1]} ${tahun}` : `${hari} ${BULAN[bulan - 1]}`;
+}
+
 /** `2026-11-05` menjadi `5 Nov 2026`. */
 function labelTanggal(nilai: string): string {
   const [tahun, bulan, hari] = nilai.split('-').map(Number);

@@ -1,0 +1,73 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id                                 AS id,\n               t.created_at                         AS \"created_at!\",\n               t.voided_at                          AS \"voided_at!\",\n               t.sales_channel                      AS \"sales_channel!\",\n               k.name                               AS \"cashier?\",\n               u.name                               AS \"voided_by?\",\n               t.void_reason                        AS void_reason,\n               t.subtotal - t.discount_amount       AS \"revenue!\",\n               t.total_amount                       AS total_amount\n        FROM transactions t\n        LEFT JOIN users k ON k.id = t.cashier_user_id\n        LEFT JOIN users u ON u.id = t.voided_by\n        WHERE t.status = 'voided'\n          AND ($1::date IS NULL\n               OR t.voided_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR t.voided_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n        ORDER BY t.voided_at DESC, t.id\n        LIMIT $3 OFFSET $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "voided_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "sales_channel!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "cashier?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "voided_by?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "void_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "total_amount",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      null,
+      false
+    ]
+  },
+  "hash": "75f264a51c938e1a642b5c516cdc4d8f31d2db607e7a1f877300edf6d22bbf2d"
+}

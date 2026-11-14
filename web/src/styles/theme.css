@@ -198,6 +198,11 @@
     @apply border-b border-[var(--color-garis-lembut)] px-4 py-3 align-middle;
   }
 
+  /* Baris jumlah di kaki tabel, sejajar dengan isi di atasnya. */
+  .tabel tfoot td {
+    @apply px-4 py-3;
+  }
+
   .tabel tbody tr:hover td {
     @apply bg-merah-50/40;
   }

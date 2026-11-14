@@ -1,0 +1,79 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT pb.id                 AS batch_id,\n               p.id                  AS product_id,\n               p.name                AS name,\n               p.sku                 AS sku,\n               pb.batch_number       AS batch_number,\n               pb.received_at        AS received_at,\n               pb.quantity           AS quantity,\n               pb.remaining_qty      AS remaining_qty,\n               COALESCE(pb.purchase_price, p.cost_price)                AS purchase_price,\n               pb.quantity * COALESCE(pb.purchase_price, p.cost_price)  AS total\n        FROM product_batches pb\n        JOIN products p ON p.id = pb.product_id\n        WHERE EXISTS (SELECT 1 FROM stock_adjustments sa\n                      WHERE sa.batch_id = pb.id AND sa.reason = 'restock' AND sa.change_qty > 0)\n          AND ($1::date IS NULL\n               OR pb.received_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR pb.received_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n        ORDER BY pb.received_at DESC, pb.id\n        LIMIT $3 OFFSET $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "batch_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "product_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "sku",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "batch_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "received_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "quantity",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "remaining_qty",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "purchase_price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
+        "name": "total",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "d64a5d92042e1bfa30bbec89697d38668779b5e6523b62c7ff18256389df5de1"
+}

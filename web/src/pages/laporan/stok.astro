@@ -1,0 +1,197 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import Paginasi from '../../components/Paginasi.astro';
+import Peringatan from '../../components/Peringatan.astro';
+import SaringanPeriode from '../../components/SaringanPeriode.astro';
+import TabLaporan from '../../components/TabLaporan.astro';
+import { api, type StockReport } from '../../lib/api';
+import { kg, rupiah, waktu } from '../../lib/format';
+import {
+  ALASAN_KOREKSI,
+  bacaSaringan,
+  kueriPeriodeApi,
+  kueriPeriodeHalaman,
+  labelAlasan,
+  labelPeriode,
+} from '../../lib/laporan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const PER_HALAMAN = 10;
+
+const saringan = bacaSaringan(Astro.url);
+
+function bacaHalaman(nama: string): number {
+  return Math.max(1, Math.floor(Number(Astro.url.searchParams.get(nama))) || 1);
+}
+const halamanBeli = bacaHalaman('hal_beli');
+const halamanKurang = bacaHalaman('hal_kurang');
+
+const q = kueriPeriodeApi(saringan);
+q.set('purchase_limit', String(PER_HALAMAN));
+q.set('purchase_offset', String((halamanBeli - 1) * PER_HALAMAN));
+q.set('reduction_limit', String(PER_HALAMAN));
+q.set('reduction_offset', String((halamanKurang - 1) * PER_HALAMAN));
+const laporan = await api<StockReport>(`/reports/stock?${q}`, { token });
+const { stock_value, purchases, purchase_rows, losses, loss_total, reduction_rows, reduction_total } = laporan;
+
+const beliTerakhir = Math.max(1, Math.ceil(purchases.batch_count / PER_HALAMAN));
+const kurangTerakhir = Math.max(1, Math.ceil(reduction_total / PER_HALAMAN));
+
+/** Tautan halaman salah satu daftar; periode dan halaman daftar satunya tetap terbawa. */
+function tautanHalaman(daftar: 'hal_beli' | 'hal_kurang', ke: number, jangkar: string): string {
+  const p = kueriPeriodeHalaman(saringan);
+  const halaman = { hal_beli: halamanBeli, hal_kurang: halamanKurang };
+  halaman[daftar] = ke;
+  for (const [nama, nilai] of Object.entries(halaman)) {
+    if (nilai > 1) p.set(nama, String(nilai));
+  }
+  const s = p.toString();
+  return `/laporan/stok${s ? `?${s}` : ''}#${jangkar}`;
+}
+
+const KERUGIAN = ALASAN_KOREKSI.filter((a) => a.nilai !== 'salah_catat');
+const rincianRugi = KERUGIAN.map((a) => ({ ...a, slice: losses.find((l) => l.reason === a.nilai) })).filter((r) => r.slice);
+---
+
+<AppShell judul="Laporan · Stok" user={user}>
+  <TabLaporan saringan={saringan} />
+  <SaringanPeriode saringan={saringan} />
+
+  <div class="mb-6 grid gap-3 sm:grid-cols-3 sm:gap-4">
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Nilai Persediaan Sekarang</span>
+      <span class="kartu-angka-nilai">{rupiah(stock_value.value)}</span>
+      <span class="kartu-angka-bantu">
+        {kg(stock_value.total_kg)} di gudang · potret hari ini, tidak ikut periode
+      </span>
+    </div>
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Pembelian Stok</span>
+      <span class="kartu-angka-nilai">{rupiah(purchases.value)}</span>
+      <span class="kartu-angka-bantu">
+        {purchases.batch_count} batch · {purchases.qty} pack · {labelPeriode(saringan)}
+      </span>
+    </div>
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Kerugian Stok</span>
+      <span class:list={['kartu-angka-nilai', loss_total > 0 && 'text-red-600']}>{rupiah(loss_total)}</span>
+      <span class="kartu-angka-bantu">
+        {rincianRugi.length === 0
+          ? 'Tidak ada barang rusak, kedaluwarsa, atau hilang'
+          : rincianRugi.map((r) => `${r.singkat} ${r.slice!.qty} pack ${rupiah(r.slice!.amount)}`).join(' · ')}
+      </span>
+    </div>
+  </div>
+
+  {
+    (purchases.batches_without_cost > 0 || stock_value.batches_without_cost > 0 || laporan.loss_without_cost > 0) && (
+      <Peringatan class="mb-6">
+        Ada batch tanpa harga beli; nilainya dihitung nol, jadi pembelian, persediaan, dan kerugian di atas
+        <strong>lebih kecil dari sebenarnya</strong>. Isi harga beli batch di halaman produk.
+      </Peringatan>
+    )
+  }
+
+  <section class="kartu-rapat mb-6 overflow-x-auto" id="pembelian" data-daftar>
+    <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
+      <h2 class="text-base font-bold">Pembelian Stok</h2>
+      <p class="text-xs text-[var(--color-teks-lembut)]">Batch yang dicatat masuk lewat halaman produk atau impor</p>
+    </div>
+    <table class="tabel tabel-kartu">
+      <thead>
+        <tr>
+          <th>Masuk</th>
+          <th>Produk</th>
+          <th>Batch</th>
+          <th class="text-right">Jumlah</th>
+          <th class="text-right">Harga Beli</th>
+          <th class="text-right">Total</th>
+          <th class="text-right">Sisa</th>
+        </tr>
+      </thead>
+      <tbody>
+        {purchase_rows.map((b) => (
+          <tr>
+            <td data-label="Masuk" class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">{waktu(b.received_at)}</td>
+            <td data-judul>
+              <a class="font-medium hover:underline" href={`/produk/${b.product_id}`}>{b.name}</a>
+              <span class="block text-xs text-[var(--color-teks-lembut)]">{b.sku ?? 'Tanpa SKU'}</span>
+            </td>
+            <td data-label="Batch" class="text-[var(--color-teks-lembut)]">{b.batch_number ?? '—'}</td>
+            <td data-label="Jumlah" class="sel-angka">{b.quantity}</td>
+            <td data-label="Harga Beli" class="sel-angka">
+              {b.purchase_price === null ? <span class="text-kuning-700">Belum diisi</span> : rupiah(b.purchase_price)}
+            </td>
+            <td data-label="Total" class="sel-angka font-semibold">{b.total === null ? '—' : rupiah(b.total)}</td>
+            <td data-label="Sisa" class="sel-angka text-[var(--color-teks-lembut)]">{b.remaining_qty}</td>
+          </tr>
+        ))}
+        {purchase_rows.length === 0 && (
+          <tr>
+            <td colspan="7" class="py-12 text-center text-[var(--color-teks-lembut)]">Tidak ada batch masuk pada periode ini.</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+    {beliTerakhir > 1 && (
+      <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-garis)] px-5 py-3">
+        <p class="text-xs text-[var(--color-teks-lembut)]">{purchases.batch_count} batch · halaman {halamanBeli} dari {beliTerakhir}</p>
+        <Paginasi ringkas halaman={halamanBeli} halamanTerakhir={beliTerakhir} tautan={(ke) => tautanHalaman('hal_beli', ke, 'pembelian')} />
+      </div>
+    )}
+  </section>
+
+  <section class="kartu-rapat overflow-x-auto" id="pengurangan" data-daftar>
+    <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
+      <h2 class="text-base font-bold">Pengurangan Stok Manual</h2>
+      <p class="text-xs text-[var(--color-teks-lembut)]">Hanya rusak, kedaluwarsa, dan hilang yang dihitung kerugian</p>
+    </div>
+    <table class="tabel tabel-kartu">
+      <thead>
+        <tr>
+          <th>Waktu</th>
+          <th>Produk</th>
+          <th class="text-right">Jumlah</th>
+          <th>Alasan</th>
+          <th class="text-right">Nilai</th>
+          <th>Oleh</th>
+        </tr>
+      </thead>
+      <tbody>
+        {reduction_rows.map((r) => {
+          const rugi = r.reason !== null && r.reason !== 'salah_catat';
+          return (
+            <tr>
+              <td data-label="Waktu" class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">{waktu(r.created_at)}</td>
+              <td data-judul>
+                <a class="font-medium hover:underline" href={`/produk/${r.product_id}`}>{r.name}</a>
+                <span class="block text-xs text-[var(--color-teks-lembut)]">{r.sku ?? 'Tanpa SKU'}</span>
+              </td>
+              <td data-label="Jumlah" class="sel-angka">{r.qty}</td>
+              <td data-label="Alasan">
+                <span class={rugi ? 'lencana-gagal' : 'lencana-nonaktif'}>{labelAlasan(r.reason)}</span>
+              </td>
+              <td data-label="Nilai" class:list={['sel-angka', rugi ? 'font-semibold text-red-600' : 'text-[var(--color-teks-lembut)]']}>
+                {r.value === null ? '—' : rupiah(r.value)}
+              </td>
+              <td data-label="Oleh" class="text-[var(--color-teks-lembut)]">{r.adjusted_by ?? '—'}</td>
+            </tr>
+          );
+        })}
+        {reduction_rows.length === 0 && (
+          <tr>
+            <td colspan="6" class="py-12 text-center text-[var(--color-teks-lembut)]">Tidak ada pengurangan stok manual pada periode ini.</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-garis)] px-5 py-3">
+      <p class="text-xs text-[var(--color-teks-lembut)]">
+        Catat barang rusak atau kedaluwarsa lewat Koreksi stok di halaman produk. Koreksi lama dan edit massal tercatat tanpa alasan.
+      </p>
+      <Paginasi ringkas halaman={halamanKurang} halamanTerakhir={kurangTerakhir} tautan={(ke) => tautanHalaman('hal_kurang', ke, 'pengurangan')} />
+    </div>
+  </section>
+</AppShell>

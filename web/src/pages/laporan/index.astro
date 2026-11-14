@@ -14,6 +14,7 @@ import {
   kueriApi,
   kueriHalaman,
   kueriPeriodeHalaman,
+  labelButir,
   labelJenis,
   labelKanal,
   labelMetode,
@@ -51,6 +52,7 @@ const jumlahSaringan = [saringan.periode !== 'month', saringan.metode, saringan.
 const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
 const kueriPeriode = kueriPeriodeHalaman(saringan).toString();
 const tautanBeban = `/laporan/beban${kueriPeriode ? `?${kueriPeriode}` : ''}`;
+const tautanProduk = `/laporan/produk${kueriPeriode ? `?${kueriPeriode}` : ''}`;
 
 const { summary, previous_summary, trend, channels, expense_breakdown, top_products, top_products_total, sales } =
   laporan;
@@ -70,15 +72,18 @@ function tautanHalaman(daftar: 'hal_terlaris' | 'hal_jual', ke: number, jangkar:
   return `/laporan${q ? `?${q}` : ''}#${jangkar}`;
 }
 
-// Satu skala grafik untuk omzet dan beban agar tinggi batang keduanya bisa dibandingkan langsung.
-const puncak = Math.max(1, ...trend.map((t) => Math.max(t.revenue, t.expenses)));
+const butir = trend.granularity;
+const titik = trend.points;
+// Satu skala untuk omzet dan laba kotor agar tinggi batang keduanya bisa dibandingkan langsung.
+const puncak = Math.max(1, ...titik.map((t) => t.revenue));
+// Label sumbu dijarangkan agar tak bertumpuk; batang tetap satu per butir.
+const langkahLabel = Math.max(1, Math.ceil(titik.length / 12));
+const NAMA_BUTIR = { hour: 'Per jam', day: 'Per hari', month: 'Per bulan' } as const;
 
-const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-
-/** `2026-09` menjadi `Sep 26`. */
-function labelBulan(kunci: string): string {
-  const [tahun, bulan] = kunci.split('-').map(Number);
-  return `${BULAN[bulan - 1]} ${String(tahun).slice(2)}`;
+/** Label sumbu: butir bulan hanya menyebut tahun di batang pertama dan Januari supaya label tetap pendek. */
+function labelSumbu(start: string, i: number): string {
+  if (butir !== 'month' || i === 0 || start.slice(5, 7) === '01') return labelButir(start, butir);
+  return labelButir(start, butir).slice(0, 3);
 }
 
 /** Tinggi batang dalam persen, minimal terlihat kalau nilainya bukan nol. */
@@ -86,6 +91,24 @@ function tinggi(nilai: number): string {
   if (nilai <= 0) return '0%';
   return `${Math.max(2, (nilai / puncak) * 100)}%`;
 }
+
+// Tabel rincian hanya untuk butir hari dan bulan, karena beban dicatat per tanggal dan laba per jam tak bisa dihitung jujur; butir yang sepi sama sekali disembunyikan.
+const barisRincian = butir === 'hour' ? [] : titik.filter((t) => t.transaction_count > 0 || t.expenses !== 0 || t.stock_loss !== 0);
+const jumlahRincian = barisRincian.reduce(
+  (j, t) => ({
+    transaction_count: j.transaction_count + t.transaction_count,
+    revenue: j.revenue + t.revenue,
+    cogs: j.cogs + t.cogs,
+    platform_fees: j.platform_fees + t.platform_fees,
+    expenses: j.expenses + t.expenses,
+    stock_loss: j.stock_loss + t.stock_loss,
+    profit: j.profit + t.profit,
+  }),
+  { transaction_count: 0, revenue: 0, cogs: 0, platform_fees: 0, expenses: 0, stock_loss: 0, profit: 0 },
+);
+
+// Kolom kerugian stok hanya muncul bila ada, supaya tabel tak bertambah lebar untuk angka nol.
+const adaRugi = jumlahRincian.stock_loss !== 0;
 
 const totalBeban = expense_breakdown.reduce((j, b) => j + b.amount, 0);
 
@@ -221,7 +244,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <span class={summary.profit < 0 ? 'kartu-angka-nilai text-red-600' : 'kartu-angka-nilai'}>
         {rupiah(summary.profit)}
       </span>
-      <span class="kartu-angka-bantu">Omzet − harga pokok − beban − potongan marketplace</span>
+      <span class="kartu-angka-bantu">Omzet − harga pokok − beban − potongan marketplace − stok terbuang</span>
     </div>
 
     <div class="kartu-angka">
@@ -385,6 +408,12 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
           <dt class="text-[var(--color-teks-lembut)]">Beban toko</dt>
           <dd class="tabular-nums">− {rupiah(bebanUmum)}</dd>
         </div>
+        {summary.stock_loss > 0 && (
+          <div class="flex justify-between gap-4">
+            <dt class="text-[var(--color-teks-lembut)]">Stok terbuang</dt>
+            <dd class="tabular-nums">− {rupiah(summary.stock_loss)}</dd>
+          </div>
+        )}
         <div class="flex justify-between gap-4 font-semibold">
           <dt>Laba</dt>
           <dd class={summary.profit < 0 ? 'tabular-nums text-red-600' : 'tabular-nums'}>{rupiah(summary.profit)}</dd>
@@ -393,46 +422,115 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
     </section>
   </div>
 
-  <div class="mb-6 grid gap-4 lg:grid-cols-2">
-    <section class="kartu">
-      <h2 class="mb-1 text-base font-bold">Omzet dan Beban</h2>
-      <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
-        Enam bulan terakhir
-      </p>
+  <section class="kartu mb-6">
+    <h2 class="mb-1 text-base font-bold">Omzet dan Laba Kotor</h2>
+    <p class="mb-5 text-xs text-[var(--color-teks-lembut)]">
+      {labelPeriode(saringan)} · {NAMA_BUTIR[butir].toLowerCase()}
+    </p>
 
-      {/* Grafik batang tanpa JavaScript: tinggi dihitung saat render sebagai persen sehingga melar mengikuti lebar kartu. */}
-      <div class="flex h-48 items-end gap-3">
-        {trend.map((t) => (
-          <div class="flex h-full min-w-0 flex-1 flex-col justify-end gap-1.5">
-            <div class="flex h-full items-end justify-center gap-1">
-              <div
-                class="w-1/3 rounded-t bg-merah-600"
-                style={`height:${tinggi(t.revenue)}`}
-                title={`Omzet ${labelBulan(t.month)}: ${rupiah(t.revenue)}`}
-              />
-              <div
-                class="w-1/3 rounded-t bg-stone-300"
-                style={`height:${tinggi(t.expenses)}`}
-                title={`Beban ${labelBulan(t.month)}: ${rupiah(t.expenses)}`}
-              />
+    {/* Grafik batang tanpa JavaScript: tinggi dihitung saat render sebagai persen; lebih dari 31 batang boleh digeser mendatar agar tiap batang tetap terlihat. */}
+    <div class="overflow-x-auto">
+      <div class="flex h-48 items-end gap-1" style={titik.length > 31 ? `min-width:${titik.length * 1.25}rem` : undefined}>
+        {titik.map((t, i) => (
+          <div
+            class="flex h-full min-w-0 flex-1 flex-col justify-end gap-1.5"
+            title={`${labelButir(t.start, butir, true)}: omzet ${rupiah(t.revenue)}, laba kotor ${rupiah(t.revenue - t.cogs)}, ${t.transaction_count} order`}
+          >
+            <div class="flex h-full items-end justify-center gap-px">
+              <div class="w-2/5 max-w-4 rounded-t bg-merah-600" style={`height:${tinggi(t.revenue)}`} />
+              <div class="w-2/5 max-w-4 rounded-t bg-merah-300" style={`height:${tinggi(t.revenue - t.cogs)}`} />
             </div>
-            <span class="truncate text-center text-xs text-[var(--color-teks-lembut)]">
-              {labelBulan(t.month)}
+            {/* Label boleh meluber dari kolom batangnya yang sempit (jaraknya dijarangkan `langkahLabel`), dan di ponsel separuhnya disembunyikan agar tak bertumpuk. */}
+            <span
+              class:list={[
+                'flex h-4 whitespace-nowrap text-[0.6875rem] text-[var(--color-teks-lembut)]',
+                i === 0 ? 'justify-start' : i === titik.length - 1 ? 'justify-end' : 'justify-center',
+                (i / langkahLabel) % 2 === 1 && 'max-sm:invisible',
+              ]}
+            >
+              {i % langkahLabel === 0 ? labelSumbu(t.start, i) : ''}
             </span>
           </div>
         ))}
       </div>
+    </div>
 
-      <p class="mt-4 flex gap-4 text-xs text-[var(--color-teks-lembut)]">
-        <span class="flex items-center gap-1.5">
-          <span class="inline-block h-2.5 w-2.5 rounded-sm bg-merah-600" />Omzet
-        </span>
-        <span class="flex items-center gap-1.5">
-          <span class="inline-block h-2.5 w-2.5 rounded-sm bg-stone-300" />Beban
-        </span>
-      </p>
-    </section>
+    <p class="mt-4 flex flex-wrap gap-4 text-xs text-[var(--color-teks-lembut)]">
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block h-2.5 w-2.5 rounded-sm bg-merah-600" />Omzet
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block h-2.5 w-2.5 rounded-sm bg-merah-300" />Laba kotor (omzet − harga pokok)
+      </span>
+    </p>
 
+    {
+      butir === 'hour' ? (
+        <p class="mt-4 text-xs text-[var(--color-teks-lembut)]">
+          Rincian laba per jam tidak ditampilkan karena beban dicatat per tanggal; laba hari ini ada di kartu Laba.
+        </p>
+      ) : (
+        <details class="mt-5 border-t border-[var(--color-garis)] pt-4">
+          <summary class="cursor-pointer text-sm font-semibold">
+            Rincian {NAMA_BUTIR[butir].toLowerCase()} ({barisRincian.length} {butir === 'day' ? 'hari' : 'bulan'} berisi)
+          </summary>
+          <div class="mt-3 overflow-x-auto">
+            <table class="tabel min-w-[40rem]">
+              <thead>
+                <tr>
+                  <th>{butir === 'day' ? 'Tanggal' : 'Bulan'}</th>
+                  <th class="text-right">Order</th>
+                  <th class="text-right">Omzet</th>
+                  <th class="text-right">Harga Pokok</th>
+                  <th class="text-right">Potongan</th>
+                  <th class="text-right">Beban</th>
+                  {adaRugi && <th class="text-right">Stok Terbuang</th>}
+                  <th class="text-right">Laba</th>
+                </tr>
+              </thead>
+              <tbody>
+                {barisRincian.map((t) => (
+                  <tr>
+                    <td class="whitespace-nowrap">{labelButir(t.start, butir, true)}</td>
+                    <td class="sel-angka">{t.transaction_count}</td>
+                    <td class="sel-angka">{rupiah(t.revenue)}</td>
+                    <td class="sel-angka text-[var(--color-teks-lembut)]">{rupiah(t.cogs)}</td>
+                    <td class="sel-angka text-[var(--color-teks-lembut)]">{rupiah(t.platform_fees)}</td>
+                    <td class="sel-angka text-[var(--color-teks-lembut)]">{rupiah(t.expenses)}</td>
+                    {adaRugi && <td class="sel-angka text-[var(--color-teks-lembut)]">{rupiah(t.stock_loss)}</td>}
+                    <td class:list={['sel-angka font-semibold', t.profit < 0 && 'text-red-600']}>{rupiah(t.profit)}</td>
+                  </tr>
+                ))}
+                {barisRincian.length === 0 && (
+                  <tr>
+                    <td colspan={adaRugi ? 8 : 7} class="py-8 text-center text-[var(--color-teks-lembut)]">
+                      Belum ada penjualan atau beban pada periode ini.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              {barisRincian.length > 0 && (
+                <tfoot>
+                  <tr class="border-t-2 border-[var(--color-garis)] font-semibold">
+                    <td>Jumlah</td>
+                    <td class="sel-angka">{jumlahRincian.transaction_count}</td>
+                    <td class="sel-angka">{rupiah(jumlahRincian.revenue)}</td>
+                    <td class="sel-angka">{rupiah(jumlahRincian.cogs)}</td>
+                    <td class="sel-angka">{rupiah(jumlahRincian.platform_fees)}</td>
+                    <td class="sel-angka">{rupiah(jumlahRincian.expenses)}</td>
+                    {adaRugi && <td class="sel-angka">{rupiah(jumlahRincian.stock_loss)}</td>}
+                    <td class:list={['sel-angka', jumlahRincian.profit < 0 && 'text-red-600']}>{rupiah(jumlahRincian.profit)}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </details>
+      )
+    }
+  </section>
+
+  <div class="mb-6">
     <section class="kartu">
       <div class="mb-5 flex items-start justify-between gap-3">
         <div>
@@ -451,7 +549,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
             <a class="block font-medium text-merah-700 hover:underline" href={tautanBeban}>Catat gaji, sewa, listrik, dan lainnya →</a>
           </p>
         ) : (
-          <ul class="space-y-3">
+          <ul class="grid gap-x-10 gap-y-3 lg:grid-cols-2">
             {expense_breakdown.map((b) => {
               const bagian = totalBeban > 0 ? (b.amount / totalBeban) * 100 : 0;
               return (
@@ -479,7 +577,10 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
 
   <section class="kartu-rapat mb-6 overflow-x-auto" id="produk-terlaris" data-daftar>
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-garis)] px-5 py-4">
-      <h2 class="text-base font-bold">Produk Terlaris</h2>
+      <div>
+        <h2 class="text-base font-bold">Produk Terlaris</h2>
+        <a class="text-xs font-medium text-merah-700 hover:underline" href={tautanProduk}>Laba per produk →</a>
+      </div>
 
       {/* Periode kartu ini terpisah dari saringan utama (metode bayar dan jenis pembeli ikut lewat input tersembunyi), dan `action="#produk-terlaris"` mengembalikan scroll ke kartu ini. */}
       <form method="GET" class="flex items-center gap-2" action="#produk-terlaris">

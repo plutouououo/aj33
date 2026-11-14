@@ -1,0 +1,73 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT sa.id                  AS id,\n               sa.created_at          AS \"created_at!\",\n               p.id                   AS product_id,\n               p.name                 AS name,\n               p.sku                  AS sku,\n               ABS(sa.change_qty)     AS \"qty!\",\n               sa.manual_reason       AS reason,\n               ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price) AS value,\n               u.name                 AS \"adjusted_by?\"\n        FROM stock_adjustments sa\n        JOIN products p ON p.id = sa.product_id\n        LEFT JOIN product_batches pb ON pb.id = sa.batch_id\n        LEFT JOIN users u ON u.id = sa.adjusted_by_user_id\n        WHERE sa.reason = 'manual_adjustment'\n          AND sa.change_qty < 0\n          AND ($1::date IS NULL\n               OR sa.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR sa.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n        ORDER BY sa.created_at DESC, sa.id\n        LIMIT $3 OFFSET $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "product_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "sku",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "qty!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "reason",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "value",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "adjusted_by?",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      null,
+      true,
+      null,
+      false
+    ]
+  },
+  "hash": "ce2c54015d0c0e76fc346305da15b8ced822405f3cd71c3b60ee13f070e07ac9"
+}

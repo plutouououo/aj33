@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH deret AS (\n            SELECT generate_series($1::timestamp, $2::timestamp, ('1 ' || $3)::interval) AS awal\n        ),\n        jual AS (\n            SELECT date_trunc($3, t.created_at AT TIME ZONE 'Asia/Jakarta') AS awal,\n                   SUM(t.subtotal - t.discount_amount) AS omzet,\n                   SUM(t.platform_fee_total)           AS potongan,\n                   SUM(t.shipping_subsidy)             AS subsidi,\n                   COUNT(*)                            AS jumlah\n            FROM transactions t\n            WHERE t.status = 'completed'\n              AND t.created_at >= $4::date::timestamp AT TIME ZONE 'Asia/Jakarta'\n              AND t.created_at < ($5::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta'\n              AND ($6::text IS NULL OR t.payment_method = $6)\n              AND ($7::text IS NULL OR t.type = $7)\n            GROUP BY 1\n        ),\n        pokok AS (\n            SELECT date_trunc($3, t.created_at AT TIME ZONE 'Asia/Jakarta') AS awal,\n                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS hpp\n            FROM stock_adjustments sa\n            JOIN transactions t ON t.id = sa.reference_id\n            LEFT JOIN product_batches pb ON pb.id = sa.batch_id\n            LEFT JOIN products p ON p.id = sa.product_id\n            WHERE sa.reason = 'sale'\n              AND sa.change_qty < 0\n              AND sa.reference_type = 'transaction'\n              AND t.status = 'completed'\n              AND t.created_at >= $4::date::timestamp AT TIME ZONE 'Asia/Jakarta'\n              AND t.created_at < ($5::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta'\n              AND ($6::text IS NULL OR t.payment_method = $6)\n              AND ($7::text IS NULL OR t.type = $7)\n            GROUP BY 1\n        ),\n        beban AS (\n            SELECT date_trunc($3, e.expense_date::timestamp) AS awal,\n                   SUM(e.amount) AS jumlah\n            FROM expenses e\n            WHERE $3 <> 'hour'\n              AND e.expense_date >= $4::date\n              AND e.expense_date <= $5::date\n            GROUP BY 1\n        ),\n        rugi AS (\n            SELECT date_trunc($3, sa.created_at AT TIME ZONE 'Asia/Jakarta') AS awal,\n                   SUM(ABS(sa.change_qty) * COALESCE(pb.purchase_price, p.cost_price, 0)) AS jumlah\n            FROM stock_adjustments sa\n            LEFT JOIN product_batches pb ON pb.id = sa.batch_id\n            LEFT JOIN products p ON p.id = sa.product_id\n            WHERE sa.manual_reason IN ('rusak', 'kedaluwarsa', 'hilang')\n              AND sa.created_at >= $4::date::timestamp AT TIME ZONE 'Asia/Jakarta'\n              AND sa.created_at < ($5::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta'\n            GROUP BY 1\n        )\n        SELECT d.awal                                          AS \"start!\",\n               COALESCE(j.omzet, 0)                            AS \"revenue!\",\n               COALESCE(k.hpp, 0)                              AS \"cogs!\",\n               COALESCE(j.potongan, 0)                         AS \"platform_fees!\",\n               COALESCE(b.jumlah, 0) + COALESCE(j.subsidi, 0)  AS \"expenses!\",\n               COALESCE(r.jumlah, 0)                           AS \"stock_loss!\",\n               COALESCE(j.jumlah, 0)                           AS \"count!\"\n        FROM deret d\n        LEFT JOIN jual j ON j.awal = d.awal\n        LEFT JOIN pokok k ON k.awal = d.awal\n        LEFT JOIN beban b ON b.awal = d.awal\n        LEFT JOIN rugi r ON r.awal = d.awal\n        ORDER BY d.awal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "start!",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 1,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 2,
+        "name": "cogs!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "platform_fees!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "expenses!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "stock_loss!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Timestamp",
+        "Text",
+        "Date",
+        "Date",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b443fd785a9b28bccc55e91a9688b89337d2fca7ad083bc236a05415c59b0cfc"
+}

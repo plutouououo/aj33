@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*)                                       AS \"batch_count!\",\n               COALESCE(SUM(pb.quantity), 0)::bigint          AS \"qty!\",\n               COALESCE(SUM(pb.quantity * COALESCE(pb.purchase_price, p.cost_price, 0)), 0) AS \"value!\",\n               COUNT(*) FILTER (WHERE COALESCE(pb.purchase_price, p.cost_price) IS NULL) AS \"batches_without_cost!\"\n        FROM product_batches pb\n        JOIN products p ON p.id = pb.product_id\n        WHERE EXISTS (SELECT 1 FROM stock_adjustments sa\n                      WHERE sa.batch_id = pb.id AND sa.reason = 'restock' AND sa.change_qty > 0)\n          AND ($1::date IS NULL\n               OR pb.received_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR pb.received_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "batch_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "qty!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "value!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "batches_without_cost!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f09ea5113b5fe36d2d65cbb65c46171235e0dd94e4fabcbb1738cc11176457ca"
+}

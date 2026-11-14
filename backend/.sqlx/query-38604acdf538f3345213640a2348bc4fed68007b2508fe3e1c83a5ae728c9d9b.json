@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT u.name                                     AS \"name?\",\n               COUNT(*)                                   AS \"count!\",\n               SUM(t.subtotal - t.discount_amount)        AS \"revenue!\"\n        FROM transactions t\n        LEFT JOIN users u ON u.id = t.voided_by\n        WHERE t.status = 'voided'\n          AND ($1::date IS NULL\n               OR t.voided_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR t.voided_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n        GROUP BY t.voided_by, u.name\n        ORDER BY 2 DESC, 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "38604acdf538f3345213640a2348bc4fed68007b2508fe3e1c83a5ae728c9d9b"
+}

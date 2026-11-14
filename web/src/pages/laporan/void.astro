@@ -1,0 +1,127 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import Paginasi from '../../components/Paginasi.astro';
+import SaringanPeriode from '../../components/SaringanPeriode.astro';
+import TabLaporan from '../../components/TabLaporan.astro';
+import { api, type VoidReport } from '../../lib/api';
+import { rupiah, waktu } from '../../lib/format';
+import {
+  bacaSaringan,
+  kueriPeriodeApi,
+  kueriPeriodeHalaman,
+  labelKanal,
+  labelPeriode,
+  nomorPesanan,
+} from '../../lib/laporan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const PER_HALAMAN = 25;
+
+const saringan = bacaSaringan(Astro.url);
+const halaman = Math.max(1, Math.floor(Number(Astro.url.searchParams.get('halaman'))) || 1);
+
+const q = kueriPeriodeApi(saringan);
+q.set('limit', String(PER_HALAMAN));
+q.set('offset', String((halaman - 1) * PER_HALAMAN));
+const laporan = await api<VoidReport>(`/reports/voids?${q}`, { token });
+
+const halamanTerakhir = Math.max(1, Math.ceil(laporan.count / PER_HALAMAN));
+const dari = laporan.count === 0 ? 0 : (halaman - 1) * PER_HALAMAN + 1;
+const sampai = Math.min(halaman * PER_HALAMAN, laporan.count);
+// Persentase dari seluruh transaksi yang dibuat (selesai + void) agar tak melebihi 100% saat semua dibatalkan.
+const semua = laporan.completed_count + laporan.count;
+const persen = semua > 0 ? (laporan.count / semua) * 100 : 0;
+
+function tautanHalaman(ke: number): string {
+  const p = kueriPeriodeHalaman(saringan);
+  if (ke > 1) p.set('halaman', String(ke));
+  const s = p.toString();
+  return `/laporan/void${s ? `?${s}` : ''}#daftar-void`;
+}
+---
+
+<AppShell judul="Laporan · Void" user={user}>
+  <TabLaporan saringan={saringan} />
+  <SaringanPeriode saringan={saringan} />
+
+  <div class="mb-6 grid gap-3 sm:grid-cols-3 sm:gap-4">
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Transaksi Dibatalkan</span>
+      <span class="kartu-angka-nilai">{laporan.count}</span>
+      <span class="kartu-angka-bantu">{persen.toFixed(1)}% dari transaksi · {labelPeriode(saringan)}</span>
+    </div>
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Nilai Dibatalkan</span>
+      <span class="kartu-angka-nilai">{rupiah(laporan.revenue)}</span>
+      <span class="kartu-angka-bantu">Omzet barang yang batal; stoknya sudah kembali</span>
+    </div>
+    <div class="kartu-angka">
+      <span class="kartu-angka-label">Dibatalkan Oleh</span>
+      {laporan.per_user.length === 0 ? (
+        <span class="kartu-angka-bantu">Belum ada void pada periode ini</span>
+      ) : (
+        <ul class="mt-1 space-y-1 text-sm">
+          {laporan.per_user.map((o) => (
+            <li class="flex justify-between gap-3">
+              <span class="min-w-0 truncate">{o.name ?? 'Akun terhapus'}</span>
+              <span class="shrink-0 tabular-nums text-[var(--color-teks-lembut)]">{o.count}× · {rupiah(o.revenue)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  </div>
+
+  <div id="daftar-void" data-daftar>
+    <div class="kartu-rapat overflow-x-auto">
+      <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
+        <h2 class="text-base font-bold">Daftar Void</h2>
+        <p class="text-xs text-[var(--color-teks-lembut)]">Disaring menurut waktu pembatalan</p>
+      </div>
+      <table class="tabel tabel-kartu">
+        <thead>
+          <tr>
+            <th>No. Pesanan</th>
+            <th>Dibuat</th>
+            <th>Dibatalkan</th>
+            <th>Kanal</th>
+            <th>Kasir</th>
+            <th>Oleh</th>
+            <th>Alasan</th>
+            <th class="text-right">Omzet</th>
+          </tr>
+        </thead>
+        <tbody>
+          {laporan.rows.map((v) => (
+            <tr>
+              <td data-judul class="whitespace-nowrap">
+                <a class="font-medium text-merah-700 hover:underline" href={`/laporan/transaksi/${v.id}`}>#{nomorPesanan(v.id)}</a>
+              </td>
+              <td data-label="Dibuat" class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">{waktu(v.created_at)}</td>
+              <td data-label="Dibatalkan" class="whitespace-nowrap text-xs">{waktu(v.voided_at)}</td>
+              <td data-label="Kanal" class="text-[var(--color-teks-lembut)]">{labelKanal(v.sales_channel)}</td>
+              <td data-label="Kasir">{v.cashier ?? '—'}</td>
+              <td data-label="Oleh">{v.voided_by ?? '—'}</td>
+              <td data-label="Alasan" class="text-[var(--color-teks-lembut)]">{v.void_reason ?? '—'}</td>
+              <td data-label="Omzet" class="sel-angka font-semibold">{rupiah(v.revenue)}</td>
+            </tr>
+          ))}
+          {laporan.rows.length === 0 && (
+            <tr>
+              <td colspan="8" class="py-12 text-center text-[var(--color-teks-lembut)]">Tidak ada transaksi yang dibatalkan pada periode ini.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+      <p class="text-[var(--color-teks-lembut)]">
+        Menampilkan <span class="tabular-nums">{dari}–{sampai}</span> dari <span class="tabular-nums">{laporan.count}</span> void
+      </p>
+      <Paginasi halaman={halaman} {halamanTerakhir} tautan={tautanHalaman} />
+    </div>
+  </div>
+</AppShell>

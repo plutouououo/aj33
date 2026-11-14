@@ -320,7 +320,79 @@ export interface StockAdjustment {
   reference_id: string | null;
   stock_before: number;
   stock_after: number;
+  /** Alasan pengurangan manual; kosong untuk perubahan lain dan koreksi lama. */
+  manual_reason: AlasanKoreksi | null;
   created_at: string;
+}
+
+/** Alasan pengurangan stok manual; semua kecuali `salah_catat` adalah kerugian di laba rugi. */
+export type AlasanKoreksi = 'rusak' | 'kedaluwarsa' | 'hilang' | 'salah_catat';
+
+export interface KerugianStokSlice {
+  reason: Exclude<AlasanKoreksi, 'salah_catat'>;
+  qty: number;
+  amount: number;
+}
+
+/** Bentuk `GET /reports/stock`. Owner saja. */
+export interface StockReport {
+  /** Potret persediaan sekarang, bukan angka periode. */
+  stock_value: StockValue;
+  purchases: {
+    batch_count: number;
+    qty: number;
+    value: number;
+    /** Selama bukan nol, `value` batas bawah. */
+    batches_without_cost: number;
+  };
+  purchase_rows: {
+    batch_id: string;
+    product_id: string;
+    name: string;
+    sku: string | null;
+    batch_number: string | null;
+    received_at: string;
+    quantity: number;
+    remaining_qty: number;
+    purchase_price: number | null;
+    total: number | null;
+  }[];
+  losses: KerugianStokSlice[];
+  loss_total: number;
+  loss_without_cost: number;
+  /** Semua pengurangan manual: kerugian, salah catat, dan koreksi tanpa alasan (`reason` null). */
+  reduction_rows: {
+    id: string;
+    created_at: string;
+    product_id: string;
+    name: string;
+    sku: string | null;
+    qty: number;
+    reason: AlasanKoreksi | null;
+    value: number | null;
+    adjusted_by: string | null;
+  }[];
+  reduction_total: number;
+}
+
+/** Bentuk `GET /reports/voids`, disaring menurut waktu pembatalan. Owner saja. */
+export interface VoidReport {
+  count: number;
+  revenue: number;
+  /** Transaksi selesai pada periode yang sama, pembanding persentase. */
+  completed_count: number;
+  per_user: { name: string | null; count: number; revenue: number }[];
+  rows: {
+    id: string;
+    created_at: string;
+    voided_at: string;
+    sales_channel: SalesChannel;
+    cashier: string | null;
+    voided_by: string | null;
+    void_reason: string | null;
+    revenue: number;
+    total_amount: number;
+  }[];
 }
 
 export type TicketStatus = 'unassigned' | 'assigned' | 'packing' | 'packed' | 'handed_over';
@@ -471,18 +543,36 @@ export interface SalesSummary {
   expenses: number;
   /** Jumlah biaya admin + PPh 0,5% + biaya proses Rp1.250 Shopee periode ini, dibaca dari yang tersimpan per transaksi (bukan tarif tetap); nol bila tak ada penjualan Shopee. */
   platform_fees: number;
-  /** `revenue - cogs - expenses - platform_fees`. */
+  /** Barang rusak, kedaluwarsa, atau hilang periode ini dinilai harga beli. */
+  stock_loss: number;
+  /** `revenue - cogs - expenses - platform_fees - stock_loss`. */
   profit: number;
   transaction_count: number;
   /** Baris item yang harga pokoknya belum diisi; selama bukan nol, `cogs` dan `profit` hanyalah batas atas dan halaman mengatakannya. */
   items_without_cost: number;
 }
 
-export interface MonthlyPoint {
-  /** `YYYY-MM` pada zona toko. */
-  month: string;
+/** Butir waktu tren: satu hari per jam, sampai dua bulan per hari, selebihnya per bulan. */
+export type Butir = 'hour' | 'day' | 'month';
+
+export interface TitikTren {
+  /** Awal batang pada zona toko tanpa zona, `2026-11-14T08:00:00`. */
+  start: string;
   revenue: number;
+  cogs: number;
+  platform_fees: number;
+  /** Tabel beban plus ongkir ditanggung toko; butir jam hanya memuat ongkir karena beban dicatat per tanggal. */
   expenses: number;
+  /** Kerugian stok menurut waktu pencatatannya. */
+  stock_loss: number;
+  /** `revenue - cogs - platform_fees - expenses - stock_loss`. */
+  profit: number;
+  transaction_count: number;
+}
+
+export interface Tren {
+  granularity: Butir;
+  points: TitikTren[];
 }
 
 /** Omzet dan laba satu kanal; tabel `expenses` tak ikut karena tak dicatat per kanal. */
@@ -510,7 +600,45 @@ export interface TopProduct {
   name: string;
   sku: string | null;
   qty: number;
+  /** `null` bila produknya tak punya ukuran atau sudah dihapus. */
+  sold_kg: number | null;
+  /** Harga barang sebelum diskon transaksi. */
   revenue: number;
+  cogs: number;
+  /** `revenue - cogs`, laba kotor sebelum potongan marketplace. */
+  profit: number;
+  /** Selama bukan nol, `cogs` terlalu kecil dan `profit` batas atas. */
+  items_without_cost: number;
+}
+
+/** Bentuk `GET /reports/products`. Owner saja. */
+export interface ProductReport {
+  data: TopProduct[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+/** Uang diterima satu kanal dan metode bayar dalam satu butir waktu. */
+export interface BarisUangMasuk {
+  /** Awal butir pada zona toko tanpa zona. */
+  start: string;
+  channel: SalesChannel;
+  /** Bermakna hanya untuk kanal toko. */
+  payment_method: string;
+  transaction_count: number;
+  revenue: number;
+  /** Ongkir yang ditagih ke pembeli. */
+  shipping: number;
+  /** Tagihan pembeli di toko, uang cair di marketplace. */
+  received: number;
+}
+
+/** Bentuk `GET /reports/cash-in`. Owner saja. */
+export interface UangMasuk {
+  /** `day` atau `month`. */
+  granularity: Butir;
+  rows: BarisUangMasuk[];
 }
 
 export interface StockValue {
@@ -528,8 +656,8 @@ export interface SalesReport {
   summary: SalesSummary;
   /** Angka periode setara sebelumnya untuk kartu trend; `null` bila saringan "Seluruh Waktu" karena tak punya pembanding. */
   previous_summary: SalesSummary | null;
-  /** Selalu enam bulan terakhir, tidak ikut saringan periode. */
-  trend: MonthlyPoint[];
+  /** Mengikuti seluruh saringan; butirnya dipilih backend dari panjang periode. */
+  trend: Tren;
   /** Selalu tiga kanal berurutan: toko, Shopee, Tokopedia. */
   channels: ChannelSummary[];
   expense_breakdown: ExpenseSlice[];
@@ -558,6 +686,11 @@ export interface LabaRugi {
   /** Tabel beban per kategori, tanpa ongkir ditanggung toko. */
   operating_expenses: ExpenseSlice[];
   operating_expenses_total: number;
+  /** Barang terbuang per alasan, dinilai harga beli. */
+  stock_losses: KerugianStokSlice[];
+  stock_loss_total: number;
+  /** Selama bukan nol, kerugian stok batas bawah. */
+  stock_loss_without_cost: number;
   profit_before_tax: number;
   /** PPh final UMKM yang tercatat per transaksi. */
   withholding_tax: number;
