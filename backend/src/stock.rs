@@ -12,8 +12,8 @@ use uuid::Uuid;
 pub enum StockReason {
     /// Penjualan POS, termasuk pesanan marketplace yang tiketnya selesai.
     Sale,
-    /// Koreksi manual oleh Owner.
-    ManualAdjustment,
+    /// Koreksi manual oleh Owner; alasan hanya untuk pengurangan dan menentukan apakah barang yang keluar dihitung kerugian.
+    ManualAdjustment(Option<AlasanKoreksi>),
     /// Barang masuk sebagai batch lengkap dengan kedaluwarsa, dibedakan dari koreksi manual agar ledger menjawab "datang dari kiriman mana".
     Restock,
     /// Pengembalian stok karena void, dibedakan dari `ManualAdjustment` agar ledger menjawab "kembali karena transaksi apa".
@@ -24,9 +24,16 @@ impl StockReason {
     fn as_str(self) -> &'static str {
         match self {
             Self::Sale => "sale",
-            Self::ManualAdjustment => "manual_adjustment",
+            Self::ManualAdjustment(_) => "manual_adjustment",
             Self::Restock => "restock",
             Self::VoidReversal => "void_reversal",
+        }
+    }
+
+    fn alasan_koreksi(self) -> Option<&'static str> {
+        match self {
+            Self::ManualAdjustment(alasan) => alasan.map(AlasanKoreksi::as_str),
+            _ => None,
         }
     }
 
@@ -35,7 +42,39 @@ impl StockReason {
             // Void mengacu balik ke transaksi yang dibatalkan, sama seperti penjualan aslinya.
             Self::Sale | Self::VoidReversal => "transaction",
             // Batch masuk tak berasal dari transaksi/pesanan; "manual" satu-satunya nilai CHECK untuk asal seperti itu.
-            Self::ManualAdjustment | Self::Restock => "manual",
+            Self::ManualAdjustment(_) | Self::Restock => "manual",
+        }
+    }
+}
+
+/// Alasan pengurangan stok manual, dikunci CHECK `stock_adjustments_manual_reason_check`; semua kecuali `SalahCatat` adalah kerugian di laba rugi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlasanKoreksi {
+    Rusak,
+    Kedaluwarsa,
+    /// Selisih opname: barangnya tak ada di rak.
+    Hilang,
+    /// Membetulkan angka yang salah ketik, bukan barang yang keluar.
+    SalahCatat,
+}
+
+impl AlasanKoreksi {
+    pub fn parse(nilai: &str) -> Option<Self> {
+        match nilai {
+            "rusak" => Some(Self::Rusak),
+            "kedaluwarsa" => Some(Self::Kedaluwarsa),
+            "hilang" => Some(Self::Hilang),
+            "salah_catat" => Some(Self::SalahCatat),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rusak => "rusak",
+            Self::Kedaluwarsa => "kedaluwarsa",
+            Self::Hilang => "hilang",
+            Self::SalahCatat => "salah_catat",
         }
     }
 }
@@ -472,8 +511,8 @@ async fn tulis_perubahan(
         r#"
         INSERT INTO stock_adjustments
             (product_id, change_qty, reason, reference_type, reference_id,
-             stock_before, stock_after, batch_id, adjusted_by_user_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             stock_before, stock_after, batch_id, adjusted_by_user_id, manual_reason)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         "#,
         product_id,
         change_qty,
@@ -483,7 +522,8 @@ async fn tulis_perubahan(
         stock_before,
         stock_after,
         batch_id,
-        actor_user_id
+        actor_user_id,
+        reason.alasan_koreksi()
     )
     .execute(&mut **tx)
     .await?;
@@ -589,10 +629,29 @@ mod tests {
     #[test]
     fn alasan_dan_reference_type_berpasangan_sesuai_check_constraint() {
         assert_eq!(StockReason::Sale.reference_type(), "transaction");
-        assert_eq!(StockReason::ManualAdjustment.reference_type(), "manual");
+        assert_eq!(
+            StockReason::ManualAdjustment(None).reference_type(),
+            "manual"
+        );
         assert_eq!(StockReason::Restock.as_str(), "restock");
         assert_eq!(StockReason::Restock.reference_type(), "manual");
         assert_eq!(StockReason::VoidReversal.as_str(), "void_reversal");
         assert_eq!(StockReason::VoidReversal.reference_type(), "transaction");
+    }
+
+    #[test]
+    fn alasan_koreksi_hanya_menempel_pada_koreksi_manual() {
+        let rusak = StockReason::ManualAdjustment(Some(AlasanKoreksi::Rusak));
+        assert_eq!(rusak.as_str(), "manual_adjustment");
+        assert_eq!(rusak.alasan_koreksi(), Some("rusak"));
+        assert_eq!(StockReason::ManualAdjustment(None).alasan_koreksi(), None);
+        assert_eq!(StockReason::Sale.alasan_koreksi(), None);
+        for nilai in ["rusak", "kedaluwarsa", "hilang", "salah_catat"] {
+            assert_eq!(
+                AlasanKoreksi::parse(nilai).map(AlasanKoreksi::as_str),
+                Some(nilai)
+            );
+        }
+        assert!(AlasanKoreksi::parse("dimakan").is_none());
     }
 }

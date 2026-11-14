@@ -11,6 +11,7 @@ import {
 } from '../../lib/api';
 import { kg, rupiah, waktu, sisaHari } from '../../lib/format';
 import { MEREK, kembaliKeDaftar } from '../../lib/produk';
+import { ALASAN_KOREKSI } from '../../lib/laporan';
 import { GagalUnggah, hapusFoto, unggahFoto } from '../../lib/blob';
 
 const user = Astro.locals.user!;
@@ -174,10 +175,13 @@ if (Astro.request.method === 'POST') {
       await api(`/products/${id}/batches/${form.get('batch_id')}`, { method: 'DELETE', token });
       berhasil = 'hapus-batch';
     } else if (aksi === 'koreksi') {
+      const selisih = angka(form, 'change_qty') ?? 0;
+      // Alasan hanya dikirim untuk pengurangan karena backend menolak alasan pada penambahan; pilihan yang tersisa di form saat menambah diabaikan.
+      const alasan = String(form.get('reason') ?? '');
       await api(`/products/${id}/stock-adjustments`, {
         method: 'POST',
         token,
-        body: { change_qty: angka(form, 'change_qty') ?? 0 },
+        body: { change_qty: selisih, reason: selisih < 0 && alasan ? alasan : undefined },
       });
       berhasil = 'koreksi';
     }
@@ -784,7 +788,17 @@ const DEKAT_KEDALUWARSA = 30;
                   </p>
                   </div>
 
-                  
+                  <div class="isian isian-pendek">
+                    <label class="label" for="alasan-koreksi">Alasan pengurangan</label>
+                    <select class="kolom" id="alasan-koreksi" name="reason">
+                      <option value="">Pilih bila mengurangi</option>
+                      {ALASAN_KOREKSI.map((a) => <option value={a.nilai}>{a.label}</option>)}
+                    </select>
+                    <p class="isian isian-bantu">
+                      Rusak, kedaluwarsa, dan hilang dihitung sebagai kerugian stok di Laporan › Laba Rugi.
+                    </p>
+                  </div>
+
 
                   <div class="isian">
                     <button class="tombol-halus" type="submit">Koreksi stok</button>

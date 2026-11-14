@@ -144,7 +144,9 @@ const disaring = Boolean(cari || kategori);
           <li>SKU produk yang sudah punya varian atau terhubung ke listing marketplace tidak bisa diubah.</li>
           <li>
             Atribut stok: hanya batch yang sudah ada. Sisa stok tidak boleh melebihi isi kiriman; perubahannya
-            dicatat di riwayat stok sebagai koreksi manual. Batch baru dicatat lewat halaman produk.
+            dicatat di riwayat stok sebagai koreksi manual tanpa alasan, jadi tidak dihitung sebagai kerugian;
+            barang rusak, kedaluwarsa, atau hilang dicatat lewat Koreksi stok di halaman produk. Batch baru
+            dicatat lewat halaman produk.
           </li>
           <li>Tulis tanggal kedaluwarsa sebagai YYYY-MM-DD atau sel tanggal Excel.</li>
           <li>Baris Error dilewati saat Terapkan; baris lain tetap diproses.</li>

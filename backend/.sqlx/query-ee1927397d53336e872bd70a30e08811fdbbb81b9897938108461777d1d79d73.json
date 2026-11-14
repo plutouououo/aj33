@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, product_id, change_qty, reason, reference_type, reference_id,\n               stock_before, stock_after, adjusted_by_user_id,\n               created_at AS \"created_at!\"\n        FROM stock_adjustments\n        WHERE product_id = $1\n        ORDER BY created_at DESC, id DESC\n        LIMIT $2\n        ",
+  "query": "\n        SELECT id, product_id, change_qty, reason, reference_type, reference_id,\n               stock_before, stock_after, adjusted_by_user_id, manual_reason,\n               created_at AS \"created_at!\"\n        FROM stock_adjustments\n        WHERE product_id = $1\n        ORDER BY created_at DESC, id DESC\n        LIMIT $2\n        ",
   "describe": {
     "columns": [
       {
@@ -50,6 +50,11 @@
       },
       {
         "ordinal": 9,
+        "name": "manual_reason",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at!",
         "type_info": "Timestamptz"
       }
@@ -70,8 +75,9 @@
       false,
       false,
       true,
+      true,
       false
     ]
   },
-  "hash": "73c24a1aef468981541d73c3ec200a676bf2071e3e70a0867f6dd5cb6007c09b"
+  "hash": "ee1927397d53336e872bd70a30e08811fdbbb81b9897938108461777d1d79d73"
 }

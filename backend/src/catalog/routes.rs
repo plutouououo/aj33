@@ -8,7 +8,7 @@ use super::service;
 use super::sku;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
-use crate::stock::{self, StockLine, StockReason};
+use crate::stock::{self, AlasanKoreksi, StockLine, StockReason};
 use crate::AppState;
 use axum::extract::{Path, Query, State};
 use axum::routing::{delete, get, patch};
@@ -537,6 +537,25 @@ async fn list_stock_adjustments(
 struct StockAdjustmentRequest {
     /// Positif menambah, negatif mengurangi.
     change_qty: i32,
+    /// Wajib bila mengurangi: `rusak`, `kedaluwarsa`, `hilang`, atau `salah_catat`; ditolak bila menambah.
+    reason: Option<String>,
+}
+
+/// Pengurangan wajib beralasan agar kerugian stok di laba rugi tak bergantung pada ingatan siapa pun; penambahan tak boleh beralasan karena tak ada yang hilang.
+fn alasan_koreksi(change_qty: i32, reason: Option<&str>) -> AppResult<Option<AlasanKoreksi>> {
+    let reason = reason.map(str::trim).filter(|r| !r.is_empty());
+    match (change_qty < 0, reason) {
+        (true, None) => Err(AppError::bad_request(
+            "Pilih alasan pengurangan stok: rusak, kedaluwarsa, hilang, atau salah catat.",
+        )),
+        (true, Some(r)) => AlasanKoreksi::parse(r)
+            .map(Some)
+            .ok_or_else(|| AppError::bad_request(format!("Alasan '{r}' tidak dikenal."))),
+        (false, None) => Ok(None),
+        (false, Some(_)) => Err(AppError::bad_request(
+            "Alasan hanya untuk pengurangan stok.",
+        )),
+    }
 }
 
 /// Koreksi stok manual owner (selisih opname, barang rusak); barang masuk lewat batch agar kedaluwarsanya tercatat.
@@ -551,6 +570,7 @@ async fn adjust_stock(
     if body.change_qty == 0 {
         return Err(AppError::bad_request("Perubahan stok tidak boleh nol."));
     }
+    let alasan = alasan_koreksi(body.change_qty, body.reason.as_deref())?;
 
     // Tanpa `batch_id`: koreksi turun memakai FEFO, koreksi naik dibuatkan batch tanpa asal oleh `stock::tambah`, karena opname tak tahu kiriman mana yang selisih.
     let line = StockLine {
@@ -566,7 +586,7 @@ async fn adjust_stock(
         stock::tambah(
             &mut tx,
             &[line],
-            StockReason::ManualAdjustment,
+            StockReason::ManualAdjustment(None),
             id,
             Some(user.id),
         )
@@ -575,7 +595,7 @@ async fn adjust_stock(
         stock::kurangi(
             &mut tx,
             &[line],
-            StockReason::ManualAdjustment,
+            StockReason::ManualAdjustment(alasan),
             id,
             Some(user.id),
         )
@@ -585,6 +605,24 @@ async fn adjust_stock(
     tx.commit().await?;
 
     Ok(Json(service::ambil_produk(&state, id).await?))
+}
+
+#[cfg(test)]
+mod tests_koreksi {
+    use super::*;
+
+    #[test]
+    fn pengurangan_wajib_beralasan_dan_penambahan_tak_boleh() {
+        assert!(alasan_koreksi(-2, None).is_err());
+        assert!(alasan_koreksi(-2, Some("  ")).is_err());
+        assert!(alasan_koreksi(-2, Some("dimakan")).is_err());
+        assert_eq!(
+            alasan_koreksi(-2, Some("kedaluwarsa")).unwrap(),
+            Some(AlasanKoreksi::Kedaluwarsa)
+        );
+        assert_eq!(alasan_koreksi(3, None).unwrap(), None);
+        assert!(alasan_koreksi(3, Some("rusak")).is_err());
+    }
 }
 
 // --- Kategori ---

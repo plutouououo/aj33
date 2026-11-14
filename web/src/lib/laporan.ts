@@ -156,6 +156,19 @@ export function labelKanal(nilai: string): string {
   return { toko: 'Offline (Toko)', shopee: 'Shopee', tiktok: 'Tokopedia' }[nilai] ?? nilai;
 }
 
+/** Pilihan alasan pengurangan stok, urutan tampil form koreksi; harus sama dengan `AlasanKoreksi` di `backend/src/stock.rs`. */
+export const ALASAN_KOREKSI = [
+  { nilai: 'rusak', label: 'Rusak', singkat: 'Rusak' },
+  { nilai: 'kedaluwarsa', label: 'Kedaluwarsa', singkat: 'Kedaluwarsa' },
+  { nilai: 'hilang', label: 'Hilang (selisih opname)', singkat: 'Hilang' },
+  { nilai: 'salah_catat', label: 'Salah catat (bukan kerugian)', singkat: 'Salah catat' },
+] as const;
+
+export function labelAlasan(nilai: string | null): string {
+  if (nilai === null) return 'Tanpa alasan';
+  return ALASAN_KOREKSI.find((a) => a.nilai === nilai)?.label ?? nilai;
+}
+
 export function labelJenis(nilai: string): string {
   return JENIS.find((j) => j.nilai === nilai)?.label ?? nilai;
 }

@@ -170,7 +170,7 @@ async fn ubah_batch(
                 stock::tambah(
                     &mut tx,
                     &[baris],
-                    StockReason::ManualAdjustment,
+                    StockReason::ManualAdjustment(None),
                     produk_id,
                     Some(user_id),
                 )
@@ -179,7 +179,7 @@ async fn ubah_batch(
                 stock::kurangi(
                     &mut tx,
                     &[baris],
-                    StockReason::ManualAdjustment,
+                    StockReason::ManualAdjustment(None),
                     produk_id,
                     Some(user_id),
                 )

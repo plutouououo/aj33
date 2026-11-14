@@ -77,6 +77,8 @@ pub struct StockAdjustment {
     pub stock_before: i32,
     pub stock_after: i32,
     pub adjusted_by_user_id: Option<Uuid>,
+    /// Alasan pengurangan manual (`rusak`, `kedaluwarsa`, `hilang`, `salah_catat`); kosong untuk perubahan lain dan koreksi lama.
+    pub manual_reason: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -860,7 +862,7 @@ pub async fn list_stock_adjustments(
         StockAdjustment,
         r#"
         SELECT id, product_id, change_qty, reason, reference_type, reference_id,
-               stock_before, stock_after, adjusted_by_user_id,
+               stock_before, stock_after, adjusted_by_user_id, manual_reason,
                created_at AS "created_at!"
         FROM stock_adjustments
         WHERE product_id = $1
