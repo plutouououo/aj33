@@ -292,29 +292,34 @@ const diskonOngkirAngka = gratisOngkirIsi ? ongkirAngka : 0;
 // Pecahan pengaturan (0,1725) jadi persen tampil (17,25); toFixed membuang sisa float.
 const persenTampil = (pecahan: number): number => Number((pecahan * 100).toFixed(2));
 
-/** Persen potongan tiap kanal, sama dengan `Persen` di `pos/service.rs`: komisi dua kanal, layanan hanya Shopee, komisi dinamis dan logistik hanya Tokopedia, toko nol. */
+/** Potongan tiap kanal, sama dengan `Persen` dan logistik di `pos/service.rs`: komisi dua kanal, layanan hanya Shopee, komisi dinamis dan logistik hanya Tokopedia, toko nol; logistik berupa rupiah tetap per transaksi, sisanya persen. */
 const PERSEN_KANAL = {
-  toko: { komisi: 0, layanan: 0, dinamis: 0, logistik: 0 },
+  toko: { komisi: 0, layanan: 0, dinamis: 0, logistikRp: 0 },
   shopee: {
     komisi: persenTampil(pengaturanHarga.shopee_commission_percent),
     layanan: persenTampil(pengaturanHarga.shopee_service_percent),
     dinamis: 0,
-    logistik: 0,
+    logistikRp: 0,
   },
   tiktok: {
     komisi: persenTampil(pengaturanHarga.tiktok_commission_percent),
     layanan: 0,
     dinamis: persenTampil(pengaturanHarga.tiktok_dynamic_commission_percent),
-    logistik: persenTampil(pengaturanHarga.tiktok_logistics_percent),
+    logistikRp: pengaturanHarga.tiktok_logistics_fee,
   },
-} satisfies Record<Kanal, { komisi: number; layanan: number; dinamis: number; logistik: number }>;
+} satisfies Record<Kanal, { komisi: number; layanan: number; dinamis: number; logistikRp: number }>;
 const persenIni = PERSEN_KANAL[kanalIsi];
 
 // Basis potongan adalah omzet barang, sama dengan `subtotal` di `Potongan::hitung` pada `pos/service.rs`.
 const biayaKomisiAngka = biayaPersenRupiah(totalBelanja, persenIni.komisi);
 const biayaLayananAngka = biayaPersenRupiah(totalBelanja, persenIni.layanan);
 const biayaDinamisAngka = biayaPersenRupiah(totalBelanja, persenIni.dinamis);
-const biayaLogistikAngka = biayaPersenRupiah(totalBelanja, persenIni.logistik);
+// Logistik tetap per transaksi, bukan per produk; seperti biaya proses, baru ikut setelah keranjang terisi.
+const biayaLogistikAngka = keranjang.length > 0 ? persenIni.logistikRp : 0;
+
+/** Struk lama menyimpan logistik sebagai persen; transaksi baru tanpa persen, jadi hanya nominalnya. */
+const labelLogistik = (persen: number): string =>
+  persen > 0 ? `Biaya Layanan Logistik (${persenTampil(persen)}%)` : 'Biaya Layanan Logistik';
 const biayaWithholdingTaxAngka = adalahMarketplace(kanalIsi)
   ? biayaPersenRupiah(totalBelanja, PPH_UMKM_PERSEN)
   : 0;
@@ -1186,7 +1191,7 @@ function ringkasBatch(p: Product): string {
               ]}
               data-baris-biaya-logistik
             >
-              <span>Biaya Layanan Logistik (<span data-biaya-logistik-persen>{persenIni.logistik}</span>%)</span>
+              <span>Biaya Layanan Logistik</span>
               <span class="tabular-nums text-merah-700" data-biaya-logistik-tampil>
                 {minusRupiah(biayaLogistikAngka)}
               </span>
@@ -1342,7 +1347,7 @@ function ringkasBatch(p: Product): string {
                     {struk.platform_logistics_fee > 0 && (
                       <tr>
                         <td class="py-0.5">
-                          Biaya Layanan Logistik ({persenTampil(struk.platform_logistics_fee_percent)}%)
+                          {labelLogistik(struk.platform_logistics_fee_percent)}
                         </td>
                         <td class="py-0.5 text-right tabular-nums">
                           -{rupiah(struk.platform_logistics_fee)}
@@ -1467,7 +1472,7 @@ function ringkasBatch(p: Product): string {
                     )}
                     {struk.platform_logistics_fee > 0 && (
                       <tr>
-                        <td>Biaya Layanan Logistik ({persenTampil(struk.platform_logistics_fee_percent)}%)</td>
+                        <td>{labelLogistik(struk.platform_logistics_fee_percent)}</td>
                         <td class="nota-kanan">-{rupiah(struk.platform_logistics_fee)}</td>
                       </tr>
                     )}
@@ -1586,7 +1591,6 @@ function ringkasBatch(p: Product): string {
     var selBiayaDinamisPersen = borang.querySelector('[data-biaya-dinamis-persen]');
     var barisBiayaLogistik = borang.querySelector('[data-baris-biaya-logistik]');
     var selBiayaLogistik = borang.querySelector('[data-biaya-logistik-tampil]');
-    var selBiayaLogistikPersen = borang.querySelector('[data-biaya-logistik-persen]');
     var barisBiayaPph = borang.querySelector('[data-baris-biaya-pph]');
     var selBiayaPph = borang.querySelector('[data-biaya-pph-tampil]');
     var barisBiayaProses = borang.querySelector('[data-baris-biaya-proses]');
@@ -1784,14 +1788,14 @@ function ringkasBatch(p: Product): string {
       if (blokCepat) blokCepat.classList.toggle('hidden', isMarketplace);
 
       // Persen dari pengaturan owner, ditulis server ke atribut form (sama dengan `PERSEN_KANAL` di frontmatter).
-      var persen = persenKanal[kanal()] || { komisi: 0, layanan: 0, dinamis: 0, logistik: 0 };
+      var persen = persenKanal[kanal()] || { komisi: 0, layanan: 0, dinamis: 0, logistikRp: 0 };
 
       // Basis potongan: omzet barang, sama dengan `subtotal` di `Potongan::hitung` pada `pos/service.rs`.
       var basisFee = subtotal;
       var biayaKomisi = biayaPersenRupiah(basisFee, persen.komisi);
       var biayaLayanan = biayaPersenRupiah(basisFee, persen.layanan);
       var biayaDinamis = biayaPersenRupiah(basisFee, persen.dinamis);
-      var biayaLogistik = biayaPersenRupiah(basisFee, persen.logistik);
+      var biayaLogistik = jalur > 0 ? persen.logistikRp : 0;
       var biayaPph = isMarketplace ? biayaPersenRupiah(basisFee, PPH_UMKM_PERSEN) : 0;
       // Rp1.250 baru berlaku setelah ada barang di keranjang (sama dengan `biayaOrderProcessingAngka`).
       var biayaProses = isMarketplace && jalur > 0 ? BIAYA_PROSES_PESANAN : 0;
@@ -1825,7 +1829,7 @@ function ringkasBatch(p: Product): string {
       isiBiaya(barisBiayaKomisi, selBiayaKomisi, selBiayaKomisiPersen, isMarketplace, persen.komisi, biayaKomisi);
       isiBiaya(barisBiayaLayanan, selBiayaLayanan, selBiayaLayananPersen, isShopee, persen.layanan, biayaLayanan);
       isiBiaya(barisBiayaDinamis, selBiayaDinamis, selBiayaDinamisPersen, isTiktok, persen.dinamis, biayaDinamis);
-      isiBiaya(barisBiayaLogistik, selBiayaLogistik, selBiayaLogistikPersen, isTiktok, persen.logistik, biayaLogistik);
+      isiBiaya(barisBiayaLogistik, selBiayaLogistik, null, isTiktok, 0, biayaLogistik);
       isiBiaya(barisBiayaPph, selBiayaPph, null, isMarketplace, 0, biayaPph);
       isiBiaya(barisBiayaProses, selBiayaProses, null, isMarketplace, 0, biayaProses);
 

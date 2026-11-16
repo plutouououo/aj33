@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE pricing_settings\n        SET tiktok_commission_percent = $1, tiktok_dynamic_commission_percent = $2,\n            tiktok_logistics_fee = $3, updated_by = $4, updated_at = now()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a0e6acef6b7a204e64e988ccfe2b4c3f6ea2480de0db3636ffc3af4cdfe9c93a"
+}

@@ -165,8 +165,6 @@ struct Persen {
     layanan: Decimal,
     /// "Komisi dinamis" Tokopedia, nol di Shopee.
     komisi_dinamis: Decimal,
-    /// "Biaya layanan logistik" Tokopedia, nol di Shopee.
-    logistik: Decimal,
 }
 
 /// Potongan platform dalam rupiah penuh, tiap komponen dibulatkan sendiri seperti rincian penyelesaian marketplace.
@@ -181,13 +179,13 @@ struct Potongan {
 }
 
 impl Potongan {
-    /// Persen toko nol dan biaya proses hanya marketplace, jadi kanal toko menghasilkan PPh saja (lihat `memotong_tagihan`).
-    fn hitung(kanal: SalesChannel, basis: Decimal, persen: &Persen) -> Self {
+    /// Persen toko nol dan biaya proses hanya marketplace, jadi kanal toko menghasilkan PPh saja (lihat `memotong_tagihan`); logistik rupiah tetap per transaksi, bukan persen omzet.
+    fn hitung(kanal: SalesChannel, basis: Decimal, persen: &Persen, logistik: Decimal) -> Self {
         Self {
             komisi: rupiah_bulat(basis * persen.komisi),
             layanan: rupiah_bulat(basis * persen.layanan),
             komisi_dinamis: rupiah_bulat(basis * persen.komisi_dinamis),
-            logistik: rupiah_bulat(basis * persen.logistik),
+            logistik: rupiah_bulat(logistik),
             pph: rupiah_bulat(basis * pph_umkm_persen()),
             proses: if kanal.marketplace() {
                 biaya_proses_pesanan()
@@ -221,6 +219,8 @@ struct Bahan<'a> {
     shipping_borne_by_store: bool,
     /// Nol di kanal toko; diikutkan karena persen berbeda berarti biaya tersimpan berbeda (migrasi 0018, 0038).
     persen: Persen,
+    /// Rupiah tetap per transaksi, nol di luar Tokopedia.
+    logistik: Decimal,
     items: &'a [(Uuid, i32)],
 }
 
@@ -263,7 +263,7 @@ fn sidik_jari(bahan: &Bahan<'_>) -> String {
     hasher.update(b"|");
     hasher.update(sidik_persen(bahan.persen.komisi_dinamis).as_bytes());
     hasher.update(b"|");
-    hasher.update(sidik_persen(bahan.persen.logistik).as_bytes());
+    hasher.update(sidik_uang(Some(bahan.logistik)).as_bytes());
     hasher.update(b"|");
     hasher.update(bahan.nomor_marketplace.unwrap_or("null").as_bytes());
     for (product_id, qty) in urut {
@@ -282,6 +282,7 @@ struct Rencana {
     ongkir: Decimal,
     ongkir_ditanggung_toko: bool,
     persen: Persen,
+    logistik: Decimal,
     lines: Vec<StockLine>,
     per_produk: Vec<(Uuid, i32)>,
     amount_paid_tersimpan: Option<Decimal>,
@@ -344,10 +345,10 @@ async fn rencanakan(pool: &PgPool, input: &CheckoutInput) -> AppResult<Rencana> 
         Ok(persen)
     };
 
-    let persen = match input.sales_channel {
+    let (persen, logistik) = match input.sales_channel {
         SalesChannel::Shopee => {
             let bawaan = settings::repo::biaya_shopee(pool).await?;
-            Persen {
+            let persen = Persen {
                 komisi: jepit_persen(
                     input
                         .platform_commission_fee_percent
@@ -359,18 +360,19 @@ async fn rencanakan(pool: &PgPool, input: &CheckoutInput) -> AppResult<Rencana> 
                     "biaya layanan",
                 )?,
                 ..Persen::default()
-            }
+            };
+            (persen, Decimal::ZERO)
         }
         SalesChannel::Tiktok => {
             let bawaan = settings::repo::biaya_tiktok(pool).await?;
-            Persen {
+            let persen = Persen {
                 komisi: bawaan.komisi,
                 komisi_dinamis: bawaan.komisi_dinamis,
-                logistik: bawaan.logistik,
                 ..Persen::default()
-            }
+            };
+            (persen, bawaan.logistik)
         }
-        SalesChannel::Toko => Persen::default(),
+        SalesChannel::Toko => (Persen::default(), Decimal::ZERO),
     };
 
     // Digabung dulu baru disidikjari, karena yang tersimpan juga versi gabungan sehingga sidik jari request dan transaksi lama berbahan sama.
@@ -400,6 +402,7 @@ async fn rencanakan(pool: &PgPool, input: &CheckoutInput) -> AppResult<Rencana> 
         ongkir,
         ongkir_ditanggung_toko,
         persen,
+        logistik,
         lines,
         per_produk,
         amount_paid_tersimpan,
@@ -418,6 +421,7 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
         shipping_cost: rencana.ongkir,
         shipping_borne_by_store: rencana.ongkir_ditanggung_toko,
         persen: rencana.persen,
+        logistik: rencana.logistik,
         items: &rencana.per_produk,
     });
 
@@ -470,8 +474,8 @@ async fn kembalikan_yang_ada(pool: &PgPool, existing: TxRow, sidik: &str) -> App
             komisi: existing.platform_commission_fee_percent,
             layanan: existing.platform_service_fee_percent,
             komisi_dinamis: existing.platform_dynamic_commission_fee_percent,
-            logistik: existing.platform_logistics_fee_percent,
         },
+        logistik: existing.platform_logistics_fee,
         items: &items_lama,
     });
 
@@ -548,6 +552,7 @@ async fn tulis(
         ongkir,
         ongkir_ditanggung_toko,
         persen,
+        logistik,
         ref lines,
         ref per_produk,
         amount_paid_tersimpan,
@@ -583,7 +588,7 @@ async fn tulis(
     let subtotal = uang(subtotal);
 
     // Marketplace: komisi, biaya layanan/komisi dinamis/logistik (sesuai kanal), PPh 0,5% dari omzet barang, dan Rp1.250 per transaksi, semuanya memotong `total_amount`; toko: hanya PPh 0,5% sebagai beban yang tidak memotong tagihan pembeli; `rupiah_bulat` sama strateginya dengan `Math.round` di kasir.
-    let potongan = Potongan::hitung(input.sales_channel, subtotal, &persen);
+    let potongan = Potongan::hitung(input.sales_channel, subtotal, &persen, logistik);
 
     // Ongkir hanya menambah tagihan bila pembeli yang menanggung; bila toko, ongkir tak masuk `total_amount` dan dicatat sebagai beban (`shipping_subsidy`). Untuk Shopee dan Tokopedia `total_amount` adalah uang yang cair ke toko.
     let ongkir_ditagih = if ongkir_ditanggung_toko {
@@ -593,6 +598,13 @@ async fn tulis(
     };
     let total_amount =
         uang(subtotal + ongkir_ditagih - potongan.memotong_tagihan(input.sales_channel));
+
+    // Potongan tetap (logistik, biaya proses) bisa melebihi omzet pesanan kecil; penghasilan negatif tak bisa dicatat sebagai uang yang cair.
+    if total_amount.is_sign_negative() {
+        return Err(AppError::bad_request(
+            "Potongan marketplace melebihi nilai barang; periksa isi keranjang.",
+        ));
+    }
 
     if input.payment_method == PaymentMethod::Cash {
         let dibayar = amount_paid_tersimpan
@@ -626,7 +638,7 @@ async fn tulis(
             platform_service_fee: potongan.layanan,
             platform_dynamic_commission_fee_percent: persen.komisi_dinamis,
             platform_dynamic_commission_fee: potongan.komisi_dinamis,
-            platform_logistics_fee_percent: persen.logistik,
+            platform_logistics_fee_percent: Decimal::ZERO,
             platform_logistics_fee: potongan.logistik,
             platform_withholding_tax: potongan.pph,
             platform_order_processing_fee: potongan.proses,
@@ -783,6 +795,7 @@ mod tests {
             shipping_cost: Decimal::ZERO,
             shipping_borne_by_store: false,
             persen: Persen::default(),
+            logistik: Decimal::ZERO,
             items,
         }
     }
@@ -931,15 +944,23 @@ mod tests {
         Persen {
             komisi: Decimal::new(775, 4),
             komisi_dinamis: Decimal::new(65, 3),
-            logistik: Decimal::new(505, 4),
             ..Persen::default()
         }
+    }
+
+    fn logistik_tiktok() -> Decimal {
+        Decimal::new(3030, 0)
     }
 
     #[test]
     fn potongan_tiktok_cocok_dengan_rincian_penyelesaian_marketplace() {
         let basis = Decimal::new(60000, 0);
-        let potongan = Potongan::hitung(SalesChannel::Tiktok, basis, &persen_tiktok());
+        let potongan = Potongan::hitung(
+            SalesChannel::Tiktok,
+            basis,
+            &persen_tiktok(),
+            logistik_tiktok(),
+        );
 
         assert_eq!(potongan.komisi, Decimal::new(4650, 0));
         assert_eq!(potongan.komisi_dinamis, Decimal::new(3900, 0));
@@ -953,11 +974,25 @@ mod tests {
     }
 
     #[test]
+    fn logistik_tiktok_tetap_per_transaksi_berapa_pun_omzet_barang() {
+        for basis in [Decimal::new(20000, 0), Decimal::new(600000, 0)] {
+            let potongan = Potongan::hitung(
+                SalesChannel::Tiktok,
+                basis,
+                &persen_tiktok(),
+                logistik_tiktok(),
+            );
+            assert_eq!(potongan.logistik, Decimal::new(3030, 0));
+        }
+    }
+
+    #[test]
     fn kanal_toko_hanya_kena_pph_dan_tak_memotong_tagihan() {
         let potongan = Potongan::hitung(
             SalesChannel::Toko,
             Decimal::new(60000, 0),
             &Persen::default(),
+            Decimal::ZERO,
         );
 
         assert_eq!(potongan.pph, Decimal::new(300, 0));
@@ -971,13 +1006,13 @@ mod tests {
         let tiktok = Bahan {
             sales_channel: SalesChannel::Tiktok,
             persen: persen_tiktok(),
+            logistik: logistik_tiktok(),
             ..bahan(&items)
         };
         let logistik_beda = Bahan {
-            persen: Persen {
-                logistik: Decimal::new(6, 2),
-                ..persen_tiktok()
-            },
+            sales_channel: SalesChannel::Tiktok,
+            persen: persen_tiktok(),
+            logistik: Decimal::new(4000, 0),
             ..bahan(&items)
         };
         let dinamis_beda = Bahan {
@@ -986,6 +1021,7 @@ mod tests {
                 ..persen_tiktok()
             },
             sales_channel: SalesChannel::Tiktok,
+            logistik: logistik_tiktok(),
             ..bahan(&items)
         };
 

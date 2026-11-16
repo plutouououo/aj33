@@ -190,8 +190,8 @@ export interface PricingSettings {
   tiktok_commission_percent: number;
   /** "Komisi dinamis" Tokopedia/TikTok. */
   tiktok_dynamic_commission_percent: number;
-  /** "Biaya layanan logistik" Tokopedia/TikTok. */
-  tiktok_logistics_percent: number;
+  /** "Biaya layanan logistik" Tokopedia/TikTok dalam rupiah, tetap per transaksi. */
+  tiktok_logistics_fee: number;
   /** Pecahan PPh final UMKM (tetap). */
   withholding_tax_percent: number;
   /** Rupiah per transaksi Shopee dan Tokopedia (tetap). */

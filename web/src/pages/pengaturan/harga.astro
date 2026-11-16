@@ -52,13 +52,15 @@ if (Astro.request.method === 'POST') {
   } else if (aksi === 'biaya-tiktok') {
     isiKomisiTiktok = String(form.get('tiktok_commission_percent') ?? '').trim();
     isiDinamis = String(form.get('tiktok_dynamic_commission_percent') ?? '').trim();
-    isiLogistik = String(form.get('tiktok_logistics_percent') ?? '').trim();
+    isiLogistik = String(form.get('tiktok_logistics_fee') ?? '').trim();
     const komisi = keDesimal(isiKomisiTiktok);
     const dinamis = keDesimal(isiDinamis);
-    const logistik = keDesimal(isiLogistik);
+    const logistik = Number(isiLogistik);
 
-    if (komisi === null || dinamis === null || logistik === null) {
+    if (komisi === null || dinamis === null) {
       galat = 'Persentase biaya Tokopedia harus berupa angka 0 sampai 100.';
+    } else if (isiLogistik === '' || !Number.isInteger(logistik) || logistik < 0) {
+      galat = 'Biaya layanan logistik harus rupiah bulat, 0 atau lebih.';
     } else {
       try {
         await api<PricingSettings>('/settings/tiktok-fees', {
@@ -67,7 +69,7 @@ if (Astro.request.method === 'POST') {
           body: {
             tiktok_commission_percent: komisi,
             tiktok_dynamic_commission_percent: dinamis,
-            tiktok_logistics_percent: logistik,
+            tiktok_logistics_fee: logistik,
           },
         });
         return Astro.redirect(sesudahAksi(Astro.url, 'simpan-biaya-tiktok'), 303);
@@ -187,8 +189,9 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
     <input type="hidden" name="aksi" value="biaya-tiktok" />
     <h2 class="font-semibold">Biaya Tokopedia / TikTok Shop</h2>
     <p class="text-sm text-[var(--color-teks-lembut)]">
-      Ketiganya dihitung dari omzet barang, sama seperti rincian "Detail Penyelesaian Pembayaran" di aplikasi
-      penjual. Cocokkan dengan pesanan asli bila angkanya berubah.
+      Komisi dihitung dari omzet barang, sedangkan biaya layanan logistik berupa nominal tetap per transaksi
+      (bukan per produk), sama seperti rincian "Detail Penyelesaian Pembayaran" di aplikasi penjual. Cocokkan
+      dengan pesanan asli bila angkanya berubah.
     </p>
 
     <div class="isian isian-pendek">
@@ -224,20 +227,20 @@ const keTeksPersen = (pecahan: number): string => String(Number((pecahan * 100).
     </div>
 
     <div class="isian isian-pendek">
-      <label class="label" for="tiktok_logistics_percent">Biaya layanan logistik (%)</label>
+      <label class="label" for="tiktok_logistics_fee">Biaya layanan logistik per transaksi (Rp)</label>
       <input
         class="kolom tabular-nums"
-        id="tiktok_logistics_percent"
-        name="tiktok_logistics_percent"
+        id="tiktok_logistics_fee"
+        name="tiktok_logistics_fee"
         type="number"
         min="0"
-        max="100"
-        step="0.01"
-        inputmode="decimal"
-        value={isiLogistik ?? keTeksPersen(pengaturan.tiktok_logistics_percent)}
+        max="10000000"
+        step="1"
+        inputmode="numeric"
+        value={isiLogistik ?? String(pengaturan.tiktok_logistics_fee)}
         required
       />
-      <p class="isian-bantu">Ongkir yang ditanggung platform tidak ikut dihitung; hanya biaya layanan ini.</p>
+      <p class="isian-bantu">Satu kali per transaksi, berapa pun isi keranjang. Ongkir yang ditanggung platform tidak ikut dihitung.</p>
     </div>
 
     <button class="tombol-halus" type="submit">Simpan biaya Tokopedia</button>

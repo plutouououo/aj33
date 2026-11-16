@@ -30,8 +30,8 @@ struct PricingSettings {
     tiktok_commission_percent: Decimal,
     /// Pecahan "Komisi dinamis" Tokopedia/TikTok.
     tiktok_dynamic_commission_percent: Decimal,
-    /// Pecahan "Biaya layanan logistik" Tokopedia/TikTok.
-    tiktok_logistics_percent: Decimal,
+    /// "Biaya layanan logistik" Tokopedia/TikTok dalam rupiah, tetap per transaksi.
+    tiktok_logistics_fee: Decimal,
     /// Pecahan PPh final UMKM, tetap (tak bisa diubah): dicatat di kanal toko, Shopee, dan Tokopedia.
     withholding_tax_percent: Decimal,
     /// Biaya proses pesanan Shopee dan Tokopedia dalam rupiah, tetap per transaksi.
@@ -47,7 +47,7 @@ async fn baca_pricing(state: &AppState) -> AppResult<PricingSettings> {
         shopee_service_percent: biaya.layanan,
         tiktok_commission_percent: tiktok.komisi,
         tiktok_dynamic_commission_percent: tiktok.komisi_dinamis,
-        tiktok_logistics_percent: tiktok.logistik,
+        tiktok_logistics_fee: tiktok.logistik,
         withholding_tax_percent: service::pph_umkm_persen(),
         order_processing_fee: service::biaya_proses_pesanan(),
     })
@@ -135,7 +135,7 @@ async fn update_shopee_fees(
 struct TiktokFeesUpdateRequest {
     tiktok_commission_percent: Decimal,
     tiktok_dynamic_commission_percent: Decimal,
-    tiktok_logistics_percent: Decimal,
+    tiktok_logistics_fee: Decimal,
 }
 
 async fn update_tiktok_fees(
@@ -148,7 +148,6 @@ async fn update_tiktok_fees(
     for (persen, label) in [
         (body.tiktok_commission_percent, "komisi platform"),
         (body.tiktok_dynamic_commission_percent, "komisi dinamis"),
-        (body.tiktok_logistics_percent, "layanan logistik"),
     ] {
         if persen.is_sign_negative() || persen > Decimal::ONE {
             return Err(AppError::bad_request(format!(
@@ -163,12 +162,23 @@ async fn update_tiktok_fees(
         }
     }
 
+    // Rupiah penuh karena potongan dibulatkan ke rupiah di `pos/service.rs`; batas atas menjaga NUMERIC(14,2).
+    let logistik = body.tiktok_logistics_fee;
+    if logistik.is_sign_negative()
+        || logistik.normalize().scale() > 0
+        || logistik > Decimal::new(10_000_000, 0)
+    {
+        return Err(AppError::bad_request(
+            "Biaya layanan logistik harus rupiah bulat antara Rp0 dan Rp10.000.000.",
+        ));
+    }
+
     repo::ubah_biaya_tiktok(
         &state.pool,
         &repo::BiayaTiktok {
             komisi: body.tiktok_commission_percent,
             komisi_dinamis: body.tiktok_dynamic_commission_percent,
-            logistik: body.tiktok_logistics_percent,
+            logistik,
         },
         user.id,
     )

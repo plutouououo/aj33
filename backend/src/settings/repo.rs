@@ -72,7 +72,7 @@ pub async fn ubah_biaya_shopee(
     Ok(())
 }
 
-/// Pecahan potongan Tokopedia/TikTok Shop dari omzet barang: komisi platform, komisi dinamis, dan biaya layanan logistik.
+/// Potongan Tokopedia/TikTok Shop: komisi platform dan komisi dinamis berupa pecahan omzet barang, biaya layanan logistik berupa rupiah tetap per transaksi.
 pub struct BiayaTiktok {
     pub komisi: Decimal,
     pub komisi_dinamis: Decimal,
@@ -82,7 +82,7 @@ pub struct BiayaTiktok {
 pub async fn biaya_tiktok(db: impl PgExecutor<'_>) -> AppResult<BiayaTiktok> {
     let baris = sqlx::query!(
         r#"
-        SELECT tiktok_commission_percent, tiktok_dynamic_commission_percent, tiktok_logistics_percent
+        SELECT tiktok_commission_percent, tiktok_dynamic_commission_percent, tiktok_logistics_fee
         FROM pricing_settings
         "#
     )
@@ -92,7 +92,7 @@ pub async fn biaya_tiktok(db: impl PgExecutor<'_>) -> AppResult<BiayaTiktok> {
     Ok(BiayaTiktok {
         komisi: baris.tiktok_commission_percent,
         komisi_dinamis: baris.tiktok_dynamic_commission_percent,
-        logistik: baris.tiktok_logistics_percent,
+        logistik: baris.tiktok_logistics_fee,
     })
 }
 
@@ -105,7 +105,7 @@ pub async fn ubah_biaya_tiktok(
         r#"
         UPDATE pricing_settings
         SET tiktok_commission_percent = $1, tiktok_dynamic_commission_percent = $2,
-            tiktok_logistics_percent = $3, updated_by = $4, updated_at = now()
+            tiktok_logistics_fee = $3, updated_by = $4, updated_at = now()
         "#,
         biaya.komisi,
         biaya.komisi_dinamis,
