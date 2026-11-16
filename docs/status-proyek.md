@@ -264,6 +264,7 @@ Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 - Label pratinjau: Baru, Edit, Tetap, Error. Baris Error dilewati saat Terapkan, baris lain tetap jalan; tiap baris ditulis lewat `catalog::service` dan `stock.rs` (satu baris gagal tak menahan yang lain), hasilnya disimpan di kolom `hasil`.
 - Aturan sel: kolom yang tak ada di berkas tidak disentuh; sel kosong pada kolom opsional mengosongkan nilainya; sel kosong pada nama, harga ecer, batas stok, dan status berarti tetap. Ubah SKU lewat `service::koreksi_sku` (ditolak bila produk punya varian atau listing marketplace).
 - Sisa stok yang diubah dicatat di ledger sebagai `manual_adjustment` per batch lewat `stock::tambah`/`kurangi`, dan tak boleh melebihi isi kiriman (`quantity`).
+- Kolom **alasan pengurangan** (`rusak`, `kedaluwarsa`, `hilang`, `salah_catat`) wajib bila sisa turun, dengan aturan yang sama dengan Koreksi stok (`stock::alasan_koreksi`), dan menjadi `manual_reason` pada ledger. Baris yang turun tanpa alasan jadi Error di pratinjau; Terapkan menolaknya juga, untuk pratinjau lama yang belum punya kolom itu. Kolom alasan diabaikan bila sisa naik atau tetap.
 - Terapkan berjalan sinkron dalam satu request; berkas dibatasi 5000 baris dan 10 MB. `klaim_sesi` menandai sesi diterapkan lebih dulu agar dua klik tidak menjalankan perubahan dua kali.
 - Ekspor mengikuti saringan `cari` dan `kategori` dari daftar produk; tab status (menipis, habis, dll.) belum ikut.
 
@@ -299,7 +300,7 @@ Dasar risetnya di [`riset-laporan-keuangan.md`](riset-laporan-keuangan.md). `/la
 - **Tren mengikuti periode** (`reports::repo::tren`, menggantikan `monthly_trend` enam bulan tetap): butir dipilih dari panjang rentang (`Butir::untuk`: 1 hari per jam, ≤ 62 hari per hari, selebihnya per bulan). Butir bulan dibulatkan ke tanggal 1 untuk label, tapi transaksi tetap disaring dengan tanggal asli, jadi rentang 15 Mar–20 Okt tak menarik data di luar rentang. Untuk butir hari/bulan jumlah `profit` seluruh batang = `SalesSummary.profit`; butir jam tak memuat tabel beban (dicatat per tanggal), karena itu tabel rincian tak ditampilkan untuk Hari Ini.
 - **Produk** (`/laporan/produk`, `GET /api/reports/products?sort=qty|revenue|profit|margin`): `top_products` kini membawa kg, harga pokok, dan laba kotor per produk. Laba di sini sebelum potongan marketplace (melekat pada transaksi), dan Σ laba produk = laba kotor + diskon lama karena diskon transaksi tak dibagi ke barang. Barang tanpa keluaran stok sama sekali (barang lepas, produk terhapus) ditandai HPP belum lengkap.
 - **Uang Masuk** (`/laporan/uang-masuk`, `GET /api/reports/cash-in`): Σ `total_amount` per hari/bulan, kanal, dan metode bayar; toko dirinci per metode, marketplace per kanal saja (metode bayarnya selalu e-wallet, tak bermakna). Tanggalnya tanggal pesanan, bukan tanggal dana dilepas marketplace.
-- **Kerugian stok (migrasi 0039):** kolom `stock_adjustments.manual_reason` (`rusak`, `kedaluwarsa`, `hilang`, `salah_catat`), dikunci CHECK hanya pada pengurangan manual. Koreksi stok di halaman produk wajib memilih alasan bila mengurangi dan menolak alasan bila menambah (`StockReason::ManualAdjustment(Option<AlasanKoreksi>)` di `stock.rs`). Rusak, kedaluwarsa, dan hilang dinilai `ABS(change_qty) × harga beli batch` (cadangan `products.cost_price`, seperti harga pokok) lewat satu fungsi, `reports::repo::kerugian_stok`, dan dikurangkan dari `SalesSummary.profit`, `LabaRugi` (bagian Kerugian stok, sebelum laba sebelum pajak), dan tren, jadi ketiganya tetap sama. `salah_catat`, koreksi lama, dan edit massal (tanpa alasan) tidak dihitung kerugian. **Laporan harian Google Sheets belum memuat kerugian stok.**
+- **Kerugian stok (migrasi 0039):** kolom `stock_adjustments.manual_reason` (`rusak`, `kedaluwarsa`, `hilang`, `salah_catat`), dikunci CHECK hanya pada pengurangan manual. Koreksi stok di halaman produk wajib memilih alasan bila mengurangi dan menolak alasan bila menambah (`StockReason::ManualAdjustment(Option<AlasanKoreksi>)` di `stock.rs`). Rusak, kedaluwarsa, dan hilang dinilai `ABS(change_qty) × harga beli batch` (cadangan `products.cost_price`, seperti harga pokok) lewat satu fungsi, `reports::repo::kerugian_stok`, dan dikurangkan dari `SalesSummary.profit`, `LabaRugi` (bagian Kerugian stok, sebelum laba sebelum pajak), dan tren, jadi ketiganya tetap sama. `salah_catat`, koreksi lama, dan edit massal yang sisanya naik atau tetap tidak dihitung kerugian; edit massal yang menurunkan sisa wajib alasan dan dihitung seperti koreksi manual. **Laporan harian Google Sheets belum memuat kerugian stok.**
 - **Stok** (`/laporan/stok`, `GET /api/reports/stock`): nilai persediaan sekarang, pembelian stok periode (batch yang punya ledger `restock`, yaitu lewat Catat batch atau impor; batch dari koreksi naik dan data seed tak terhitung), kerugian per alasan, dan daftar semua pengurangan manual.
 - **Void** (`/laporan/void`, `GET /api/reports/voids`): disaring menurut `voided_at`; jumlah, nilai, persen dari transaksi (selesai + void), siapa yang membatalkan, alasan, dan kasirnya.
 - **Cetak:** tombol Cetak / Simpan PDF (JS kosmetik, Ctrl+P tetap jalan). Aturan cetak nota kasir menyembunyikan seluruh `body *`; halaman yang memuat `.lembar-cetak` dikecualikan di `theme.css`, dan kerangka `AppShell` (sidebar, topbar, tab bawah) memakai `print:hidden`.
@@ -392,6 +393,39 @@ Cara memasangnya tertulis di Pengaturan › Shortcut iPhone.
 - Jawabannya selalu `{ pesan }` untuk ditampilkan notifikasi Shortcut.
   Pesanan yang tercatat menunggu di `/pesanan` seperti hasil unggah biasa.
 
+### Batch dan stok: empat perbaikan dari pembacaan kode (tanpa migrasi)
+
+Ditemukan dengan membaca kode, belum direproduksi lewat UI.
+
+- **Penjualan memotong batch** lewat `backend/src/stock.rs`. Tanpa pilihan
+  kasir, FEFO (kedaluwarsa terdekat dulu); bila kasir memilih batch, batch itu
+  yang dipotong. `quantity` tetap jumlah yang masuk, `remaining_qty` yang
+  berkurang. Kedaluwarsa terdekat per produk tampil di daftar, merah bila ≤ 30
+  hari.
+- **Void setelah sisa batch diisi ulang.** Edit massal "Atribut stok" bisa
+  menaikkan sisa batch asal; pengembalian void lalu melanggar
+  `product_batches_remaining_check` dan void selalu 500. Sekarang batch asal
+  diisi sampai penuh dan sisanya masuk batch tanpa nomor, alasan ledger tetap
+  `void_reversal`.
+- **Edit massal stok memakai sisa pratinjau.** Pratinjau menyimpan sisa batch
+  saat itu sebagai `lama`. Terapkan menolak baris yang sisanya sudah berbeda,
+  supaya penjualan di antara pratinjau dan Terapkan tidak dibatalkan diam-diam.
+  Unduh ulang berkas stok lalu unggah lagi.
+- **Pembatalan batch** (migrasi 0040) tercatat sebagai `reason = batch_dibatalkan` dengan `change_qty` negatif, bukan `restock` negatif. Baris `restock` negatif yang lama dipindah ke nilai itu, dan CHECK `stock_adjustments_batch_arah_check` memastikan `restock` selalu menambah dan `batch_dibatalkan` selalu mengurangi. Laporan tak berubah: pembelian hanya membaca `restock` positif milik batch yang masih ada, dan harga pokok hanya membaca `sale`.
+- **Klik ganda Catat batch dan Koreksi stok** (migrasi 0041): setiap form membawa `idempotency_key` yang dibuat saat halaman dirender (isian tersembunyi, jalan tanpa JS) dan dikirim web sebagai header `Idempotency-Key` ke backend. Backend mencatatnya di `stock_request_keys` dalam transaksi yang sama dengan perubahan stok. Kiriman kedua dengan kunci yang sama dijawab sukses tanpa mengubah stok. Kunci dipertahankan saat aksi gagal, dan baru diganti setelah sukses karena halaman lalu dialihkan. Kunci dibuat per form, bukan per halaman, supaya tombol Back ke form lain tak dianggap ulangan.
+- **Hapus produk yang punya jejak.** Produk yang pernah muncul di transaksi kasir (`transaction_items`) atau masih punya stok lebih dari 0 ditolak dengan pesan "Nonaktifkan saja", sama dengan penahan tugas packing dan pesanan marketplace. Produk baru yang salah input bisa dihapus setelah batch-nya dibatalkan.
+- **Checkout bersamaan dengan `Idempotency-Key` yang sama.** Yang kalah
+  menabrak `transactions_idempotency_key_key`; sekarang dijawab seperti kirim
+  ulang (transaksi yang sudah ada, atau galat isi berbeda), bukan 500.
+- **Void transaksi dari tiket packing** (`tickets::pulihkan_dari_void`, dipanggil `pos::void_transaction` di transaksi database yang sama): tiket kembali `unassigned` tanpa dihapus (penugasan dan centang dikosongkan, pilihan batch dan catatan jadi jejak), pesanan `shipped` kembali `processing` dan tautan `transaction_id` dilepas.
+  Kunci idempotensi `pesanan:<id>` transaksi yang di-void diganti `void:<id transaksi>` supaya penyelesaian ulang membuat penjualan baru. Pesanan `cancelled` dari platform tetap `cancelled`. Tanpa migrasi.
+- **Nomor pesanan marketplace di kasir** (migrasi 0042): kanal Shopee dan Tokopedia / TikTok wajib mengisi nomor pesanan (`transactions.marketplace_order_no`, dinormalkan lewat `marketplace::normalkan_nomor_pesanan`). Indeks unik parsial `transactions_nomor_marketplace_aktif_key` hanya untuk transaksi `completed`, jadi void melepas nomornya.
+  `checkout` menolak nomor yang sudah jadi pesanan di platform yang sama (label atau sinkron) atau sudah dicatat transaksi lain; label dan sinkron balik melewati nomor yang sudah dijual lewat kasir bila pesanannya belum ada. Nomor ikut sidik jari idempotensi. Penjualan dari tiket mengisi nomor dari `external_orders.external_order_id`.
+- **Status sinkron marketplace** (`marketplace::status_setelah_sinkron`, tanpa migrasi): pesanan dibayar yang menunggu dikirim masuk sebagai `new`; `UNPAID` tidak disimpan. Sinkron ulang tak pernah memundurkan pesanan bertiket (hanya maju ke `shipped`, `completed`, atau `cancelled`) dan `cancelled` tak dihidupkan lagi.
+- **Riwayat stok per produk**: `/produk/[id]/riwayat` (owner) menampilkan 100 perubahan ledger terakhir dari `GET /products/{id}/stock-adjustments`.
+- **Pesanan yang dibatalkan platform** (`cancelled`) tidak bisa dijadikan tugas
+  packing dan tidak bisa diselesaikan (`handed_over`), jadi stok tidak terpotong.
+
 ---
 
 ## Jebakan yang sudah memakan waktu
@@ -477,10 +511,6 @@ prepared statement, dan sqlx memakainya untuk tiap query.
   keterangan, bukan paginasi.
 - Harga marketplace belum ditampilkan di tabel produk (baru ada di form tambah
   dan halaman produk).
-- Batch belum dipakai saat stok berkurang: `quantity` adalah jumlah yang masuk,
-  bukan sisa per batch, jadi penjualan belum memotong batch terdekat
-  kedaluwarsanya (FEFO). Yang sudah ada: kedaluwarsa terdekat per produk
-  tampil di daftar dan ditandai merah bila ≤ 30 hari.
 - Sortir kolom di tabel produk belum ada; backend selalu `ORDER BY name`.
 
 **Mungkin tidak perlu**

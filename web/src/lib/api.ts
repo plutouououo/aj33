@@ -227,6 +227,7 @@ export interface Transaction {
   type: string;
   payment_method: string;
   sales_channel: SalesChannel;
+  marketplace_order_no: string | null;
   subtotal: number;
   /** Diskon umum lama: selalu 0 untuk transaksi baru, hanya transaksi lama yang memuatnya. */
   discount_amount: number;

@@ -40,11 +40,16 @@ pub struct ShopeeItem {
     pub model_discounted_price: Option<f64>,
 }
 
-/// `IN_CANCEL` dipetakan ke `New` (bukan `Processing`) agar order yang diminta batal tak ikut dipacking; status tak dikenal juga ke `New` agar tetap terlihat.
+/// Pesanan belum dibayar tidak disimpan sama sekali; sinkron berikutnya membawanya setelah dibayar.
+pub fn belum_dibayar(status: &str) -> bool {
+    status == "UNPAID"
+}
+
+/// Pesanan dibayar yang menunggu dikirim masuk sebagai `New` agar muncul di Pesanan Masuk; `IN_CANCEL` juga `New` agar tak ikut dipacking sebelum dibatalkan, dan status tak dikenal ke `New`.
 pub fn petakan_status(status: &str) -> OrderStatus {
     match status {
-        "UNPAID" | "PENDING" | "INVOICE_PENDING" | "IN_CANCEL" => OrderStatus::New,
-        "READY_TO_SHIP" | "PROCESSED" | "RETRY_SHIP" => OrderStatus::Processing,
+        "PENDING" | "INVOICE_PENDING" | "IN_CANCEL" | "READY_TO_SHIP" | "PROCESSED"
+        | "RETRY_SHIP" => OrderStatus::New,
         "SHIPPED" | "TO_CONFIRM_RECEIVE" => OrderStatus::Shipped,
         "COMPLETED" => OrderStatus::Completed,
         "CANCELLED" | "UNPAID_CANCELLED" => OrderStatus::Cancelled,
@@ -114,9 +119,11 @@ mod tests {
 
     #[test]
     fn status_dipetakan_ke_istilah_internal() {
-        assert_eq!(petakan_status("UNPAID"), OrderStatus::New);
-        assert_eq!(petakan_status("READY_TO_SHIP"), OrderStatus::Processing);
-        assert_eq!(petakan_status("PROCESSED"), OrderStatus::Processing);
+        assert!(belum_dibayar("UNPAID"));
+        assert!(!belum_dibayar("READY_TO_SHIP"));
+        assert_eq!(petakan_status("READY_TO_SHIP"), OrderStatus::New);
+        assert_eq!(petakan_status("PROCESSED"), OrderStatus::New);
+        assert_eq!(petakan_status("INVOICE_PENDING"), OrderStatus::New);
         assert_eq!(petakan_status("SHIPPED"), OrderStatus::Shipped);
         assert_eq!(petakan_status("COMPLETED"), OrderStatus::Completed);
         assert_eq!(petakan_status("CANCELLED"), OrderStatus::Cancelled);
@@ -193,7 +200,7 @@ mod tests {
         ])));
 
         assert_eq!(hasil.external_order_id, "2404098R48U37H");
-        assert_eq!(hasil.status, OrderStatus::Processing);
+        assert_eq!(hasil.status, OrderStatus::New);
         assert_eq!(
             hasil.total_amount,
             Some(Decimal::from_str("210000").unwrap())

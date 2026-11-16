@@ -1,7 +1,7 @@
 //! Akses tabel `external_orders`, `external_order_items`, `channel_listings`, dan `platforms`.
 
 use crate::error::AppResult;
-use crate::marketplace::NormalizedOrder;
+use crate::marketplace::{status_setelah_sinkron, NormalizedOrder};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -249,6 +249,18 @@ pub struct HasilUpsert {
     pub dibuat: bool,
 }
 
+pub async fn pesanan_ada(pool: &PgPool, platform_id: Uuid, nomor: &str) -> AppResult<bool> {
+    let ada = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM external_orders WHERE platform_id = $1 AND external_order_id = $2) AS "ada!""#,
+        platform_id,
+        nomor
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(ada)
+}
+
 /// Upsert order dengan kunci idempotensi `(platform_id, external_order_id)` karena webhook bisa berulang; `received_at`/`sla_*` tak ditimpa agar tenggat tak mundur.
 pub async fn upsert_order(
     pool: &PgPool,
@@ -258,6 +270,25 @@ pub async fn upsert_order(
     sla_deadline: DateTime<Utc>,
 ) -> AppResult<HasilUpsert> {
     let mut tx = pool.begin().await?;
+
+    // Dikunci dulu agar pembuatan tiket yang bersamaan tak lolos di tengah sinkron ulang.
+    let tersimpan = sqlx::query!(
+        r#"
+        SELECT eo.status,
+               EXISTS (SELECT 1 FROM tickets t WHERE t.external_order_id = eo.id) AS "ada_tiket!"
+        FROM external_orders eo
+        WHERE eo.platform_id = $1 AND eo.external_order_id = $2
+        FOR UPDATE
+        "#,
+        platform_id,
+        order.external_order_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    let status = status_setelah_sinkron(
+        tersimpan.as_ref().map(|t| (t.status.as_str(), t.ada_tiket)),
+        order.status,
+    );
 
     let baris = sqlx::query!(
         r#"
@@ -275,7 +306,7 @@ pub async fn upsert_order(
         "#,
         platform_id,
         order.external_order_id,
-        order.status.as_str(),
+        status.as_str(),
         sla_type,
         sla_deadline,
         order.total_amount,

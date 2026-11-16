@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT EXISTS (\n            SELECT 1\n            FROM external_orders eo\n            JOIN platforms p ON p.id = eo.platform_id\n            WHERE p.platform_name = ANY($1)\n              AND UPPER(BTRIM(eo.external_order_id)) = $2\n        ) AS \"ada!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ada!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "52f64f802c597582cf4bcc48857419df5c4e2cb86588ca64c54e7416c7f78611"
+}

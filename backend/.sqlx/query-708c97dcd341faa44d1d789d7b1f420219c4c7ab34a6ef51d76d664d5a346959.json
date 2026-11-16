@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE transactions SET idempotency_key = 'void:' || id::text WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "708c97dcd341faa44d1d789d7b1f420219c4c7ab34a6ef51d76d664d5a346959"
+}

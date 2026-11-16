@@ -1,0 +1,96 @@
+---
+import AppShell from '../../../layouts/AppShell.astro';
+import { api, ApiRequestError, type ProductDetail, type StockAdjustment } from '../../../lib/api';
+import { labelAlasan } from '../../../lib/laporan';
+import { waktu } from '../../../lib/format';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+const { id } = Astro.params;
+
+/** Harus sama dengan `StockReason::as_str` di `backend/src/stock.rs`. */
+const LABEL_SEBAB: Record<string, string> = {
+  sale: 'Penjualan',
+  manual_adjustment: 'Koreksi manual',
+  void_reversal: 'Void transaksi',
+  external_order: 'Pesanan marketplace',
+  restock: 'Batch masuk',
+  batch_dibatalkan: 'Batch dibatalkan',
+};
+
+let produk: ProductDetail | null = null;
+let riwayat: StockAdjustment[] = [];
+try {
+  [produk, riwayat] = await Promise.all([
+    api<ProductDetail>(`/products/${id}`, { token }),
+    api<StockAdjustment[]>(`/products/${id}/stock-adjustments`, { token }),
+  ]);
+} catch (err) {
+  if (err instanceof ApiRequestError && err.status === 404) {
+    Astro.response.status = 404;
+  } else {
+    throw err;
+  }
+}
+---
+
+<AppShell judul={produk ? `Riwayat stok ${produk.name}` : 'Riwayat stok'} user={user}>
+  <nav class="remah" aria-label="Remah roti">
+    <a href="/produk">Produk</a>
+    <span aria-hidden="true">›</span>
+    {
+      produk ? (
+        <a href={`/produk/${produk.id}`}>{produk.name}</a>
+      ) : (
+        <span>Tidak ditemukan</span>
+      )
+    }
+    <span aria-hidden="true">›</span>
+    <span aria-current="page">Riwayat stok</span>
+  </nav>
+
+  {!produk && <p class="kartu">Produk tidak ditemukan.</p>}
+
+  {
+    produk && (
+      <Fragment>
+        <p class="mb-3 text-sm text-gray-600">
+          Stok sekarang {produk.stock_qty}. Menampilkan {riwayat.length} perubahan terakhir
+          (maksimal 100).
+        </p>
+        {riwayat.length === 0 ? (
+          <p class="kartu">Belum ada perubahan stok.</p>
+        ) : (
+          <div class="kartu-rapat overflow-x-auto">
+            <table class="tabel">
+              <thead>
+                <tr>
+                  <th>Waktu</th>
+                  <th>Sebab</th>
+                  <th class="text-right">Perubahan</th>
+                  <th class="text-right">Stok sebelum</th>
+                  <th class="text-right">Stok sesudah</th>
+                  <th>Alasan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {riwayat.map((r) => (
+                  <tr>
+                    <td>{waktu(r.created_at)}</td>
+                    <td>{LABEL_SEBAB[r.reason] ?? r.reason}</td>
+                    <td class="text-right tabular-nums">
+                      {r.change_qty > 0 ? `+${r.change_qty}` : r.change_qty}
+                    </td>
+                    <td class="text-right tabular-nums">{r.stock_before}</td>
+                    <td class="text-right tabular-nums">{r.stock_after}</td>
+                    <td>{r.manual_reason ? labelAlasan(r.manual_reason) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Fragment>
+    )
+  }
+</AppShell>

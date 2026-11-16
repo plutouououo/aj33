@@ -65,9 +65,10 @@ async fn buat_dalam(
     notes: Option<&str>,
     batches: &HashMap<Uuid, Uuid>,
 ) -> AppResult<Uuid> {
-    if !repo::ada_pesanan(tx, external_order_id).await? {
-        return Err(AppError::not_found("Pesanan tidak ditemukan."));
-    }
+    let status = repo::status_pesanan_terkunci(tx, external_order_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Pesanan tidak ditemukan."))?;
+    pastikan_pesanan_tidak_dibatalkan(&status)?;
 
     let baris = repo::baris_pesanan(tx, external_order_id).await?;
     if baris.is_empty() {
@@ -208,6 +209,34 @@ pub async fn batalkan(pool: &PgPool, ticket_id: Uuid, oleh: CurrentUser) -> AppR
     Ok(())
 }
 
+/// Dipanggil void transaksi dalam transaksi database yang sama; tiket kembali ke antrean dan pesanannya bisa dijual ulang, sedangkan transaksi kasir biasa tak punya pesanan tertaut sehingga tidak berbuat apa-apa.
+pub(crate) async fn pulihkan_dari_void(
+    tx: &mut Transaction<'_, Postgres>,
+    transaction_id: Uuid,
+) -> AppResult<()> {
+    let Some(pesanan) = repo::pesanan_penjualan_terkunci(tx, transaction_id).await? else {
+        return Ok(());
+    };
+
+    repo::kembalikan_ke_antrean(
+        tx,
+        pesanan.id,
+        "Penjualan dibatalkan (void); tugas kembali ke antrean.",
+    )
+    .await?;
+    repo::lepas_penjualan(tx, pesanan.id, status_setelah_void(&pesanan.status)).await?;
+    repo::lepaskan_kunci_penjualan(tx, transaction_id).await
+}
+
+/// Pesanan `shipped` kembali `processing` karena tiketnya masih ada; status dari platform (mis. `cancelled`) dibiarkan.
+fn status_setelah_void(status: &str) -> &str {
+    if status == "shipped" {
+        "processing"
+    } else {
+        status
+    }
+}
+
 /// Memindahkan status satu langkah; pesanan baru tercatat sebagai penjualan dan stoknya berkurang saat `handed_over` (barang keluar), bukan lebih awal.
 pub async fn pindah_status(
     pool: &PgPool,
@@ -235,6 +264,10 @@ pub async fn pindah_status(
     }
 
     if tujuan == TicketStatus::HandedOver {
+        let status = repo::status_pesanan_terkunci(&mut tx, tiket.external_order_id)
+            .await?
+            .ok_or_else(|| AppError::not_found("Pesanan tidak ditemukan."))?;
+        pastikan_pesanan_tidak_dibatalkan(&status)?;
         catat_penjualan(pool, &mut tx, tiket.external_order_id, ticket_id, oleh).await?;
     }
 
@@ -319,6 +352,7 @@ async fn catat_penjualan(
             customer_id: pesanan.customer_id,
             payment_method: PaymentMethod::Ewallet,
             sales_channel,
+            marketplace_order_no: Some(pesanan.nomor_platform.clone()),
             amount_paid: None,
             shipping_cost: None,
             shipping_borne_by_store: false,
@@ -353,4 +387,41 @@ fn pastikan_boleh_mengerjakan(tiket: &TiketTerkunci, oleh: CurrentUser) -> AppRe
         None => "Tugas packing ini belum ditugaskan ke siapa pun.",
         Some(_) => "Tugas packing ini ditugaskan ke orang lain.",
     }))
+}
+
+/// Pesanan yang dibatalkan platform (`cancelled`, nilai CHECK `external_orders_status_check`) tak boleh dikemas atau dijual lagi.
+fn pastikan_pesanan_tidak_dibatalkan(status: &str) -> AppResult<()> {
+    if status == "cancelled" {
+        return Err(AppError::conflict(
+            "Pesanan ini sudah dibatalkan oleh platform, jadi tidak bisa diproses sebagai tugas packing.",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pesanan_dibatalkan_platform_tidak_bisa_diproses() {
+        assert!(pastikan_pesanan_tidak_dibatalkan("cancelled").is_err());
+    }
+
+    #[test]
+    fn void_mengembalikan_pesanan_terkirim_ke_pemrosesan() {
+        assert_eq!(status_setelah_void("shipped"), "processing");
+        assert_eq!(status_setelah_void("cancelled"), "cancelled");
+        assert_eq!(status_setelah_void("completed"), "completed");
+    }
+
+    #[test]
+    fn pesanan_aktif_tetap_bisa_diproses() {
+        for status in ["new", "processing", "shipped", "completed"] {
+            assert!(
+                pastikan_pesanan_tidak_dibatalkan(status).is_ok(),
+                "{status}"
+            );
+        }
+    }
 }

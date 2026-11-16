@@ -8,9 +8,11 @@ use super::service;
 use super::sku;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{AppError, AppResult};
-use crate::stock::{self, AlasanKoreksi, StockLine, StockReason};
+use crate::stock::{self, StockLine, StockReason};
 use crate::AppState;
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch};
 use axum::{Json, Router};
 use chrono::NaiveDate;
@@ -334,7 +336,7 @@ async fn update_product(
     Ok(Json(service::ambil_produk(&state, id).await?))
 }
 
-/// Menghapus produk sungguhan selama tak tersangkut varian, tiket, pesanan marketplace, listing, atau daftar belanja; riwayat kasir tetap utuh lewat snapshot nama dan harga di item transaksi.
+/// Menghapus produk sungguhan selama tak tersangkut varian, tiket, pesanan, listing, daftar belanja, riwayat kasir, atau stok; selebihnya hanya bisa dinonaktifkan.
 async fn delete_product(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -387,14 +389,32 @@ struct BatchCreateRequest {
     storage_location: Option<String>,
 }
 
-/// Mencatat barang masuk; stok bertambah lewat ledger di transaksi yang sama sehingga jumlah batch dan stok tak pernah berselisih.
+/// Kunci kiriman wajib di endpoint yang menulis stok; dibatasi 100 karakter sesuai kolom `stock_request_keys.key`.
+fn kunci_kiriman(headers: &HeaderMap) -> AppResult<String> {
+    let kunci = headers
+        .get("idempotency-key")
+        .and_then(|nilai| nilai.to_str().ok())
+        .map(str::trim)
+        .filter(|nilai| !nilai.is_empty())
+        .ok_or_else(|| AppError::bad_request("Header Idempotency-Key wajib diisi."))?;
+    if kunci.len() > 100 {
+        return Err(AppError::bad_request(
+            "Idempotency-Key terlalu panjang (maksimal 100 karakter).",
+        ));
+    }
+    Ok(kunci.to_string())
+}
+
+/// Mencatat barang masuk; stok bertambah lewat ledger di transaksi yang sama sehingga jumlah batch dan stok tak pernah berselisih, dan kiriman ulang dengan kunci yang sama dijawab sukses tanpa menambah lagi.
 async fn create_batch(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(body): Json<BatchCreateRequest>,
-) -> AppResult<(axum::http::StatusCode, Json<ProductBatch>)> {
+) -> AppResult<Response> {
     user.require(&[Role::Owner])?;
+    let kunci = kunci_kiriman(&headers)?;
 
     if body.quantity <= 0 {
         return Err(AppError::bad_request("Jumlah batch harus lebih dari nol."));
@@ -408,6 +428,12 @@ async fn create_batch(
     }
 
     let batch_number = service::bersihkan(body.batch_number);
+
+    let mut tx = state.pool.begin().await?;
+    // Kunci dicatat dulu agar kiriman ulang (klik ganda) berhenti di sini sebelum cek nomor batch, yang akan menolaknya sebagai duplikat.
+    if !stock::catat_kunci(&mut tx, &kunci).await? {
+        return Ok(axum::http::StatusCode::NO_CONTENT.into_response());
+    }
     if let Some(nomor) = &batch_number {
         if repo::list_batches(&state.pool, id)
             .await?
@@ -420,7 +446,6 @@ async fn create_batch(
         }
     }
 
-    let mut tx = state.pool.begin().await?;
     let batch_id = service::catat_batch(
         &mut tx,
         &NewBatch {
@@ -442,7 +467,7 @@ async fn create_batch(
         .find(|b| b.id == batch_id)
         .ok_or_else(|| AppError::not_found("Batch tidak ditemukan."))?;
 
-    Ok((axum::http::StatusCode::CREATED, Json(batch)))
+    Ok((axum::http::StatusCode::CREATED, Json(batch)).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -486,7 +511,7 @@ async fn update_batch(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// Membatalkan batch: baris dihapus dan stoknya ditarik lewat ledger; ditolak bila stok tak cukup karena sebagian sudah terjual.
+/// Membatalkan batch: baris dihapus dan stoknya ditarik lewat ledger sebagai `batch_dibatalkan`; ditolak bila stok tak cukup karena sebagian sudah terjual.
 async fn delete_batch(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -508,7 +533,7 @@ async fn delete_batch(
             qty: batch.quantity,
             batch_id: Some(batch.id),
         }],
-        StockReason::Restock,
+        StockReason::BatchDibatalkan,
         id,
         Some(user.id),
     )
@@ -541,36 +566,22 @@ struct StockAdjustmentRequest {
     reason: Option<String>,
 }
 
-/// Pengurangan wajib beralasan agar kerugian stok di laba rugi tak bergantung pada ingatan siapa pun; penambahan tak boleh beralasan karena tak ada yang hilang.
-fn alasan_koreksi(change_qty: i32, reason: Option<&str>) -> AppResult<Option<AlasanKoreksi>> {
-    let reason = reason.map(str::trim).filter(|r| !r.is_empty());
-    match (change_qty < 0, reason) {
-        (true, None) => Err(AppError::bad_request(
-            "Pilih alasan pengurangan stok: rusak, kedaluwarsa, hilang, atau salah catat.",
-        )),
-        (true, Some(r)) => AlasanKoreksi::parse(r)
-            .map(Some)
-            .ok_or_else(|| AppError::bad_request(format!("Alasan '{r}' tidak dikenal."))),
-        (false, None) => Ok(None),
-        (false, Some(_)) => Err(AppError::bad_request(
-            "Alasan hanya untuk pengurangan stok.",
-        )),
-    }
-}
-
-/// Koreksi stok manual owner (selisih opname, barang rusak); barang masuk lewat batch agar kedaluwarsanya tercatat.
+/// Koreksi stok manual owner (selisih opname, barang rusak); barang masuk lewat batch agar kedaluwarsanya tercatat, dan kiriman ulang dengan kunci yang sama tak mengoreksi dua kali.
 async fn adjust_stock(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(body): Json<StockAdjustmentRequest>,
 ) -> AppResult<Json<Product>> {
     user.require(&[Role::Owner])?;
+    let kunci = kunci_kiriman(&headers)?;
 
     if body.change_qty == 0 {
         return Err(AppError::bad_request("Perubahan stok tidak boleh nol."));
     }
-    let alasan = alasan_koreksi(body.change_qty, body.reason.as_deref())?;
+    let alasan = stock::alasan_koreksi(body.change_qty, body.reason.as_deref())
+        .map_err(AppError::bad_request)?;
 
     // Tanpa `batch_id`: koreksi turun memakai FEFO, koreksi naik dibuatkan batch tanpa asal oleh `stock::tambah`, karena opname tak tahu kiriman mana yang selisih.
     let line = StockLine {
@@ -580,6 +591,10 @@ async fn adjust_stock(
     };
 
     let mut tx = state.pool.begin().await?;
+
+    if !stock::catat_kunci(&mut tx, &kunci).await? {
+        return Ok(Json(service::ambil_produk(&state, id).await?));
+    }
 
     // `reference_id` menunjuk produk itu sendiri (koreksi manual tak berasal dari transaksi/order) agar baris ledger selalu punya rujukan.
     if body.change_qty > 0 {
@@ -605,24 +620,6 @@ async fn adjust_stock(
     tx.commit().await?;
 
     Ok(Json(service::ambil_produk(&state, id).await?))
-}
-
-#[cfg(test)]
-mod tests_koreksi {
-    use super::*;
-
-    #[test]
-    fn pengurangan_wajib_beralasan_dan_penambahan_tak_boleh() {
-        assert!(alasan_koreksi(-2, None).is_err());
-        assert!(alasan_koreksi(-2, Some("  ")).is_err());
-        assert!(alasan_koreksi(-2, Some("dimakan")).is_err());
-        assert_eq!(
-            alasan_koreksi(-2, Some("kedaluwarsa")).unwrap(),
-            Some(AlasanKoreksi::Kedaluwarsa)
-        );
-        assert_eq!(alasan_koreksi(3, None).unwrap(), None);
-        assert!(alasan_koreksi(3, Some("rusak")).is_err());
-    }
 }
 
 // --- Kategori ---

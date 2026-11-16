@@ -1,10 +1,11 @@
-//! Tiket packing satu arah (`unassigned` → `assigned` → `packing` → `packed` → `handed_over`); stok baru berkurang saat `handed_over`, jadi status tak boleh melompat atau mundur.
+//! Tiket packing satu arah (`unassigned` → `assigned` → `packing` → `packed` → `handed_over`); stok baru berkurang saat `handed_over`, jadi status tak boleh melompat atau mundur kecuali lewat void penjualannya.
 
 mod repo;
 mod routes;
 mod service;
 
 pub use routes::router;
+pub(crate) use service::pulihkan_dari_void;
 
 use crate::error::{AppError, AppResult};
 

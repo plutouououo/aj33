@@ -18,6 +18,27 @@ pub enum OrderStatus {
 }
 
 impl OrderStatus {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "new" => Some(Self::New),
+            "processing" => Some(Self::Processing),
+            "shipped" => Some(Self::Shipped),
+            "completed" => Some(Self::Completed),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+
+    fn peringkat(self) -> u8 {
+        match self {
+            Self::New => 0,
+            Self::Processing => 1,
+            Self::Shipped => 2,
+            Self::Completed => 3,
+            Self::Cancelled => 4,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::New => "new",
@@ -27,6 +48,41 @@ impl OrderStatus {
             Self::Cancelled => "cancelled",
         }
     }
+}
+
+/// Status yang disimpan saat sinkron ulang: pesanan yang sudah bertiket atau lewat `new` hanya maju ke tahap sesudah pengiriman atau dibatalkan, tak pernah mundur.
+pub fn status_setelah_sinkron(
+    tersimpan: Option<(&str, bool)>,
+    dari_platform: OrderStatus,
+) -> OrderStatus {
+    let Some((sekarang, ada_tiket)) = tersimpan else {
+        return dari_platform;
+    };
+    let Some(sekarang) = OrderStatus::parse(sekarang) else {
+        return dari_platform;
+    };
+
+    if dari_platform == OrderStatus::Cancelled {
+        return OrderStatus::Cancelled;
+    }
+    if sekarang == OrderStatus::Cancelled {
+        return sekarang;
+    }
+    // Tanpa tiket, `processing` hanya sisa pemetaan lama yang belum pernah dikerjakan, jadi boleh diikuti platform.
+    if !ada_tiket && matches!(sekarang, OrderStatus::New | OrderStatus::Processing) {
+        return dari_platform;
+    }
+    if matches!(dari_platform, OrderStatus::Shipped | OrderStatus::Completed)
+        && dari_platform.peringkat() > sekarang.peringkat()
+    {
+        return dari_platform;
+    }
+    sekarang
+}
+
+/// Satu-satunya normalisasi nomor pesanan marketplace; kasir, label, dan sinkron harus memakainya agar nomor yang sama cocok.
+pub fn normalkan_nomor_pesanan(raw: &str) -> String {
+    raw.trim().to_uppercase()
 }
 
 /// Tingkat layanan pengiriman, menentukan tenggat packing.
@@ -138,5 +194,54 @@ mod tests {
             tenggat_sla(diterima, SlaType::Reguler).to_rfc3339(),
             "2026-09-13T10:00:00+00:00"
         );
+    }
+
+    #[test]
+    fn status_sinkron_mengikuti_platform_untuk_pesanan_baru_atau_tanpa_tiket() {
+        assert_eq!(
+            status_setelah_sinkron(None, OrderStatus::New),
+            OrderStatus::New
+        );
+        assert_eq!(
+            status_setelah_sinkron(Some(("new", false)), OrderStatus::Shipped),
+            OrderStatus::Shipped
+        );
+        assert_eq!(
+            status_setelah_sinkron(Some(("processing", false)), OrderStatus::New),
+            OrderStatus::New
+        );
+    }
+
+    #[test]
+    fn status_sinkron_tidak_mundur_untuk_pesanan_bertiket_atau_selesai() {
+        assert_eq!(
+            status_setelah_sinkron(Some(("processing", true)), OrderStatus::New),
+            OrderStatus::Processing
+        );
+        assert_eq!(
+            status_setelah_sinkron(Some(("shipped", true)), OrderStatus::Processing),
+            OrderStatus::Shipped
+        );
+        assert_eq!(
+            status_setelah_sinkron(Some(("completed", false)), OrderStatus::New),
+            OrderStatus::Completed
+        );
+    }
+
+    #[test]
+    fn status_sinkron_pembatalan_berlaku_dan_tak_dihidupkan_lagi() {
+        assert_eq!(
+            status_setelah_sinkron(Some(("processing", true)), OrderStatus::Cancelled),
+            OrderStatus::Cancelled
+        );
+        assert_eq!(
+            status_setelah_sinkron(Some(("cancelled", true)), OrderStatus::New),
+            OrderStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn nomor_pesanan_dinormalkan_spasi_dan_huruf() {
+        assert_eq!(normalkan_nomor_pesanan("  sp123abc "), "SP123ABC");
     }
 }

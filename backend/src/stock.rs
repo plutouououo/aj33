@@ -3,6 +3,7 @@
 use crate::error::{AppError, AppResult};
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Transaction};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -18,6 +19,8 @@ pub enum StockReason {
     Restock,
     /// Pengembalian stok karena void, dibedakan dari `ManualAdjustment` agar ledger menjawab "kembali karena transaksi apa".
     VoidReversal,
+    /// Batch dibatalkan dan stoknya ditarik, dibedakan dari `Restock` agar barang masuk yang ditarik tak tampak sebagai barang masuk negatif.
+    BatchDibatalkan,
 }
 
 impl StockReason {
@@ -27,6 +30,7 @@ impl StockReason {
             Self::ManualAdjustment(_) => "manual_adjustment",
             Self::Restock => "restock",
             Self::VoidReversal => "void_reversal",
+            Self::BatchDibatalkan => "batch_dibatalkan",
         }
     }
 
@@ -42,13 +46,14 @@ impl StockReason {
             // Void mengacu balik ke transaksi yang dibatalkan, sama seperti penjualan aslinya.
             Self::Sale | Self::VoidReversal => "transaction",
             // Batch masuk tak berasal dari transaksi/pesanan; "manual" satu-satunya nilai CHECK untuk asal seperti itu.
-            Self::ManualAdjustment(_) | Self::Restock => "manual",
+            Self::ManualAdjustment(_) | Self::Restock | Self::BatchDibatalkan => "manual",
         }
     }
 }
 
 /// Alasan pengurangan stok manual, dikunci CHECK `stock_adjustments_manual_reason_check`; semua kecuali `SalahCatat` adalah kerugian di laba rugi.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AlasanKoreksi {
     Rusak,
     Kedaluwarsa,
@@ -77,6 +82,39 @@ impl AlasanKoreksi {
             Self::SalahCatat => "salah_catat",
         }
     }
+}
+
+/// Aturan alasan bersama koreksi manual dan edit massal: pengurangan wajib beralasan, penambahan tak boleh; galat berupa pesan untuk kasir atau baris pratinjau.
+pub fn alasan_koreksi(
+    change_qty: i32,
+    reason: Option<&str>,
+) -> Result<Option<AlasanKoreksi>, String> {
+    let reason = reason
+        .map(|r| r.trim().to_lowercase())
+        .filter(|r| !r.is_empty());
+    match (change_qty < 0, reason) {
+        (true, None) => Err(
+            "Pilih alasan pengurangan stok: rusak, kedaluwarsa, hilang, atau salah catat."
+                .to_string(),
+        ),
+        (true, Some(r)) => AlasanKoreksi::parse(&r)
+            .map(Some)
+            .ok_or_else(|| format!("Alasan '{r}' tidak dikenal.")),
+        (false, None) => Ok(None),
+        (false, Some(_)) => Err("Alasan hanya untuk pengurangan stok.".to_string()),
+    }
+}
+
+/// Mencatat kunci kiriman dalam transaksi pemanggil; `false` berarti kunci itu sudah tercatat, jadi kiriman ini adalah ulangan dan stok tak boleh diubah lagi.
+pub async fn catat_kunci(tx: &mut Transaction<'_, Postgres>, kunci: &str) -> AppResult<bool> {
+    let hasil = sqlx::query!(
+        "INSERT INTO stock_request_keys (key) VALUES ($1) ON CONFLICT DO NOTHING",
+        kunci
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(hasil.rows_affected() == 1)
 }
 
 /// Satu baris permintaan perubahan stok.
@@ -117,6 +155,7 @@ struct LockedBatch {
     id: Uuid,
     batch_number: Option<String>,
     expiry_date: Option<NaiveDate>,
+    quantity: i32,
     remaining_qty: i32,
 }
 
@@ -202,7 +241,7 @@ async fn kunci_batch_fefo(
     let rows = sqlx::query_as!(
         LockedBatch,
         r#"
-        SELECT id, batch_number, expiry_date, remaining_qty
+        SELECT id, batch_number, expiry_date, quantity, remaining_qty
         FROM product_batches
         WHERE product_id = $1 AND remaining_qty > 0
         ORDER BY expiry_date NULLS LAST, received_at, id
@@ -225,7 +264,7 @@ async fn kunci_batch_tunggal(
     let row = sqlx::query_as!(
         LockedBatch,
         r#"
-        SELECT id, batch_number, expiry_date, remaining_qty
+        SELECT id, batch_number, expiry_date, quantity, remaining_qty
         FROM product_batches
         WHERE id = $1 AND product_id = $2
         FOR UPDATE
@@ -410,9 +449,9 @@ pub async fn tambah(
             .get(&line.product_id)
             .ok_or_else(|| AppError::not_found("Produk tidak ditemukan."))?;
 
-        let batch_id = match line.batch_id {
+        let potongan = match line.batch_id {
             Some(batch_id) => {
-                kunci_batch_tunggal(tx, product.id, batch_id)
+                let batch = kunci_batch_tunggal(tx, product.id, batch_id)
                     .await?
                     .ok_or_else(|| {
                         AppError::not_found(format!(
@@ -420,32 +459,67 @@ pub async fn tambah(
                             product.name
                         ))
                     })?;
-                batch_id
+                if reason == StockReason::VoidReversal {
+                    pecah_pengembalian(tx, product.id, &batch, line.qty).await?
+                } else {
+                    vec![(batch_id, line.qty)]
+                }
             }
-            None => buat_batch_tanpa_asal(tx, product.id, line.qty).await?,
+            None => vec![(
+                buat_batch_tanpa_asal(tx, product.id, line.qty).await?,
+                line.qty,
+            )],
         };
 
-        let stock_before = berjalan[&product.id];
-        let stock_after = stock_before + line.qty;
+        for (batch_id, qty) in potongan {
+            let stock_before = berjalan[&product.id];
+            let stock_after = stock_before + qty;
 
-        ubah_sisa_batch(tx, batch_id, line.qty).await?;
-        tulis_perubahan(
-            tx,
-            product.id,
-            line.qty,
-            stock_before,
-            stock_after,
-            reason,
-            reference_id,
-            Some(batch_id),
-            actor_user_id,
-        )
-        .await?;
+            ubah_sisa_batch(tx, batch_id, qty).await?;
+            tulis_perubahan(
+                tx,
+                product.id,
+                qty,
+                stock_before,
+                stock_after,
+                reason,
+                reference_id,
+                Some(batch_id),
+                actor_user_id,
+            )
+            .await?;
 
-        berjalan.insert(product.id, stock_after);
+            berjalan.insert(product.id, stock_after);
+        }
     }
 
     Ok(())
+}
+
+/// Pengembalian void mengisi batch asal sampai penuh; sisanya masuk batch tanpa nomor karena batch asal sudah terisi ulang (mis. lewat edit massal).
+async fn pecah_pengembalian(
+    tx: &mut Transaction<'_, Postgres>,
+    product_id: Uuid,
+    batch: &LockedBatch,
+    qty: i32,
+) -> AppResult<Vec<(Uuid, i32)>> {
+    let (ke_asal, lebih) = bagi_pengembalian(qty, batch.quantity - batch.remaining_qty);
+
+    let mut hasil = Vec::with_capacity(2);
+    if ke_asal > 0 {
+        hasil.push((batch.id, ke_asal));
+    }
+    if lebih > 0 {
+        let baru = buat_batch_tanpa_asal(tx, product_id, lebih).await?;
+        hasil.push((baru, lebih));
+    }
+    Ok(hasil)
+}
+
+/// Membagi `qty` menjadi bagian yang muat di `ruang` batch asal dan sisanya; `ruang` dijaga tak negatif agar CHECK sisa ≤ isi tak pernah dilanggar.
+fn bagi_pengembalian(qty: i32, ruang: i32) -> (i32, i32) {
+    let ke_asal = qty.min(ruang.max(0));
+    (ke_asal, qty - ke_asal)
 }
 
 /// Batch penampung stok tanpa kiriman (selisih opname, barang kembali); `remaining_qty` mulai nol dan dinaikkan `ubah_sisa_batch` sehingga hanya satu penulis kolom itu.
@@ -627,6 +701,16 @@ mod tests {
     }
 
     #[test]
+    fn pengembalian_void_mengisi_batch_asal_sampai_penuh_lalu_sisanya_keluar() {
+        // Batch asal isi 10 sisa 10 (sudah diisi ulang edit massal): semua 2 harus pindah ke batch baru.
+        assert_eq!(bagi_pengembalian(2, 0), (0, 2));
+        // Batch asal isi 10 sisa 8: muat seluruhnya.
+        assert_eq!(bagi_pengembalian(2, 2), (2, 0));
+        // Ruang 1 dari 3: 1 kembali ke batch asal, 2 ke batch baru.
+        assert_eq!(bagi_pengembalian(3, 1), (1, 2));
+    }
+
+    #[test]
     fn alasan_dan_reference_type_berpasangan_sesuai_check_constraint() {
         assert_eq!(StockReason::Sale.reference_type(), "transaction");
         assert_eq!(
@@ -637,6 +721,25 @@ mod tests {
         assert_eq!(StockReason::Restock.reference_type(), "manual");
         assert_eq!(StockReason::VoidReversal.as_str(), "void_reversal");
         assert_eq!(StockReason::VoidReversal.reference_type(), "transaction");
+        assert_eq!(StockReason::BatchDibatalkan.as_str(), "batch_dibatalkan");
+        assert_eq!(StockReason::BatchDibatalkan.reference_type(), "manual");
+    }
+
+    #[test]
+    fn pengurangan_wajib_beralasan_dan_penambahan_tak_boleh() {
+        assert!(alasan_koreksi(-2, None).is_err());
+        assert!(alasan_koreksi(-2, Some("  ")).is_err());
+        assert!(alasan_koreksi(-2, Some("dimakan")).is_err());
+        assert_eq!(
+            alasan_koreksi(-2, Some("kedaluwarsa")).unwrap(),
+            Some(AlasanKoreksi::Kedaluwarsa)
+        );
+        assert_eq!(
+            alasan_koreksi(-2, Some(" Rusak ")).unwrap(),
+            Some(AlasanKoreksi::Rusak)
+        );
+        assert_eq!(alasan_koreksi(3, None).unwrap(), None);
+        assert!(alasan_koreksi(3, Some("rusak")).is_err());
     }
 
     #[test]

@@ -32,6 +32,13 @@ const PESAN: Record<string, string> = {
   koreksi: 'Stok dikoreksi.',
 };
 
+/** Kunci sekali-pakai per form stok, dibuat saat render dan dipertahankan bila aksinya gagal supaya coba ulang tak mencatat dua kali. */
+let kunciBatch: string = crypto.randomUUID();
+let kunciKoreksi: string = crypto.randomUUID();
+
+// Tanpa cache agar tombol Back tak memulihkan form dengan kunci yang sudah terpakai (kirim ulang akan dijawab sukses tanpa mencatat).
+Astro.response.headers.set('Cache-Control', 'no-store');
+
 let galat: string | null = null;
 const kodePesan = Astro.url.searchParams.get('pesan') ?? '';
 // Kode dari URL hanya dianggap bila kunci milik `PESAN` sendiri (`constructor` dan kerabatnya bukan kabar).
@@ -53,6 +60,9 @@ function angka(form: FormData, kolom: string): number | null {
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const aksi = String(form.get('aksi') ?? '');
+  const kunciKiriman = String(form.get('idempotency_key') ?? '');
+  if (aksi === 'batch' && kunciKiriman) kunciBatch = kunciKiriman;
+  if (aksi === 'koreksi' && kunciKiriman) kunciKoreksi = kunciKiriman;
   // Kode kabar yang akan dititipkan ke URL kalau aksinya berhasil.
   let berhasil: string | null = null;
 
@@ -150,6 +160,7 @@ if (Astro.request.method === 'POST') {
       await api(`/products/${id}/batches`, {
         method: 'POST',
         token,
+        headers: { 'Idempotency-Key': kunciKiriman },
         body: {
           batch_number: teks(form, 'batch_number'),
           purchase_price: angka(form, 'purchase_price'),
@@ -181,6 +192,7 @@ if (Astro.request.method === 'POST') {
       await api(`/products/${id}/stock-adjustments`, {
         method: 'POST',
         token,
+        headers: { 'Idempotency-Key': kunciKiriman },
         body: { change_qty: selisih, reason: selisih < 0 && alasan ? alasan : undefined },
       });
       berhasil = 'koreksi';
@@ -609,6 +621,7 @@ const DEKAT_KEDALUWARSA = 30;
           {/* Bagian: Batch & stok */}
           <section id="batch" class="kartu sasaran-bagian" aria-labelledby="j-batch">
             <h2 id="j-batch" class="mb-4 font-semibold">Batch & Stok</h2>
+            <p class="mb-3 text-sm"><a class="text-merah-700 underline" href={`/produk/${produk.id}/riwayat`}>Lihat riwayat perubahan stok</a></p>
 
             {punyaVarian ? (
               <p class="text-sm text-[var(--color-teks-lembut)]">
@@ -737,6 +750,7 @@ const DEKAT_KEDALUWARSA = 30;
 
                 <form method="POST" class="borang-tegak mb-6">
                   <input type="hidden" name="aksi" value="batch" />
+                  <input type="hidden" name="idempotency_key" value={kunciBatch} />
 
                   <div class="isian isian-pendek">
                     <label class="label" for="b_nomor">No. batch</label>
@@ -779,6 +793,7 @@ const DEKAT_KEDALUWARSA = 30;
                 <h3 class="mb-3 font-semibold">Koreksi stok</h3>
                 <form method="POST" class="borang-tegak">
                   <input type="hidden" name="aksi" value="koreksi" />
+                  <input type="hidden" name="idempotency_key" value={kunciKoreksi} />
 
                   <div class="isian isian-pendek">
                     <label class="label" for="koreksi">Selisih</label>
@@ -815,10 +830,9 @@ const DEKAT_KEDALUWARSA = 30;
             <form method="POST" class="flex flex-wrap items-center justify-between gap-3">
               <input type="hidden" name="aksi" value="hapus" />
               <p class="max-w-xl text-xs text-[var(--color-teks-lembut)]">
-                Produk yang sudah pernah terjual di kasir tetap bisa dihapus: riwayat transaksinya
-                tetap ada dengan nama dan harga saat terjual, tapi stok dan riwayat biayanya ikut
-                hilang sehingga laba lama produk ini bergeser. Produk yang masih ada di tugas
-                packing, pesanan marketplace, listing, atau daftar belanja hanya bisa dinonaktifkan.
+                Produk yang pernah terjual di kasir, masih punya stok, masih ada di tugas packing,
+                pesanan marketplace, listing, atau daftar belanja, hanya bisa dinonaktifkan. Produk
+                baru yang salah input bisa dihapus setelah batch-nya dibatalkan.
               </p>
               <button class="tombol-bahaya" type="submit">Hapus produk</button>
             </form>

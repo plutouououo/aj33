@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE tickets\n        SET status = 'unassigned', assigned_to_user_id = NULL, assigned_by = NULL,\n            assigned_at = NULL, completed_at = NULL,\n            notes = concat_ws(E'\\n', notes, $2::text), updated_at = now()\n        WHERE external_order_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "772fc726ee8c5803de922fac92c9067f35d5441a6374c9f05a40e5108b0995b9"
+}

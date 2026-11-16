@@ -29,6 +29,8 @@ pub struct Transaction {
     pub payment_method: String,
     /// `toko`, `shopee`, atau `tiktok`: daftar harga yang dipakai saat menjual (migrasi 0015).
     pub sales_channel: String,
+    /// Nomor pesanan marketplace yang dicatat kasir; kosong untuk kanal toko dan penjualan dari tiket (migrasi 0042).
+    pub marketplace_order_no: Option<String>,
     pub subtotal: Decimal,
     /// Diskon umum lama, selalu nol untuk transaksi baru (migrasi 0023); transaksi lama masih memuatnya.
     pub discount_amount: Decimal,
@@ -69,6 +71,7 @@ struct TransactionHead {
     cashier_user_id: Uuid,
     payment_method: String,
     sales_channel: String,
+    marketplace_order_no: Option<String>,
     subtotal: Decimal,
     discount_amount: Decimal,
     shipping_cost: Decimal,
@@ -112,6 +115,7 @@ async fn lengkapi(pool: &PgPool, head: TransactionHead) -> AppResult<Transaction
         cashier_user_id: head.cashier_user_id,
         payment_method: head.payment_method,
         sales_channel: head.sales_channel,
+        marketplace_order_no: head.marketplace_order_no,
         subtotal: head.subtotal,
         discount_amount: head.discount_amount,
         shipping_cost: head.shipping_cost,
@@ -140,7 +144,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<Transaction
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
+               cashier_user_id, payment_method, sales_channel, marketplace_order_no, subtotal, discount_amount,
                shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
@@ -167,7 +171,7 @@ pub async fn find_by_idempotency_key(pool: &PgPool, key: &str) -> AppResult<Opti
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
+               cashier_user_id, payment_method, sales_channel, marketplace_order_no, subtotal, discount_amount,
                shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
@@ -222,6 +226,7 @@ pub struct NewTransaction {
     pub cashier_user_id: Uuid,
     pub payment_method: String,
     pub sales_channel: String,
+    pub marketplace_order_no: Option<String>,
     pub subtotal: Decimal,
     /// Ongkos kirim sebenarnya, tak masuk `subtotal`; menambah `total_amount` hanya bila bukan ditanggung toko (migrasi 0007, 0023).
     pub shipping_cost: Decimal,
@@ -257,9 +262,9 @@ pub async fn insert_transaction(
              platform_dynamic_commission_fee_percent, platform_dynamic_commission_fee,
              platform_logistics_fee_percent, platform_logistics_fee,
              platform_withholding_tax, platform_order_processing_fee,
-             amount_paid, change_amount)
+             amount_paid, change_amount, marketplace_order_no)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                $19, $20, $21, $22)
+                $19, $20, $21, $22, $23)
         RETURNING id
         "#,
         input.idempotency_key,
@@ -283,7 +288,8 @@ pub async fn insert_transaction(
         input.platform_withholding_tax,
         input.platform_order_processing_fee,
         input.amount_paid,
-        input.change_amount
+        input.change_amount,
+        input.marketplace_order_no
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -314,7 +320,7 @@ pub async fn list_transactions(pool: &PgPool, limit: i64) -> AppResult<Vec<Trans
         TransactionHead,
         r#"
         SELECT id, idempotency_key, type AS transaction_type, customer_id,
-               cashier_user_id, payment_method, sales_channel, subtotal, discount_amount,
+               cashier_user_id, payment_method, sales_channel, marketplace_order_no, subtotal, discount_amount,
                shipping_cost, shipping_borne_by_store, total_amount,
                platform_commission_fee_percent, platform_commission_fee,
                platform_service_fee_percent, platform_service_fee,
@@ -414,4 +420,46 @@ pub async fn set_voided(
     .await?;
 
     Ok(())
+}
+
+/// Nomor pesanan marketplace sudah tercatat di transaksi kasir yang belum di-void.
+pub async fn nomor_dipakai_transaksi(pool: &PgPool, nomor: &str) -> AppResult<bool> {
+    let ada = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM transactions
+            WHERE marketplace_order_no = $1 AND status = 'completed'
+        ) AS "ada!"
+        "#,
+        nomor
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(ada)
+}
+
+/// Nomor pesanan sudah ada sebagai pesanan marketplace (dari label atau sinkron) di salah satu nama platform itu.
+pub async fn nomor_dipakai_pesanan(
+    pool: &PgPool,
+    nama_platform: Vec<&str>,
+    nomor: &str,
+) -> AppResult<bool> {
+    let ada = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM external_orders eo
+            JOIN platforms p ON p.id = eo.platform_id
+            WHERE p.platform_name = ANY($1)
+              AND UPPER(BTRIM(eo.external_order_id)) = $2
+        ) AS "ada!"
+        "#,
+        &nama_platform as &[&str],
+        nomor
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(ada)
 }

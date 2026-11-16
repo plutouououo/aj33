@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT eo.status,\n               EXISTS (SELECT 1 FROM tickets t WHERE t.external_order_id = eo.id) AS \"ada_tiket!\"\n        FROM external_orders eo\n        WHERE eo.platform_id = $1 AND eo.external_order_id = $2\n        FOR UPDATE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "ada_tiket!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "009ab10a80f03a2c087e149870f49437e49e97f9f714b550ee492d6594edd51d"
+}

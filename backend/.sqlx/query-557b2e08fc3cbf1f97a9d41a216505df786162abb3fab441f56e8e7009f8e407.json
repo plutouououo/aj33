@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT EXISTS (\n            SELECT 1 FROM transactions\n            WHERE marketplace_order_no = $1 AND status = 'completed'\n        ) AS \"ada!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ada!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "557b2e08fc3cbf1f97a9d41a216505df786162abb3fab441f56e8e7009f8e407"
+}

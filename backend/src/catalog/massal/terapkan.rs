@@ -1,6 +1,6 @@
 //! Menjalankan rencana pratinjau lewat `catalog::service` dan `stock`, jalur yang sama dengan form manual, per baris agar satu baris gagal tak menahan yang lain.
 
-use super::{Aksi, Baris, HasilBaris, Kolom, KolomBatch};
+use super::{judul, Aksi, Baris, HasilBaris, Kolom, KolomBatch, Perubahan};
 use crate::catalog::repo::{self, BatchPatch, ProductPatch};
 use crate::catalog::service::{self, CreateProductInput};
 use crate::error::{AppError, AppResult};
@@ -20,7 +20,7 @@ pub async fn jalankan(state: &AppState, user_id: Uuid, baris: &[Baris]) -> Vec<H
                 produk_id,
                 batch_id,
                 kolom,
-            } => ubah_batch(state, user_id, *produk_id, *batch_id, kolom).await,
+            } => ubah_batch(state, user_id, *produk_id, *batch_id, kolom, &b.perubahan).await,
         };
         hasil.push(HasilBaris {
             no: b.no,
@@ -131,20 +131,21 @@ async fn ubah_batch(
     produk_id: Uuid,
     batch_id: Uuid,
     kolom: &[KolomBatch],
+    perubahan: &[Perubahan],
 ) -> AppResult<()> {
-    let batch = {
-        let mut tx = state.pool.begin().await?;
-        repo::find_batch(&mut tx, produk_id, batch_id)
-            .await?
-            .ok_or_else(|| AppError::not_found("Batch tidak ditemukan."))?
-    };
+    let mut tx = state.pool.begin().await?;
+    let batch = repo::kunci_batch(&mut tx, produk_id, batch_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Batch tidak ditemukan."))?;
 
     let mut patch = BatchPatch::default();
     let mut target = None;
+    let mut alasan = None;
     for k in kolom {
         let k = k.clone();
         match k {
             KolomBatch::Sisa(v) => target = Some(v),
+            KolomBatch::Alasan(v) => alasan = Some(v),
             KolomBatch::Kedaluwarsa(v) => patch.expiry_date = Some(v),
             KolomBatch::Rak(v) => patch.storage_location = Some(v),
             KolomBatch::HargaBeli(v) => patch.purchase_price = Some(v),
@@ -158,6 +159,7 @@ async fn ubah_batch(
                 batch.quantity
             )));
         }
+        periksa_sisa_pratinjau(perubahan, batch.remaining_qty)?;
         let selisih = target - batch.remaining_qty;
         if selisih != 0 {
             let baris = StockLine {
@@ -165,7 +167,6 @@ async fn ubah_batch(
                 qty: selisih.abs(),
                 batch_id: Some(batch_id),
             };
-            let mut tx = state.pool.begin().await?;
             if selisih > 0 {
                 stock::tambah(
                     &mut tx,
@@ -176,18 +177,21 @@ async fn ubah_batch(
                 )
                 .await?;
             } else {
+                // Pratinjau lama tanpa kolom alasan ditolak di sini, memakai aturan yang sama dengan koreksi manual.
+                let alasan_kurang = stock::alasan_koreksi(selisih, alasan.map(|a| a.as_str()))
+                    .map_err(AppError::bad_request)?;
                 stock::kurangi(
                     &mut tx,
                     &[baris],
-                    StockReason::ManualAdjustment(None),
+                    StockReason::ManualAdjustment(alasan_kurang),
                     produk_id,
                     Some(user_id),
                 )
                 .await?;
             }
-            tx.commit().await?;
         }
     }
+    tx.commit().await?;
 
     let ada_metadata = patch.expiry_date.is_some()
         || patch.storage_location.is_some()
@@ -197,4 +201,52 @@ async fn ubah_batch(
     }
 
     Ok(())
+}
+
+/// Menolak selisih bila sisa batch sudah bergeser sejak pratinjau, supaya selisih lama tak membatalkan penjualan di antaranya.
+fn periksa_sisa_pratinjau(perubahan: &[Perubahan], sisa_kini: i32) -> AppResult<()> {
+    let pratinjau = perubahan
+        .iter()
+        .find(|p| p.kolom == judul::SISA)
+        .and_then(|p| p.lama.trim().parse::<i32>().ok());
+
+    match pratinjau {
+        Some(lama) if lama == sisa_kini => Ok(()),
+        Some(lama) => Err(AppError::bad_request(format!(
+            "Sisa batch sudah berubah sejak pratinjau (dulu {lama}, sekarang {sisa_kini}). Unduh ulang berkas edit massal stok, lalu unggah ulang."
+        ))),
+        None => Err(AppError::bad_request(
+            "Pratinjau tidak memuat sisa stok batch ini. Unduh ulang berkas edit massal stok, lalu unggah ulang.",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sisa_lama(lama: &str) -> Vec<Perubahan> {
+        vec![Perubahan {
+            kolom: judul::SISA.to_string(),
+            lama: lama.to_string(),
+            baru: "10".to_string(),
+        }]
+    }
+
+    #[test]
+    fn sisa_yang_masih_sama_dengan_pratinjau_diterapkan() {
+        assert!(periksa_sisa_pratinjau(&sisa_lama("8"), 8).is_ok());
+    }
+
+    #[test]
+    fn sisa_yang_sudah_bergeser_ditolak() {
+        // Penjualan di antara pratinjau dan terapkan mengubah sisa dari 8 menjadi 6.
+        assert!(periksa_sisa_pratinjau(&sisa_lama("8"), 6).is_err());
+    }
+
+    #[test]
+    fn pratinjau_tanpa_sisa_atau_tak_terbaca_ditolak() {
+        assert!(periksa_sisa_pratinjau(&[], 8).is_err());
+        assert!(periksa_sisa_pratinjau(&sisa_lama("delapan"), 8).is_err());
+    }
 }

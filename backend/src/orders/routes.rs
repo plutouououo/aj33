@@ -274,8 +274,14 @@ async fn sync_shopee(
                 }
             };
 
+            if shopee::belum_dibayar(&order.order_status) {
+                continue;
+            }
             let normal = shopee::normalisasi(&order, isi);
-            let hasil = simpan_order(&state, shopee::NAMA_PLATFORM, normal).await?;
+            let Some(hasil) = simpan_order(&state, shopee::NAMA_PLATFORM, normal).await? else {
+                dilewati += 1;
+                continue;
+            };
 
             tersimpan += 1;
             if hasil.dibuat {
@@ -363,17 +369,20 @@ async fn webhook(
     let order: tiktok::TiktokOrder = serde_json::from_value(detail.clone())
         .map_err(|_| AppError::bad_request("Bentuk order dari TikTok tidak dikenali."))?;
 
+    if tiktok::belum_dibayar(&order.status) {
+        return Ok("ok");
+    }
     simpan_order(&state, NAMA_PLATFORM, tiktok::normalisasi(&order, detail)).await?;
 
     Ok("ok")
 }
 
-/// Menyimpan satu order ternormalkan (`NormalizedOrder`, bukan JSON mentah) karena penerjemahan urusan adapter; `platform_name` hanya untuk mencari baris `platforms`.
+/// Menyimpan satu order ternormalkan (`NormalizedOrder`, bukan JSON mentah) karena penerjemahan urusan adapter; `platform_name` hanya untuk mencari baris `platforms`. `None` bila order baru itu sudah dijual lewat kasir.
 async fn simpan_order(
     state: &AppState,
     platform_name: &str,
     normal: NormalizedOrder,
-) -> AppResult<repo::HasilUpsert> {
+) -> AppResult<Option<repo::HasilUpsert>> {
     let platform_id = repo::find_platform_id(&state.pool, platform_name)
         .await?
         .ok_or_else(|| {
@@ -381,6 +390,18 @@ async fn simpan_order(
                 "Platform {platform_name} belum terdaftar di database."
             ))
         })?;
+
+    if !repo::pesanan_ada(&state.pool, platform_id, &normal.external_order_id).await?
+        && crate::pos::service::nomor_sudah_dijual_kasir(&state.pool, &normal.external_order_id)
+            .await?
+    {
+        tracing::info!(
+            platform = platform_name,
+            order_id = %normal.external_order_id,
+            "order dilewati: sudah dijual lewat kasir"
+        );
+        return Ok(None);
+    }
 
     let sla = klasifikasi_sla(normal.shipping_carrier.as_deref());
     let hasil = repo::upsert_order(
@@ -400,7 +421,7 @@ async fn simpan_order(
         "order marketplace tersimpan"
     );
 
-    Ok(hasil)
+    Ok(Some(hasil))
 }
 
 // --- Pesanan ---

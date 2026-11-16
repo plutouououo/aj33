@@ -2,6 +2,7 @@
 
 use super::repo::{self, NewTransaction, NewTransactionItem, Transaction as TxRow};
 use crate::error::{AppError, AppResult};
+use crate::marketplace::normalkan_nomor_pesanan;
 use crate::settings;
 use crate::stock::{self, StockLine, StockReason};
 use rust_decimal::{Decimal, RoundingStrategy};
@@ -118,6 +119,8 @@ pub struct CheckoutInput {
     pub payment_method: PaymentMethod,
     /// Daftar harga yang dipakai. Menentukan `unit_price` tiap baris struk.
     pub sales_channel: SalesChannel,
+    /// Nomor pesanan marketplace; wajib untuk kanal marketplace, diabaikan untuk kanal toko.
+    pub marketplace_order_no: Option<String>,
     pub amount_paid: Option<Decimal>,
     /// Ongkos kirim; `None` berarti nol, diabaikan untuk `SalesChannel::Shopee` (lihat `checkout`).
     pub shipping_cost: Option<Decimal>,
@@ -207,6 +210,8 @@ impl Potongan {
 
 /// Bahan sidik jari berupa struct, bukan argumen, karena delapan isinya setengah bertipe sama dan pertukaran di satu pemanggil akan menolak kirim ulang sah.
 struct Bahan<'a> {
+    /// Ikut sidik jari agar kirim ulang dengan nomor lain ditolak sebagai isi berbeda.
+    nomor_marketplace: Option<&'a str>,
     transaction_type: TransactionType,
     sales_channel: SalesChannel,
     customer_id: Option<Uuid>,
@@ -259,6 +264,8 @@ fn sidik_jari(bahan: &Bahan<'_>) -> String {
     hasher.update(sidik_persen(bahan.persen.komisi_dinamis).as_bytes());
     hasher.update(b"|");
     hasher.update(sidik_persen(bahan.persen.logistik).as_bytes());
+    hasher.update(b"|");
+    hasher.update(bahan.nomor_marketplace.unwrap_or("null").as_bytes());
     for (product_id, qty) in urut {
         hasher.update(b"|");
         hasher.update(product_id.as_bytes());
@@ -271,6 +278,7 @@ fn sidik_jari(bahan: &Bahan<'_>) -> String {
 
 /// Isi transaksi yang sudah dinormalkan persis seperti akan tersimpan, karena sidik jari dan tulisan harus berbahan sama.
 struct Rencana {
+    nomor_marketplace: Option<String>,
     ongkir: Decimal,
     ongkir_ditanggung_toko: bool,
     persen: Persen,
@@ -295,6 +303,22 @@ async fn rencanakan(pool: &PgPool, input: &CheckoutInput) -> AppResult<Rencana> 
             "Transaksi marketplace tidak bisa dicatat sebagai tunai -- uangnya diterima lewat e-wallet.",
         ));
     }
+
+    // Dinormalkan di satu tempat (`normalkan_nomor_pesanan`) agar cocok dengan nomor dari label dan sinkron.
+    let nomor_marketplace = if input.sales_channel.marketplace() {
+        let nomor = input
+            .marketplace_order_no
+            .as_deref()
+            .map(normalkan_nomor_pesanan)
+            .filter(|n| !n.is_empty());
+        Some(nomor.ok_or_else(|| {
+            AppError::bad_request(
+                "Nomor pesanan marketplace wajib diisi untuk penjualan Shopee atau Tokopedia / TikTok.",
+            )
+        })?)
+    } else {
+        None
+    };
 
     // Ongkir tak berlaku untuk marketplace: nilai terkirim diabaikan (bukan ditolak) dan dinormalkan sekali agar yang di-hash = yang tersimpan.
     let ongkir = if input.sales_channel.marketplace() {
@@ -372,6 +396,7 @@ async fn rencanakan(pool: &PgPool, input: &CheckoutInput) -> AppResult<Rencana> 
     let per_produk = stock::total_per_produk(&lines);
 
     Ok(Rencana {
+        nomor_marketplace,
         ongkir,
         ongkir_ditanggung_toko,
         persen,
@@ -384,6 +409,7 @@ async fn rencanakan(pool: &PgPool, input: &CheckoutInput) -> AppResult<Rencana> 
 pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
     let rencana = rencanakan(pool, &input).await?;
     let sidik = sidik_jari(&Bahan {
+        nomor_marketplace: rencana.nomor_marketplace.as_deref(),
         transaction_type: input.transaction_type,
         sales_channel: input.sales_channel,
         customer_id: input.customer_id,
@@ -397,40 +423,110 @@ pub async fn checkout(pool: &PgPool, input: CheckoutInput) -> AppResult<TxRow> {
 
     // Request ulang sah: kembalikan transaksi yang ada tanpa menyentuh stok lagi.
     if let Some(existing) = repo::find_by_idempotency_key(pool, &input.idempotency_key).await? {
-        let items_lama = repo::item_bahan_sidik_jari(pool, existing.id).await?;
-        let sidik_lama = sidik_jari(&Bahan {
-            transaction_type: parse_type(&existing.transaction_type)?,
-            sales_channel: parse_channel(&existing.sales_channel)?,
-            customer_id: existing.customer_id,
-            payment_method: parse_payment(&existing.payment_method)?,
-            amount_paid: existing.amount_paid,
-            shipping_cost: existing.shipping_cost,
-            shipping_borne_by_store: existing.shipping_borne_by_store,
-            persen: Persen {
-                komisi: existing.platform_commission_fee_percent,
-                layanan: existing.platform_service_fee_percent,
-                komisi_dinamis: existing.platform_dynamic_commission_fee_percent,
-                logistik: existing.platform_logistics_fee_percent,
-            },
-            items: &items_lama,
-        });
+        return kembalikan_yang_ada(pool, existing, &sidik).await;
+    }
 
-        if sidik_lama == sidik {
-            return Ok(existing);
-        }
-
-        return Err(AppError::conflict(
-            "Idempotency-Key ini sudah dipakai untuk transaksi dengan isi berbeda.",
-        ));
+    if let Some(nomor) = rencana.nomor_marketplace.as_deref() {
+        periksa_nomor_marketplace(pool, input.sales_channel, nomor).await?;
     }
 
     let mut tx = pool.begin().await?;
-    let transaction_id = tulis(&mut tx, &input, &rencana).await?;
+    let transaction_id = match tulis(&mut tx, &input, &rencana).await {
+        Ok(id) => id,
+        // Checkout bersamaan dengan kunci sama: yang kalah menabrak indeks unik, dijawab seperti kirim ulang biasa.
+        Err(err) if adalah_bentrok_idempotensi(&err) => {
+            drop(tx);
+            let existing = repo::find_by_idempotency_key(pool, &input.idempotency_key)
+                .await?
+                .ok_or(err)?;
+            return kembalikan_yang_ada(pool, existing, &sidik).await;
+        }
+        Err(err) if adalah_pelanggaran_unik(&err, NAMA_INDEKS_NOMOR_MARKETPLACE) => {
+            return Err(AppError::conflict(
+                "Nomor pesanan marketplace ini baru saja dicatat di transaksi kasir lain.",
+            ));
+        }
+        Err(err) => return Err(err),
+    };
     tx.commit().await?;
 
     repo::find_by_id(pool, transaction_id)
         .await?
         .ok_or_else(|| AppError::not_found("Transaksi tidak ditemukan."))
+}
+
+async fn kembalikan_yang_ada(pool: &PgPool, existing: TxRow, sidik: &str) -> AppResult<TxRow> {
+    let items_lama = repo::item_bahan_sidik_jari(pool, existing.id).await?;
+    let sidik_lama = sidik_jari(&Bahan {
+        nomor_marketplace: existing.marketplace_order_no.as_deref(),
+        transaction_type: parse_type(&existing.transaction_type)?,
+        sales_channel: parse_channel(&existing.sales_channel)?,
+        customer_id: existing.customer_id,
+        payment_method: parse_payment(&existing.payment_method)?,
+        amount_paid: existing.amount_paid,
+        shipping_cost: existing.shipping_cost,
+        shipping_borne_by_store: existing.shipping_borne_by_store,
+        persen: Persen {
+            komisi: existing.platform_commission_fee_percent,
+            layanan: existing.platform_service_fee_percent,
+            komisi_dinamis: existing.platform_dynamic_commission_fee_percent,
+            logistik: existing.platform_logistics_fee_percent,
+        },
+        items: &items_lama,
+    });
+
+    if sidik_lama == sidik {
+        return Ok(existing);
+    }
+
+    Err(AppError::conflict(
+        "Idempotency-Key ini sudah dipakai untuk transaksi dengan isi berbeda.",
+    ))
+}
+
+const NAMA_INDEKS_NOMOR_MARKETPLACE: &str = "transactions_nomor_marketplace_aktif_key";
+
+/// Hanya pelanggaran indeks unik kunci idempotensi yang dikenali; galat lain tetap jatuh ke pemetaan 500 biasa.
+fn adalah_bentrok_idempotensi(err: &AppError) -> bool {
+    adalah_pelanggaran_unik(err, "transactions_idempotency_key_key")
+}
+
+fn adalah_pelanggaran_unik(err: &AppError, indeks: &str) -> bool {
+    std::error::Error::source(err)
+        .and_then(|sumber| sumber.downcast_ref::<sqlx::Error>())
+        .and_then(|e| e.as_database_error())
+        .is_some_and(|db| db.is_unique_violation() && db.constraint() == Some(indeks))
+}
+
+/// Nomor yang sudah jadi pesanan marketplace (label atau sinkron) atau penjualan kasir lain yang belum di-void tak boleh dicatat lagi.
+async fn periksa_nomor_marketplace(
+    pool: &PgPool,
+    kanal: SalesChannel,
+    nomor: &str,
+) -> AppResult<()> {
+    let platform = match kanal {
+        SalesChannel::Shopee => vec!["shopee"],
+        SalesChannel::Tiktok => vec!["tiktok", "tokopedia"],
+        SalesChannel::Toko => return Ok(()),
+    };
+
+    if repo::nomor_dipakai_pesanan(pool, platform, nomor).await? {
+        return Err(AppError::conflict(format!(
+            "Pesanan {nomor} sudah tercatat dari label atau sinkron marketplace. Proses lewat tugas packing, jangan dicatat sebagai penjualan kasir."
+        )));
+    }
+    if repo::nomor_dipakai_transaksi(pool, nomor).await? {
+        return Err(AppError::conflict(format!(
+            "Pesanan {nomor} sudah dicatat di transaksi kasir yang belum dibatalkan."
+        )));
+    }
+
+    Ok(())
+}
+
+/// Dipakai label dan sinkron: nomor yang sudah dicatat kasir (dan belum di-void) tak boleh masuk lagi sebagai pesanan.
+pub async fn nomor_sudah_dijual_kasir(pool: &PgPool, nomor: &str) -> AppResult<bool> {
+    repo::nomor_dipakai_transaksi(pool, &normalkan_nomor_pesanan(nomor)).await
 }
 
 /// Penjualan pesanan marketplace yang tiketnya selesai; ditulis di transaksi database tiket agar status tiket, transaksi, dan stok berubah bersama atau tidak sama sekali.
@@ -455,6 +551,7 @@ async fn tulis(
         ref lines,
         ref per_produk,
         amount_paid_tersimpan,
+        ref nomor_marketplace,
     } = *rencana;
 
     let ids: Vec<Uuid> = lines.iter().map(|l| l.product_id).collect();
@@ -518,6 +615,7 @@ async fn tulis(
             cashier_user_id: input.cashier_user_id,
             payment_method: input.payment_method.as_str().to_string(),
             sales_channel: input.sales_channel.as_str().to_string(),
+            marketplace_order_no: nomor_marketplace.clone(),
             subtotal,
             shipping_borne_by_store: ongkir_ditanggung_toko,
             shipping_cost: ongkir,
@@ -552,7 +650,7 @@ async fn tulis(
     Ok(transaction_id)
 }
 
-/// Membatalkan transaksi: stok kembali persis ke batch asal lalu ditandai `voided`; laporan omzet dan riwayat pelanggan sudah menyaring `status = 'completed'` sehingga tak perlu langkah tambahan.
+/// Membatalkan transaksi: stok kembali persis ke batch asal, tiket packing tertaut (jika ada) kembali ke antrean, lalu ditandai `voided`; laporan omzet dan riwayat pelanggan sudah menyaring `status = 'completed'` sehingga tak perlu langkah tambahan.
 pub async fn void_transaction(
     pool: &PgPool,
     transaction_id: Uuid,
@@ -581,6 +679,7 @@ pub async fn void_transaction(
     }
 
     repo::set_voided(&mut tx, transaction_id, voided_by, reason).await?;
+    crate::tickets::pulihkan_dari_void(&mut tx, transaction_id).await?;
 
     tx.commit().await?;
     Ok(())
@@ -616,6 +715,58 @@ fn parse_payment(raw: &str) -> AppResult<PaymentMethod> {
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
+    struct GalatUnik(&'static str);
+
+    impl std::fmt::Display for GalatUnik {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "duplicate key value")
+        }
+    }
+
+    impl std::error::Error for GalatUnik {}
+
+    impl sqlx::error::DatabaseError for GalatUnik {
+        fn message(&self) -> &str {
+            "duplicate key value violates unique constraint"
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::UniqueViolation
+        }
+
+        fn constraint(&self) -> Option<&str> {
+            Some(self.0)
+        }
+    }
+
+    fn galat_db(constraint: &'static str) -> AppError {
+        AppError::from(sqlx::Error::Database(Box::new(GalatUnik(constraint))))
+    }
+
+    #[test]
+    fn bentrok_kunci_idempotensi_dikenali_dan_galat_lain_tidak() {
+        assert!(adalah_bentrok_idempotensi(&galat_db(
+            "transactions_idempotency_key_key"
+        )));
+        assert!(!adalah_bentrok_idempotensi(&galat_db("transactions_pkey")));
+        assert!(!adalah_bentrok_idempotensi(&AppError::conflict(
+            "Stok tidak cukup."
+        )));
+    }
+
     fn produk(n: u128) -> Uuid {
         Uuid::from_u128(n)
     }
@@ -623,6 +774,7 @@ mod tests {
     /// Bahan sidik jari paling biasa; tiap pengujian mengubah satu hal agar yang diuji benar-benar hal itu.
     fn bahan(items: &[(Uuid, i32)]) -> Bahan<'_> {
         Bahan {
+            nomor_marketplace: None,
             transaction_type: TransactionType::WalkIn,
             sales_channel: SalesChannel::Toko,
             customer_id: None,
@@ -633,6 +785,21 @@ mod tests {
             persen: Persen::default(),
             items,
         }
+    }
+
+    #[test]
+    fn nomor_marketplace_berbeda_menghasilkan_sidik_jari_berbeda() {
+        let items = [(produk(1), 2)];
+        let a = Bahan {
+            nomor_marketplace: Some("SP001"),
+            ..bahan(&items)
+        };
+        let b = Bahan {
+            nomor_marketplace: Some("SP002"),
+            ..bahan(&items)
+        };
+
+        assert_ne!(sidik_jari(&a), sidik_jari(&b));
     }
 
     #[test]

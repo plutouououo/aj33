@@ -155,6 +155,16 @@ pub async fn catat_label(pool: &PgPool, labels: Vec<LabelShopee>) -> AppResult<V
             items: &baris,
         };
 
+        if crate::pos::service::nomor_sudah_dijual_kasir(pool, &siap.order_sn).await? {
+            hasil.push(HasilLabel {
+                order_sn: siap.order_sn,
+                status: StatusLabel::SudahAda,
+                order_id: None,
+                message: Some("Pesanan ini sudah dicatat sebagai penjualan kasir.".into()),
+            });
+            continue;
+        }
+
         hasil.push(match repo::insert_pesanan_label(pool, &baru).await? {
             Some(id) => HasilLabel {
                 order_sn: siap.order_sn,

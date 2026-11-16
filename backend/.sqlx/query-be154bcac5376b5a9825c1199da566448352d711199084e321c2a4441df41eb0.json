@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, batch_number, expiry_date, remaining_qty\n        FROM product_batches\n        WHERE id = $1 AND product_id = $2\n        FOR UPDATE\n        ",
+  "query": "\n        SELECT id, batch_number, expiry_date, quantity, remaining_qty\n        FROM product_batches\n        WHERE product_id = $1 AND remaining_qty > 0\n        ORDER BY expiry_date NULLS LAST, received_at, id\n        FOR UPDATE\n        ",
   "describe": {
     "columns": [
       {
@@ -20,13 +20,17 @@
       },
       {
         "ordinal": 3,
+        "name": "quantity",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
         "name": "remaining_qty",
         "type_info": "Int4"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Uuid"
       ]
     },
@@ -34,8 +38,9 @@
       false,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "30f9555b17f69f9c09f558c685b3d1df7a42ad9c8b93e520799558e3d69b0ef1"
+  "hash": "be154bcac5376b5a9825c1199da566448352d711199084e321c2a4441df41eb0"
 }

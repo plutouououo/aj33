@@ -31,6 +31,7 @@ struct CheckoutRequest {
     /// Daftar harga yang dipakai; kosong berarti harga toko (pembeli di depan meja, satu-satunya kanal sebelum migrasi 0015).
     #[serde(default = "default_channel")]
     sales_channel: SalesChannel,
+    marketplace_order_no: Option<String>,
     amount_paid: Option<Decimal>,
     /// Ongkos kirim. Kosong berarti nol, bukan "tidak diketahui".
     shipping_cost: Option<Decimal>,
@@ -82,6 +83,7 @@ async fn checkout(
             customer_id: body.customer_id,
             payment_method: body.payment_method,
             sales_channel: body.sales_channel,
+            marketplace_order_no: body.marketplace_order_no,
             amount_paid: body.amount_paid,
             shipping_cost: body.shipping_cost,
             shipping_borne_by_store: body.shipping_borne_by_store,

@@ -198,18 +198,19 @@ pub async fn baris_pesanan(
     Ok(rows)
 }
 
-pub async fn ada_pesanan(
+/// Status pesanan dibaca terkunci agar pembatalan dari webhook menunggu transaksi tiket ini; `None` bila pesanan tak ada.
+pub async fn status_pesanan_terkunci(
     tx: &mut Transaction<'_, Postgres>,
     external_order_id: Uuid,
-) -> AppResult<bool> {
-    let ada = sqlx::query_scalar!(
-        "SELECT EXISTS (SELECT 1 FROM external_orders WHERE id = $1)",
+) -> AppResult<Option<String>> {
+    let status = sqlx::query_scalar!(
+        "SELECT status FROM external_orders WHERE id = $1 FOR UPDATE",
         external_order_id
     )
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await?;
 
-    Ok(ada.unwrap_or(false))
+    Ok(status)
 }
 
 /// Membuat tiket; `None` bila pesanan sudah punya tiket (dijaga indeks unik `idx_tickets_external_order`) sehingga dua permintaan bersamaan hanya menghasilkan satu.
@@ -454,6 +455,7 @@ pub async fn set_status_pesanan(
 
 pub struct InfoPesanan {
     pub platform_name: String,
+    pub nomor_platform: String,
     pub customer_id: Option<Uuid>,
 }
 
@@ -464,7 +466,7 @@ pub async fn info_pesanan(
     let row = sqlx::query_as!(
         InfoPesanan,
         r#"
-        SELECT pl.platform_name, o.customer_id
+        SELECT pl.platform_name, o.external_order_id AS nomor_platform, o.customer_id
         FROM external_orders o
         JOIN platforms pl ON pl.id = o.platform_id
         WHERE o.id = $1
@@ -491,6 +493,92 @@ pub async fn tautkan_penjualan(
         "#,
         external_order_id,
         transaction_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+pub struct PesananPenjualan {
+    pub id: Uuid,
+    pub status: String,
+}
+
+/// Pesanan yang penjualannya ditautkan ke transaksi ini, dikunci agar tak bersaing dengan tiket atau webhook; `None` untuk transaksi kasir biasa.
+pub async fn pesanan_penjualan_terkunci(
+    tx: &mut Transaction<'_, Postgres>,
+    transaction_id: Uuid,
+) -> AppResult<Option<PesananPenjualan>> {
+    let row = sqlx::query_as!(
+        PesananPenjualan,
+        "SELECT id, status FROM external_orders WHERE transaction_id = $1 FOR UPDATE",
+        transaction_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    Ok(row)
+}
+
+/// Melepas tautan penjualan dari pesanan dan menetapkan statusnya.
+pub async fn lepas_penjualan(
+    tx: &mut Transaction<'_, Postgres>,
+    external_order_id: Uuid,
+    status: &str,
+) -> AppResult<()> {
+    sqlx::query!(
+        "UPDATE external_orders SET status = $2, transaction_id = NULL, updated_at = now() WHERE id = $1",
+        external_order_id,
+        status
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Mengosongkan kunci idempotensi `pesanan:<id>` dari transaksi yang di-void agar penyelesaian ulang membuat penjualan baru; kuncinya unik per transaksi.
+pub async fn lepaskan_kunci_penjualan(
+    tx: &mut Transaction<'_, Postgres>,
+    transaction_id: Uuid,
+) -> AppResult<()> {
+    sqlx::query!(
+        "UPDATE transactions SET idempotency_key = 'void:' || id::text WHERE id = $1",
+        transaction_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Mengembalikan tiket ke antrean tanpa menghapusnya: penugasan dan centang packing dikosongkan, pilihan batch dan catatan tetap sebagai jejak.
+pub async fn kembalikan_ke_antrean(
+    tx: &mut Transaction<'_, Postgres>,
+    external_order_id: Uuid,
+    catatan: &str,
+) -> AppResult<()> {
+    sqlx::query!(
+        r#"
+        UPDATE ticket_items SET is_packed = false
+        WHERE ticket_id IN (SELECT id FROM tickets WHERE external_order_id = $1)
+        "#,
+        external_order_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query!(
+        r#"
+        UPDATE tickets
+        SET status = 'unassigned', assigned_to_user_id = NULL, assigned_by = NULL,
+            assigned_at = NULL, completed_at = NULL,
+            notes = concat_ws(E'\n', notes, $2::text), updated_at = now()
+        WHERE external_order_id = $1
+        "#,
+        external_order_id,
+        catatan
     )
     .execute(&mut **tx)
     .await?;

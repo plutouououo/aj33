@@ -6,6 +6,7 @@ mod repo;
 mod routes;
 mod terapkan;
 
+use crate::stock::AlasanKoreksi;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,8 @@ mod judul {
     pub const NO_BATCH: &str = "no batch";
     pub const ISI_KIRIMAN: &str = "isi kiriman";
     pub const SISA: &str = "sisa stok";
+    /// Wajib bila sisa turun; nilainya sama dengan alasan koreksi manual (`rusak`, `kedaluwarsa`, `hilang`, `salah_catat`).
+    pub const ALASAN: &str = "alasan pengurangan";
     pub const KEDALUWARSA: &str = "kedaluwarsa";
     pub const RAK: &str = "rak";
     pub const HARGA_BELI: &str = "harga beli";
@@ -71,9 +74,11 @@ pub enum Kolom {
 }
 
 /// Kolom batch pada kelompok stok; `Sisa` berisi target akhir, selisihnya dicatat sebagai penyesuaian di ledger.
+/// `Alasan` hanya ada bila sisa turun, dan menjadi `manual_reason` pada ledger itu.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum KolomBatch {
     Sisa(i32),
+    Alasan(AlasanKoreksi),
     Kedaluwarsa(Option<NaiveDate>),
     Rak(Option<String>),
     HargaBeli(Option<Decimal>),

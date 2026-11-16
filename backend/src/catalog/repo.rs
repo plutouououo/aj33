@@ -600,7 +600,9 @@ pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static
             EXISTS(SELECT 1 FROM ticket_items WHERE product_id = $1)         AS "tiket!",
             EXISTS(SELECT 1 FROM external_order_items WHERE product_id = $1) AS "pesanan!",
             EXISTS(SELECT 1 FROM channel_listings WHERE product_id = $1)     AS "listing!",
-            EXISTS(SELECT 1 FROM shopping_list_items WHERE product_id = $1)  AS "belanja!"
+            EXISTS(SELECT 1 FROM shopping_list_items WHERE product_id = $1)  AS "belanja!",
+            EXISTS(SELECT 1 FROM transaction_items WHERE product_id = $1)    AS "kasir!",
+            EXISTS(SELECT 1 FROM products WHERE id = $1 AND stock_qty > 0)   AS "stok!"
         "#,
         id
     )
@@ -617,6 +619,10 @@ pub async fn penahan_hapus(pool: &PgPool, id: Uuid) -> AppResult<Option<&'static
         Some("terhubung ke listing marketplace")
     } else if row.belanja {
         Some("ada di daftar belanja")
+    } else if row.kasir {
+        Some("pernah terjual di kasir")
+    } else if row.stok {
+        Some("masih punya stok")
     } else {
         None
     })
@@ -644,7 +650,7 @@ pub async fn penahan_ubah_sku(pool: &PgPool, id: Uuid) -> AppResult<Option<&'sta
     })
 }
 
-/// Menghapus produk beserta batch dan ledger stoknya; pemanggil wajib memeriksa `penahan_hapus` dulu, dan item transaksi kasir hanya dilepas dari produknya (FK SET NULL).
+/// Menghapus produk beserta batch dan ledger stoknya; pemanggil wajib memeriksa `penahan_hapus` dulu, karena produk yang pernah terjual tak boleh kehilangan jejaknya.
 pub async fn delete_product(pool: &PgPool, id: Uuid) -> AppResult<bool> {
     let mut tx = pool.begin().await?;
 
@@ -752,6 +758,30 @@ pub async fn find_batch(
                expiry_date, storage_location, received_at AS "received_at!", created_by
         FROM product_batches
         WHERE id = $1 AND product_id = $2
+        "#,
+        id,
+        product_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    Ok(row)
+}
+
+/// Sama dengan `find_batch`, tetapi baris dikunci agar penjualan di antaranya menunggu transaksi ini.
+pub async fn kunci_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    product_id: Uuid,
+    id: Uuid,
+) -> AppResult<Option<ProductBatch>> {
+    let row = sqlx::query_as!(
+        ProductBatch,
+        r#"
+        SELECT id, product_id, batch_number, purchase_price, quantity, remaining_qty,
+               expiry_date, storage_location, received_at AS "received_at!", created_by
+        FROM product_batches
+        WHERE id = $1 AND product_id = $2
+        FOR UPDATE
         "#,
         id,
         product_id

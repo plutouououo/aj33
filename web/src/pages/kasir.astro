@@ -96,6 +96,7 @@ let metode = 'cash';
 let kanalIsi: Kanal = 'toko';
 let ongkirIsi = '';
 let gratisOngkirIsi = false;
+let nomorPesananIsi = '';
 let dibayarIsi = '';
 let cariIsi = '';
 let kategoriIsi = '';
@@ -143,6 +144,7 @@ if (Astro.request.method === 'POST') {
   if (adalahMarketplace(kanalIsi)) metode = 'ewallet';
   ongkirIsi = String(form.get('shipping_cost') ?? '').trim();
   gratisOngkirIsi = form.get('shipping_borne_by_store') === '1';
+  nomorPesananIsi = String(form.get('marketplace_order_no') ?? '').trim();
   dibayarIsi = String(form.get('amount_paid') ?? '').trim();
 
   const angka = (kolom: string): number | undefined => {
@@ -155,6 +157,7 @@ if (Astro.request.method === 'POST') {
   if (aksi === 'kosongkan') {
     keranjang = [];
     gratisOngkirIsi = false;
+    nomorPesananIsi = '';
     dibayarIsi = '';
   } else if (aksi === 'pelanggan-baru') {
     const nama = String(form.get('pelanggan_nama') ?? '').trim();
@@ -188,6 +191,7 @@ if (Astro.request.method === 'POST') {
             customer_id: pelangganDipilih || undefined,
             payment_method: metode,
             sales_channel: kanalIsi,
+            marketplace_order_no: adalahMarketplace(kanalIsi) ? nomorPesananIsi : undefined,
             amount_paid: metode === 'cash' ? angka('amount_paid') : undefined,
             // Ongkir tidak dikirim untuk marketplace agar niatnya jelas dari isi request, bukan hanya dari validasi backend; persen komisi/layanan Shopee diisi backend dari pengaturan.
             shipping_cost: adalahMarketplace(kanalIsi) ? undefined : angka('shipping_cost'),
@@ -1019,6 +1023,20 @@ function ringkasBatch(p: Product): string {
             </p>
           </div>
 
+          <div class:list={[adalahMarketplace(kanalIsi) ? '' : 'hidden']} data-blok-nomor-pesanan>
+            <label class="label" for="marketplace_order_no">Nomor pesanan marketplace</label>
+            <input
+              class="kolom"
+              id="marketplace_order_no"
+              name="marketplace_order_no"
+              type="text"
+              maxlength="100"
+              autocomplete="off"
+              value={nomorPesananIsi}
+              placeholder="Mis. 2501234ABCD"
+            />
+          </div>
+
           {/* Ongkir jarang dipakai di penjualan toko, jadi dilipat; tetap di DOM (ikut terkirim) dan terbuka sendiri bila sudah terisi. */}
           <details
             class:list={[adalahMarketplace(kanalIsi) ? 'hidden' : '']}
@@ -1546,6 +1564,7 @@ function ringkasBatch(p: Product): string {
     var gratisOngkir = borang.querySelector('[data-gratis-ongkir]');
     var dibayar = borang.querySelector('[data-dibayar]');
     var blokOngkir = borang.querySelector('[data-blok-ongkir]');
+    var blokNomorPesanan = borang.querySelector('[data-blok-nomor-pesanan]');
     var blokMetodePilihan = borang.querySelector('[data-blok-metode-pilihan]');
     var blokMetodeShopee = borang.querySelector('[data-blok-metode-shopee]');
     var blokMetodeTiktok = borang.querySelector('[data-blok-metode-tiktok]');
@@ -1760,6 +1779,7 @@ function ringkasBatch(p: Product): string {
       if (blokMetodeShopee) blokMetodeShopee.classList.toggle('hidden', !isShopee);
       if (blokMetodeTiktok) blokMetodeTiktok.classList.toggle('hidden', !isTiktok);
       if (blokOngkir) blokOngkir.classList.toggle('hidden', isMarketplace);
+      if (blokNomorPesanan) blokNomorPesanan.classList.toggle('hidden', !isMarketplace);
       if (blokDibayar) blokDibayar.classList.toggle('hidden', isMarketplace);
       if (blokCepat) blokCepat.classList.toggle('hidden', isMarketplace);
 

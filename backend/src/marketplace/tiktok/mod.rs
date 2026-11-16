@@ -40,11 +40,15 @@ pub struct TiktokLineItem {
     pub sale_price: Option<String>,
 }
 
-/// Memetakan status TikTok ke internal; status tak dikenal jatuh ke `New` agar tetap terlihat Owner, tak hilang diam-diam.
+/// Pesanan belum dibayar tidak disimpan sama sekali; sinkron berikutnya membawanya setelah dibayar.
+pub fn belum_dibayar(status: &str) -> bool {
+    status == "UNPAID"
+}
+
+/// Memetakan status TikTok ke internal; yang dibayar dan menunggu dikirim masuk sebagai `New` agar muncul di Pesanan Masuk, dan status tak dikenal jatuh ke `New` agar tetap terlihat Owner.
 pub fn petakan_status(status: &str) -> OrderStatus {
     match status {
-        "UNPAID" | "ON_HOLD" => OrderStatus::New,
-        "AWAITING_SHIPMENT" | "AWAITING_COLLECTION" => OrderStatus::Processing,
+        "UNPAID" | "ON_HOLD" | "AWAITING_SHIPMENT" | "AWAITING_COLLECTION" => OrderStatus::New,
         "PARTIALLY_SHIPPING" | "IN_TRANSIT" => OrderStatus::Shipped,
         "DELIVERED" | "COMPLETED" => OrderStatus::Completed,
         "CANCELLED" => OrderStatus::Cancelled,
@@ -109,8 +113,10 @@ mod tests {
 
     #[test]
     fn status_dipetakan_ke_istilah_internal() {
-        assert_eq!(petakan_status("UNPAID"), OrderStatus::New);
-        assert_eq!(petakan_status("AWAITING_SHIPMENT"), OrderStatus::Processing);
+        assert!(belum_dibayar("UNPAID"));
+        assert!(!belum_dibayar("AWAITING_SHIPMENT"));
+        assert_eq!(petakan_status("AWAITING_SHIPMENT"), OrderStatus::New);
+        assert_eq!(petakan_status("AWAITING_COLLECTION"), OrderStatus::New);
         assert_eq!(petakan_status("IN_TRANSIT"), OrderStatus::Shipped);
         assert_eq!(petakan_status("COMPLETED"), OrderStatus::Completed);
         assert_eq!(petakan_status("CANCELLED"), OrderStatus::Cancelled);
@@ -172,7 +178,7 @@ mod tests {
         let hasil = normalisasi(&order, raw);
 
         assert_eq!(hasil.external_order_id, "5771234567890");
-        assert_eq!(hasil.status, OrderStatus::Processing);
+        assert_eq!(hasil.status, OrderStatus::New);
         assert_eq!(
             hasil.total_amount,
             Some(Decimal::from_str("210000.00").unwrap())

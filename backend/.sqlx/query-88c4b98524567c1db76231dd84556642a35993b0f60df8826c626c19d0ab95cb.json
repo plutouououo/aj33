@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT pl.platform_name, o.external_order_id AS nomor_platform, o.customer_id\n        FROM external_orders o\n        JOIN platforms pl ON pl.id = o.platform_id\n        WHERE o.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "platform_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "nomor_platform",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "customer_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "88c4b98524567c1db76231dd84556642a35993b0f60df8826c626c19d0ab95cb"
+}

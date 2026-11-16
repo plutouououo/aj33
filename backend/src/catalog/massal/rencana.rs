@@ -5,6 +5,7 @@ use crate::catalog::repo::{Category, Product, ProductBatch};
 use crate::catalog::service::bersihkan;
 use crate::error::{AppError, AppResult};
 use crate::import::parse::{parse_bool, parse_money, parse_ukuran_kg, BATAS_BARIS};
+use crate::stock;
 use calamine::{Data, Reader, Xlsx};
 use chrono::{Days, NaiveDate};
 use rust_decimal::prelude::ToPrimitive;
@@ -733,6 +734,7 @@ pub fn rencana_stok(
             ));
         };
 
+        let alasan_teks = lembar.sel(baris, j::ALASAN).and_then(teks);
         if let Some(sel) = lembar.sel(baris, j::SISA) {
             match bulat(sel) {
                 Err(pesan) => galat.push(format!("{}: {pesan}", j::SISA)),
@@ -741,12 +743,27 @@ pub fn rencana_stok(
                     j::SISA,
                     b.quantity
                 )),
-                Ok(Some(v)) if v != b.remaining_qty => tambah(
-                    j::SISA,
-                    b.remaining_qty.to_string(),
-                    v.to_string(),
-                    KolomBatch::Sisa(v),
-                ),
+                Ok(Some(v)) if v != b.remaining_qty => {
+                    tambah(
+                        j::SISA,
+                        b.remaining_qty.to_string(),
+                        v.to_string(),
+                        KolomBatch::Sisa(v),
+                    );
+                    // Pengurangan memakai aturan alasan koreksi manual; kenaikan dan sisa tetap mengabaikan kolom alasan.
+                    if v < b.remaining_qty {
+                        match stock::alasan_koreksi(v - b.remaining_qty, alasan_teks.as_deref()) {
+                            Ok(Some(alasan)) => tambah(
+                                j::ALASAN,
+                                String::new(),
+                                alasan.as_str().to_string(),
+                                KolomBatch::Alasan(alasan),
+                            ),
+                            Ok(None) => {}
+                            Err(pesan) => galat.push(format!("{}: {pesan}", j::ALASAN)),
+                        }
+                    }
+                }
                 Ok(_) => {}
             }
         }
@@ -1018,5 +1035,35 @@ mod tests {
         assert_eq!(r[0].status, StatusBaris::Edit);
         assert_eq!(r[0].perubahan[0].lama, "6");
         assert_eq!(r[0].perubahan[0].baru, "8");
+    }
+
+    #[test]
+    fn sisa_yang_turun_wajib_beralasan_dan_kenaikan_mengabaikan_alasan() {
+        let p = produk("AYM-1KG", "Dada", 40000);
+        let b = batch(p.id, 10, 6);
+        let id = s(&b.id.to_string());
+        let kolom = [j::ID_BATCH, j::SISA, j::ALASAN];
+
+        let tanpa = lembar(
+            &kolom,
+            vec![vec![id.clone(), Data::Float(4.0), Data::Empty]],
+        );
+        let r = rencana_stok(&tanpa, std::slice::from_ref(&p), std::slice::from_ref(&b)).unwrap();
+        assert_eq!(r[0].status, StatusBaris::Error);
+        assert!(r[0].galat[0].contains("Pilih alasan"));
+
+        let rusak = lembar(&kolom, vec![vec![id.clone(), Data::Float(4.0), s("rusak")]]);
+        let r = rencana_stok(&rusak, std::slice::from_ref(&p), std::slice::from_ref(&b)).unwrap();
+        assert_eq!(r[0].status, StatusBaris::Edit);
+        assert!(matches!(
+            r[0].aksi,
+            Some(Aksi::UbahBatch { ref kolom, .. })
+                if kolom.contains(&KolomBatch::Alasan(stock::AlasanKoreksi::Rusak))
+        ));
+
+        let naik = lembar(&kolom, vec![vec![id, Data::Float(8.0), s("dimakan")]]);
+        let r = rencana_stok(&naik, &[p], &[b]).unwrap();
+        assert_eq!(r[0].status, StatusBaris::Edit);
+        assert_eq!(r[0].perubahan.len(), 1);
     }
 }
