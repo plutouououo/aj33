@@ -1115,6 +1115,8 @@ pub struct SaleRow {
     pub revenue: Decimal,
     pub shipping: Decimal,
     pub total_amount: Decimal,
+    /// `null` untuk penjualan kasir dan pesanan marketplace tanpa kode pengambilan.
+    pub pickup_code: Option<String>,
 }
 
 pub async fn recent_sales(
@@ -1135,7 +1137,9 @@ pub async fn recent_sales(
                t.shipping_charged      AS "shipping!",
                t.total_amount          AS "total_amount!",
                (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)
-                                       AS "item_count!"
+                                       AS "item_count!",
+               (SELECT eo.pickup_code FROM external_orders eo
+                 WHERE eo.transaction_id = t.id LIMIT 1) AS pickup_code
         FROM transactions t
         LEFT JOIN customers c ON c.id = t.customer_id
         WHERE t.status = 'completed'
@@ -1170,6 +1174,7 @@ pub async fn recent_sales(
             revenue: r.revenue,
             shipping: r.shipping,
             total_amount: r.total_amount,
+            pickup_code: r.pickup_code,
         })
         .collect())
 }

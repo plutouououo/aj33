@@ -504,6 +504,8 @@ export interface SaleRow {
   revenue: number;
   shipping: number;
   total_amount: number;
+  /** `null` untuk penjualan kasir dan pesanan marketplace tanpa kode pengambilan. */
+  pickup_code: string | null;
 }
 
 export interface LowStockProduct {

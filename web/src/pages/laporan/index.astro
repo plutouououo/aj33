@@ -677,6 +677,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
       <thead>
         <tr>
           <th>No. Pesanan</th>
+          <th>Kode Pengambilan</th>
           <th>Waktu</th>
           <th>Pembeli</th>
           <th>Metode</th>
@@ -694,6 +695,9 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
                 <a class="font-medium text-merah-700 hover:underline" href={`/laporan/transaksi/${s.id}`}>
                   #{nomorPesanan(s.id)}
                 </a>
+              </td>
+              <td data-label="Kode Pengambilan" class="whitespace-nowrap font-medium">
+                {s.pickup_code ?? <span class="text-[var(--color-teks-lembut)]">-</span>}
               </td>
               <td data-label="Waktu" class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
                 {waktu(s.created_at)}
@@ -716,7 +720,7 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
         {
           sales.length === 0 && (
             <tr>
-              <td colspan="8" class="py-12 text-center text-[var(--color-teks-lembut)]">
+              <td colspan="9" class="py-12 text-center text-[var(--color-teks-lembut)]">
                 Tidak ada penjualan yang cocok dengan saringan ini.
               </td>
             </tr>
