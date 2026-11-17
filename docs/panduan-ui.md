@@ -314,7 +314,11 @@ padat tanpa `.kartu-angka-bantu` (kecuali yang berisi tautan).
 **Saringan jadi tombol di ponsel.** Bungkus bilah saringan dengan checkbox
 `peer sr-only` + `<label>` bergaya `.tombol-halus` (hanya `md:hidden`); form
 saringannya `hidden peer-checked:grid md:grid`. Tanpa JS, sama dengan laci
-sidebar. Dipakai di `/laporan`.
+sidebar. Semua tab `/laporan` memakai satu komponen untuk ini,
+`components/SaringanPeriode.astro`: di layar lebar isiannya satu baris (kolom
+tumbuh sama rata, baru membungkus bila layar terlalu sempit), `metodeJenis`
+menambah metode bayar dan jenis pembeli, slot `aksi` untuk tombol di samping
+Terapkan dan slot `aksi-ponsel` untuk tombol di samping Filter.
 
 Urutan kolom untuk daftar apa pun: **pengenal → nama → atribut → angka →
 status → aksi**. Kolom angka pakai `.sel-angka`.

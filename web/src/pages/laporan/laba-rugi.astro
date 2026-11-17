@@ -168,14 +168,17 @@ const dicetak = waktu(new Date().toISOString());
             }
             const n = b.nilai(kini);
             const m = lalu ? b.nilai(lalu) : null;
-            const tren = labelTren(hitungTren(n, m)) || '—';
+            const arah = hitungTren(n, m);
+            const tren = labelTren(arah) || '—';
+            // Sesuai permintaan owner warnanya mengikuti arah angka (naik hijau, turun merah), juga pada baris biaya; panah tetap menyebut arahnya tanpa warna.
+            const warnaTren = arah?.arah === 'naik' ? 'text-emerald-700' : arah?.arah === 'turun' ? 'text-red-600' : 'text-[var(--color-teks-lembut)]';
             if (b.jenis === 'pos') {
               return (
                 <tr>
                   <td class="py-1.5 pl-8 pr-5">{b.label}</td>
                   <td class="sel-angka px-5 py-1.5">{angkaPos(n, b.kurang)}</td>
                   {lalu && <td class="sel-angka px-5 py-1.5 text-[var(--color-teks-lembut)]">{angkaPos(m!, b.kurang)}</td>}
-                  {lalu && <td class="sel-angka px-5 py-1.5 text-xs text-[var(--color-teks-lembut)] max-sm:hidden">{tren}</td>}
+                  {lalu && <td class:list={['sel-angka px-5 py-1.5 text-xs max-sm:hidden', warnaTren]}>{tren}</td>}
                 </tr>
               );
             }
@@ -194,7 +197,7 @@ const dicetak = waktu(new Date().toISOString());
                     {b.kurang ? angkaPos(m!, true) : rupiah(m!)}
                   </td>
                 )}
-                {lalu && <td class="sel-angka px-5 py-2.5 text-xs text-[var(--color-teks-lembut)] max-sm:hidden">{tren}</td>}
+                {lalu && <td class:list={['sel-angka px-5 py-2.5 text-xs font-medium max-sm:hidden', warnaTren]}>{tren}</td>}
               </tr>
             );
           })

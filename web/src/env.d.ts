@@ -17,6 +17,7 @@ interface ImportMetaEnv {
   readonly VAPID_PUBLIC_KEY?: string;
   readonly VAPID_PRIVATE_KEY?: string;
   readonly VAPID_SUBJECT?: string;
+  readonly LAPORAN_SHEET_URL?: string;
 }
 
 export {};

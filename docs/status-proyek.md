@@ -291,7 +291,9 @@ Debian 13 dengan jarak glibc yang lega (butuh 2.34, tersedia 2.41).
 
 ### Laporan keuangan: beban dan laba rugi (tanpa migrasi)
 
-Dasar risetnya di [`riset-laporan-keuangan.md`](riset-laporan-keuangan.md). `/laporan` kini bertab: Ringkasan, Laba Rugi, Produk, Uang Masuk, Stok, Beban, Void; tab membawa periode aktif.
+Dasar risetnya di [`riset-laporan-keuangan.md`](riset-laporan-keuangan.md). `/laporan` kini bertab: Ringkasan, Penjualan, Laba Rugi, Produk, Uang Masuk, Stok, Beban, Void; tab membawa periode aktif.
+
+- **Penjualan** (`/laporan/penjualan`, `GET /api/reports/sales-list`): daftar transaksi dipindah dari Ringkasan ke tab sendiri, beserta Ekspor CSV. Pencarian `?cari=` (backend `q`, `reports::repo::pola_cari`) mencocokkan nomor pesanan (8 huruf awal UUID, `#` boleh), nomor pesanan marketplace, kode pengambilan, nomor pesanan di `external_orders`, nama pembeli, dan nama barang; hanya menyaring daftar dan CSV, bukan angka ringkasan. Tombol Laporan Harian di Ringkasan memakai env `LAPORAN_SHEET_URL` web.
 
 - **Beban** (`/laporan/beban`, modul `backend/src/expenses/`): sebelumnya tabel `expenses` hanya dibaca laporan dan sheet harian, tak ada jalan untuk mengisinya. Kini `GET/POST /api/expenses`, `GET/PATCH/DELETE /api/expenses/{id}`, khusus owner. Kategori tetap (`KATEGORI` di `expenses/routes.rs`, dikirim ke form lewat `categories` agar satu sumber); "Lainnya" wajib berketerangan dan sama dengan nama laporan untuk kategori kosong. Tanggal tak boleh setelah hari ini (salah ketik tahun menghilangkan beban dari bulan berjalan).
 - **Yang sengaja bukan beban:** belanja stok (masuk harga pokok lewat harga beli batch saat terjual), potongan marketplace, PPh, dan ongkir ditanggung toko (semuanya tercatat per transaksi). Mencatatnya di Beban berarti menghitung dua kali; form menjelaskannya.

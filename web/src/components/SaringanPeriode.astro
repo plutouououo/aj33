@@ -1,47 +1,110 @@
 ---
-/** Form GET periode (pilihan baku atau rentang tanggal) untuk laporan yang hanya mengenal waktu; isian tambahan lewat slot, dan tanggal yang terisi menang atas pilihan periode seperti `bacaSaringan`. */
-import { PERIODE, PERIODE_TANGGAL, type Saringan } from '../lib/laporan';
+/** Form GET saringan laporan (periode atau rentang tanggal, opsional metode bayar dan jenis pembeli) bersama semua tab laporan; di ponsel tersembunyi di balik tombol Filter berbasis checkbox `peer`, di layar lebar satu baris. */
+import { JENIS, METODE, PERIODE, PERIODE_TANGGAL, type Saringan } from '../lib/laporan';
 
 interface Props {
   saringan: Saringan;
-  /** Kelas kolom grid layar lebar, menyesuaikan banyaknya isian slot. */
-  kolom?: string;
+  /** Tampilkan isian metode bayar dan jenis pembeli (hanya laporan penjualan yang mengenalnya). */
+  metodeJenis?: boolean;
+  /** Banyaknya saringan lain di slot yang sedang aktif, ikut dihitung di lencana tombol Filter. */
+  aktifTambahan?: number;
 }
 
-const { saringan, kolom = 'lg:grid-cols-[12rem_10rem_10rem_auto]' } = Astro.props;
+const { saringan, metodeJenis = false, aktifTambahan = 0 } = Astro.props;
+
+// Periode baku (Bulan Ini) tidak dihitung supaya lencana hanya muncul bila ada yang sengaja diubah.
+const jumlahAktif =
+  [saringan.periode !== 'month', metodeJenis && saringan.metode, metodeJenis && saringan.jenis].filter(Boolean).length +
+  aktifTambahan;
+const adaAksiPonsel = Astro.slots.has('aksi-ponsel');
 ---
 
-<form method="GET" class:list={['kartu mb-5 grid gap-4 sm:grid-cols-3 print:hidden', kolom]}>
-  <div>
-    <label class="label" for="periode">Periode</label>
-    <select class="kolom" id="periode" name="periode">
-      {PERIODE.map((p) => (
-        <option value={p.nilai} selected={saringan.periode === p.nilai}>
-          {p.label}
+<div class="mb-5 grid grid-cols-2 gap-2 md:block print:hidden">
+  <input type="checkbox" id="buka-saringan" class="peer sr-only" />
+  <label
+    for="buka-saringan"
+    class:list={[
+      'tombol-halus cursor-pointer gap-2 md:hidden peer-checked:border-merah-600 peer-checked:bg-merah-50 peer-checked:text-merah-700 peer-focus-visible:ring-2 peer-focus-visible:ring-merah-600',
+      !adaAksiPonsel && 'col-span-2',
+    ]}
+  >
+    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 5h18M6 12h12M10 19h4" />
+    </svg>
+    Filter
+    {jumlahAktif > 0 && <span class="lencana bg-merah-600 text-white">{jumlahAktif}</span>}
+  </label>
+  <slot name="aksi-ponsel" />
+
+  {/* Kolom isian tumbuh sama rata dan tombol tetap selebar isinya, jadi di layar lebar semuanya muat sebaris dan baru membungkus bila layar terlalu sempit. */}
+  <form
+    method="GET"
+    id="saringan"
+    class="kartu col-span-2 hidden gap-4 peer-checked:grid sm:grid-cols-2 md:flex md:flex-wrap md:items-end md:gap-3 md:[&>div:not([data-aksi])]:min-w-0 md:[&>div:not([data-aksi])]:flex-1 md:[&>div:not([data-aksi])]:basis-28"
+  >
+    <div>
+      <label class="label" for="periode">Periode</label>
+      <select class="kolom" id="periode" name="periode">
+        {PERIODE.map((p) => (
+          <option value={p.nilai} selected={saringan.periode === p.nilai}>
+            {p.label}
+          </option>
+        ))}
+        <option value={PERIODE_TANGGAL} selected={saringan.periode === PERIODE_TANGGAL}>
+          Pilih Tanggal
         </option>
-      ))}
-      <option value={PERIODE_TANGGAL} selected={saringan.periode === PERIODE_TANGGAL}>
-        Pilih Tanggal
-      </option>
-    </select>
-  </div>
+      </select>
+    </div>
 
-  <div>
-    <label class="label" for="dari">Dari Tanggal</label>
-    <input class="kolom" type="date" id="dari" name="dari" value={saringan.dari} max={saringan.sampai || undefined} />
-  </div>
+    <div>
+      <label class="label" for="dari">Dari Tanggal</label>
+      <input class="kolom" type="date" id="dari" name="dari" value={saringan.dari} max={saringan.sampai || undefined} />
+    </div>
 
-  <div>
-    <label class="label" for="sampai">Sampai Tanggal</label>
-    <input class="kolom" type="date" id="sampai" name="sampai" value={saringan.sampai} min={saringan.dari || undefined} />
-  </div>
+    <div>
+      <label class="label" for="sampai">Sampai Tanggal</label>
+      <input class="kolom" type="date" id="sampai" name="sampai" value={saringan.sampai} min={saringan.dari || undefined} />
+    </div>
 
-  <slot />
+    {
+      metodeJenis && (
+        <>
+          <div>
+            <label class="label" for="metode">Metode Bayar</label>
+            <select class="kolom" id="metode" name="metode">
+              <option value="" selected={!saringan.metode}>Semua Metode</option>
+              {METODE.map((m) => (
+                <option value={m.nilai} selected={saringan.metode === m.nilai}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-  <div class="flex items-end">
-    <button class="tombol-halus max-sm:w-full" type="submit">Terapkan</button>
-  </div>
-</form>
+          <div>
+            <label class="label" for="jenis">Jenis Pembeli</label>
+            <select class="kolom" id="jenis" name="jenis">
+              <option value="" selected={!saringan.jenis}>Semua Jenis</option>
+              {JENIS.map((j) => (
+                <option value={j.nilai} selected={saringan.jenis === j.nilai}>
+                  {j.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      )
+    }
+
+    <slot />
+
+    <div data-aksi class="flex items-end gap-3 sm:col-span-2 md:shrink-0">
+      <button class="tombol-halus max-md:w-full" type="submit">Terapkan</button>
+      <slot name="aksi" />
+    </div>
+  </form>
+</div>
 
 {/* Hanya menyelaraskan pilihan periode dengan tanggal; tanpa JS formulir tetap benar karena tanggal yang terisi selalu menang. */}
 <script is:inline>

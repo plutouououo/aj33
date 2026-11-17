@@ -655,6 +655,12 @@ export interface StockValue {
   packs_without_size: number;
 }
 
+/** Jawaban `/reports/sales-list`: satu halaman daftar penjualan dan jumlah seluruh yang cocok dengan saringan dan kata cari. */
+export interface SalesList {
+  data: SaleRow[];
+  total: number;
+}
+
 export interface SalesReport {
   summary: SalesSummary;
   /** Angka periode setara sebelumnya untuk kartu trend; `null` bila saringan "Seluruh Waktu" karena tak punya pembanding. */

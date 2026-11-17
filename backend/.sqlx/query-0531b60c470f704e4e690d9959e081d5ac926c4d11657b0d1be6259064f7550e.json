@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id                    AS \"id!\",\n               t.created_at            AS \"created_at!\",\n               COALESCE(c.name, t.customer_name_snapshot) AS customer_name,\n               t.type                  AS \"transaction_type!\",\n               t.payment_method        AS \"payment_method!\",\n               t.subtotal - t.discount_amount AS \"revenue!\",\n               t.shipping_charged      AS \"shipping!\",\n               t.total_amount          AS \"total_amount!\",\n               (SELECT count(*) FROM transaction_items ti WHERE ti.transaction_id = t.id)\n                                       AS \"item_count!\",\n               (SELECT eo.pickup_code FROM external_orders eo\n                 WHERE eo.transaction_id = t.id LIMIT 1) AS pickup_code\n        FROM transactions t\n        LEFT JOIN customers c ON c.id = t.customer_id\n        WHERE t.status = 'completed'\n          AND ($1::date IS NULL\n               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($2::date IS NULL\n               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')\n          AND ($3::text IS NULL OR t.payment_method = $3)\n          AND ($4::text IS NULL OR t.type = $4)\n          AND ($7::text IS NULL\n               OR t.id::text ILIKE $7\n               OR t.marketplace_order_no ILIKE $7\n               OR COALESCE(c.name, t.customer_name_snapshot) ILIKE $7\n               OR EXISTS (SELECT 1 FROM external_orders eo\n                          WHERE eo.transaction_id = t.id\n                            AND (eo.pickup_code ILIKE $7 OR eo.external_order_id ILIKE $7))\n               OR EXISTS (SELECT 1 FROM transaction_items ti\n                          WHERE ti.transaction_id = t.id\n                            AND ti.product_name_snapshot ILIKE $7))\n        ORDER BY t.created_at DESC, t.id\n        LIMIT $5 OFFSET $6\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "customer_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "transaction_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "payment_method!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "revenue!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "shipping!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "total_amount!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "item_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "pickup_code",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      false,
+      null,
+      true,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "0531b60c470f704e4e690d9959e081d5ac926c4d11657b0d1be6259064f7550e"
+}

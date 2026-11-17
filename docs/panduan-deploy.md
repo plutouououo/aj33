@@ -343,6 +343,15 @@ Jangan mengganti pasangan kunci setelah dipakai: semua langganan perangkat
 terikat ke kunci publiknya, dan setiap perangkat harus mengaktifkan
 notifikasi ulang.
 
+**Tombol Laporan Harian (opsional).** Isi `LAPORAN_SHEET_URL` di `web.env`
+dengan alamat Google Sheets laporan harian (harus `https://`), lalu
+`sudo systemctl restart aj33-web`; tombolnya muncul di Laporan › Ringkasan
+sebaris dengan saringan. Kosong berarti tombol disembunyikan.
+
+```bash
+LAPORAN_SHEET_URL=https://docs.google.com/spreadsheets/d/...
+```
+
 **4. Kunci izinnya**, karena `backend.env` berisi kredensial database:
 
 ```bash

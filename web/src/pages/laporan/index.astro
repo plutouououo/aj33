@@ -2,12 +2,11 @@
 import AppShell from '../../layouts/AppShell.astro';
 import Paginasi from '../../components/Paginasi.astro';
 import Peringatan from '../../components/Peringatan.astro';
+import SaringanPeriode from '../../components/SaringanPeriode.astro';
 import TabLaporan from '../../components/TabLaporan.astro';
 import { api, type SalesReport } from '../../lib/api';
-import { hitungTren, kg, labelTren, rupiah, waktu } from '../../lib/format';
+import { hitungTren, kg, labelTren, rupiah } from '../../lib/format';
 import {
-  JENIS,
-  METODE,
   PERIODE,
   PERIODE_TANGGAL,
   bacaSaringan,
@@ -15,11 +14,9 @@ import {
   kueriHalaman,
   kueriPeriodeHalaman,
   labelButir,
-  labelJenis,
   labelKanal,
-  labelMetode,
   labelPeriode,
-  nomorPesanan,
+  tautanSheetHarian,
 } from '../../lib/laporan';
 
 const user = Astro.locals.user!;
@@ -28,48 +25,35 @@ const token = Astro.locals.token!;
 const saringan = bacaSaringan(Astro.url);
 
 const TERLARIS_PER_HALAMAN = 5;
-const PENJUALAN_PER_HALAMAN = 10;
 
-function bacaHalaman(nama: string): number {
-  return Math.max(1, Math.floor(Number(Astro.url.searchParams.get(nama))) || 1);
-}
+const halamanTerlaris = Math.max(1, Math.floor(Number(Astro.url.searchParams.get('hal_terlaris'))) || 1);
 
-const halamanTerlaris = bacaHalaman('hal_terlaris');
-const halamanJual = bacaHalaman('hal_jual');
-
+// Daftar penjualan punya tab sendiri, jadi di sini cukup diminta satu baris agar backend tak menarik daftar yang tak ditampilkan.
 const laporan = await api<SalesReport>(
   `/reports/sales?${kueriApi(
     saringan,
-    { batas: PENJUALAN_PER_HALAMAN, lewati: (halamanJual - 1) * PENJUALAN_PER_HALAMAN },
+    { batas: 1, lewati: 0 },
     { batas: TERLARIS_PER_HALAMAN, lewati: (halamanTerlaris - 1) * TERLARIS_PER_HALAMAN },
   )}`,
   { token },
 );
 
 const kueri = kueriHalaman(saringan);
-// Penanda di tombol Filter ponsel: hanya saringan utama, periode baku (Bulan Ini) tidak dihitung.
-const jumlahSaringan = [saringan.periode !== 'month', saringan.metode, saringan.jenis].filter(Boolean).length;
-const tautanEkspor = kueri ? `/laporan/ekspor.csv?${kueri}` : '/laporan/ekspor.csv';
+const tautanSheet = tautanSheetHarian();
 const kueriPeriode = kueriPeriodeHalaman(saringan).toString();
 const tautanBeban = `/laporan/beban${kueriPeriode ? `?${kueriPeriode}` : ''}`;
 const tautanProduk = `/laporan/produk${kueriPeriode ? `?${kueriPeriode}` : ''}`;
 
-const { summary, previous_summary, trend, channels, expense_breakdown, top_products, top_products_total, sales } =
-  laporan;
+const { summary, previous_summary, trend, channels, expense_breakdown, top_products, top_products_total } = laporan;
 
 const terlarisTerakhir = Math.max(1, Math.ceil(top_products_total / TERLARIS_PER_HALAMAN));
-const jualTerakhir = Math.max(1, Math.ceil(summary.transaction_count / PENJUALAN_PER_HALAMAN));
 
-/** Tautan ke halaman lain salah satu daftar; saringan dan halaman daftar satunya tetap terbawa. */
-function tautanHalaman(daftar: 'hal_terlaris' | 'hal_jual', ke: number, jangkar: string): string {
+/** Tautan ke halaman lain Produk Terlaris; saringan tetap terbawa. */
+function tautanTerlaris(ke: number): string {
   const p = new URLSearchParams(kueri);
-  const halaman = { hal_terlaris: halamanTerlaris, hal_jual: halamanJual };
-  halaman[daftar] = ke;
-  for (const [nama, nilai] of Object.entries(halaman)) {
-    if (nilai > 1) p.set(nama, String(nilai));
-  }
+  if (ke > 1) p.set('hal_terlaris', String(ke));
   const q = p.toString();
-  return `/laporan${q ? `?${q}` : ''}#${jangkar}`;
+  return `/laporan${q ? `?${q}` : ''}#produk-terlaris`;
 }
 
 const butir = trend.granularity;
@@ -125,83 +109,18 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
 <AppShell judul="Laporan · Ringkasan" user={user}>
   <TabLaporan saringan={saringan} />
 
-  {/* Saringan dikirim sebagai GET agar keadaan laporan ada di URL (bisa di-bookmark, dibagikan) dan tombol ekspor membaca periode yang sama; di ponsel formnya dibuka tombol Filter lewat checkbox `peer` (tanpa JS, seperti laci sidebar). */}
-  <div class="mb-5 grid grid-cols-2 gap-2 md:block">
-    <input type="checkbox" id="buka-saringan" class="peer sr-only" />
-    <label
-      for="buka-saringan"
-      class="tombol-halus cursor-pointer gap-2 md:hidden peer-checked:border-merah-600 peer-checked:bg-merah-50 peer-checked:text-merah-700 peer-focus-visible:ring-2 peer-focus-visible:ring-merah-600"
-    >
-      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M3 5h18M6 12h12M10 19h4" />
-      </svg>
-      Filter
-      {jumlahSaringan > 0 && <span class="lencana bg-merah-600 text-white">{jumlahSaringan}</span>}
-    </label>
-    <a class="tombol-utama md:hidden" href={tautanEkspor} download>↓ Ekspor CSV</a>
-
-  <form
-    method="GET"
-    id="saringan"
-    action="#saringan"
-    class="kartu col-span-2 hidden gap-4 peer-checked:grid sm:grid-cols-2 md:grid lg:grid-cols-5"
-  >
-    <div>
-      <label class="label" for="periode">Periode</label>
-      <select class="kolom" id="periode" name="periode">
-        {PERIODE.map((p) => (
-          <option value={p.nilai} selected={saringan.periode === p.nilai}>
-            {p.label}
-          </option>
-        ))}
-        <option value={PERIODE_TANGGAL} selected={saringan.periode === PERIODE_TANGGAL}>
-          Pilih Tanggal
-        </option>
-      </select>
-    </div>
-
-    {/* Tanggal yang terisi menang atas pilihan periode (lihat `bacaSaringan`); skrip kecil di bawah hanya menyelaraskan keduanya, tanpa JS formulir tetap jalan. */}
-    <div>
-      <label class="label" for="dari">Dari Tanggal</label>
-      <input class="kolom" type="date" id="dari" name="dari" value={saringan.dari} max={saringan.sampai || undefined} />
-    </div>
-
-    <div>
-      <label class="label" for="sampai">Sampai Tanggal</label>
-      <input class="kolom" type="date" id="sampai" name="sampai" value={saringan.sampai} min={saringan.dari || undefined} />
-    </div>
-
-    <div>
-      <label class="label" for="metode">Metode Bayar</label>
-      <select class="kolom" id="metode" name="metode">
-        <option value="" selected={!saringan.metode}>Semua Metode</option>
-        {METODE.map((m) => (
-          <option value={m.nilai} selected={saringan.metode === m.nilai}>
-            {m.label}
-          </option>
-        ))}
-      </select>
-    </div>
-
-    <div>
-      <label class="label" for="jenis">Jenis Pembeli</label>
-      <select class="kolom" id="jenis" name="jenis">
-        <option value="" selected={!saringan.jenis}>Semua Jenis</option>
-        {JENIS.map((j) => (
-          <option value={j.nilai} selected={saringan.jenis === j.nilai}>
-            {j.label}
-          </option>
-        ))}
-      </select>
-    </div>
-
-    <div class="flex items-end gap-3 sm:col-span-2 lg:col-span-5">
-      <button class="tombol-halus max-md:w-full" type="submit">Terapkan</button>
-      <a class="tombol-utama max-md:hidden" href={tautanEkspor} download>↓ Ekspor CSV</a>
-    </div>
-  </form>
-  </div>
+  <SaringanPeriode saringan={saringan} metodeJenis>
+    {tautanSheet && (
+      <a slot="aksi" class="tombol-utama whitespace-nowrap max-md:hidden" href={tautanSheet} target="_blank" rel="noopener">
+        Laporan Harian ↗
+      </a>
+    )}
+    {tautanSheet && (
+      <a slot="aksi-ponsel" class="tombol-utama md:hidden" href={tautanSheet} target="_blank" rel="noopener">
+        Laporan Harian ↗
+      </a>
+    )}
+  </SaringanPeriode>
 
   {/* Pil naik/turun hanya perbandingan arah, bukan penilaian baik/buruk; disembunyikan untuk "Seluruh Waktu" karena tak ada periode sebelumnya (lihat `previous_summary` di backend). */}
   <div class="ringkasan mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
@@ -658,109 +577,10 @@ const marjin = summary.revenue > 0 ? ((summary.revenue - summary.cogs) / summary
             ringkas
             halaman={halamanTerlaris}
             halamanTerakhir={terlarisTerakhir}
-            tautan={(ke) => tautanHalaman('hal_terlaris', ke, 'produk-terlaris')}
+            tautan={tautanTerlaris}
           />
         </div>
       )
     }
   </section>
-
-  <section class="kartu-rapat overflow-x-auto" id="penjualan" data-daftar>
-    <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
-      <h2 class="text-base font-bold">Penjualan</h2>
-      <p class="text-xs text-[var(--color-teks-lembut)]">
-        {summary.transaction_count} transaksi · Ekspor CSV berisi seluruhnya
-      </p>
-    </div>
-
-    <table class="tabel tabel-kartu">
-      <thead>
-        <tr>
-          <th>No. Pesanan</th>
-          <th>Kode Pengambilan</th>
-          <th>Waktu</th>
-          <th>Pembeli</th>
-          <th>Metode</th>
-          <th class="text-right">Item</th>
-          <th class="text-right">Omzet</th>
-          <th class="text-right">Ongkir</th>
-          <th class="text-right">Dibayar</th>
-        </tr>
-      </thead>
-      <tbody>
-        {
-          sales.map((s) => (
-            <tr>
-              <td data-judul class="whitespace-nowrap">
-                <a class="font-medium text-merah-700 hover:underline" href={`/laporan/transaksi/${s.id}`}>
-                  #{nomorPesanan(s.id)}
-                </a>
-              </td>
-              <td data-label="Kode Pengambilan" class="whitespace-nowrap font-medium">
-                {s.pickup_code ?? <span class="text-[var(--color-teks-lembut)]">-</span>}
-              </td>
-              <td data-label="Waktu" class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
-                {waktu(s.created_at)}
-              </td>
-              <td data-label="Pembeli">
-                {s.customer_name ?? (
-                  <span class="text-[var(--color-teks-lembut)]">
-                    {labelJenis(s.type)}
-                  </span>
-                )}
-              </td>
-              <td data-label="Metode" class="text-[var(--color-teks-lembut)]">{labelMetode(s.payment_method)}</td>
-              <td data-label="Item" class="sel-angka">{s.item_count}</td>
-              <td data-label="Omzet" class="sel-angka">{rupiah(s.revenue)}</td>
-              <td data-label="Ongkir" class="sel-angka text-[var(--color-teks-lembut)] max-md:hidden">{rupiah(s.shipping)}</td>
-              <td data-label="Dibayar" class="sel-angka font-semibold">{rupiah(s.total_amount)}</td>
-            </tr>
-          ))
-        }
-        {
-          sales.length === 0 && (
-            <tr>
-              <td colspan="9" class="py-12 text-center text-[var(--color-teks-lembut)]">
-                Tidak ada penjualan yang cocok dengan saringan ini.
-              </td>
-            </tr>
-          )
-        }
-      </tbody>
-    </table>
-    {
-      jualTerakhir > 1 && (
-        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-garis)] px-5 py-3">
-          <p class="text-xs text-[var(--color-teks-lembut)]">
-            Halaman {halamanJual} dari {jualTerakhir}
-          </p>
-          <Paginasi
-            ringkas
-            halaman={halamanJual}
-            halamanTerakhir={jualTerakhir}
-            tautan={(ke) => tautanHalaman('hal_jual', ke, 'penjualan')}
-          />
-        </div>
-      )
-    }
-  </section>
-
-  <script is:inline>
-    (function () {
-      var periode = document.getElementById('periode');
-      var dari = document.getElementById('dari');
-      var sampai = document.getElementById('sampai');
-      if (!periode || !dari || !sampai) return;
-      periode.addEventListener('change', function () {
-        if (periode.value !== 'custom') { dari.value = ''; sampai.value = ''; }
-      });
-      [dari, sampai].forEach(function (el) {
-        el.addEventListener('change', function () {
-          if (dari.value || sampai.value) periode.value = 'custom';
-          dari.max = sampai.value || '';
-          sampai.min = dari.value || '';
-        });
-      });
-    })();
-  </script>
 </AppShell>

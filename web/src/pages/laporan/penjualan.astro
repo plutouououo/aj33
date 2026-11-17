@@ -1,0 +1,165 @@
+---
+import AppShell from '../../layouts/AppShell.astro';
+import Paginasi from '../../components/Paginasi.astro';
+import SaringanPeriode from '../../components/SaringanPeriode.astro';
+import TabLaporan from '../../components/TabLaporan.astro';
+import { api, type SalesList } from '../../lib/api';
+import { rupiah, waktu } from '../../lib/format';
+import {
+  PERIODE_TANGGAL,
+  bacaCari,
+  bacaSaringan,
+  kueriApi,
+  kueriHalaman,
+  labelJenis,
+  labelMetode,
+  labelPeriode,
+  nomorPesanan,
+} from '../../lib/laporan';
+
+const user = Astro.locals.user!;
+const token = Astro.locals.token!;
+
+const PER_HALAMAN = 20;
+
+const saringan = bacaSaringan(Astro.url);
+const cari = bacaCari(Astro.url);
+const halaman = Math.max(1, Math.floor(Number(Astro.url.searchParams.get('halaman'))) || 1);
+
+const q = new URLSearchParams(kueriApi(saringan, { batas: PER_HALAMAN, lewati: (halaman - 1) * PER_HALAMAN }));
+if (cari) q.set('q', cari);
+const daftar = await api<SalesList>(`/reports/sales-list?${q}`, { token });
+
+// `top_periode` milik kartu Ringkasan, jadi tak dibawa tautan di tab ini.
+const kueriSaringan = kueriHalaman({ ...saringan, top_periode: '' });
+const tautanTanpaCari = `/laporan/penjualan${kueriSaringan ? `?${kueriSaringan}` : ''}#daftar-penjualan`;
+const kueriDasar = new URLSearchParams(kueriSaringan);
+if (cari) kueriDasar.set('cari', cari);
+
+const kueriEkspor = kueriDasar.toString();
+const tautanEkspor = `/laporan/ekspor.csv${kueriEkspor ? `?${kueriEkspor}` : ''}`;
+
+const halamanTerakhir = Math.max(1, Math.ceil(daftar.total / PER_HALAMAN));
+const dari = daftar.total === 0 ? 0 : (halaman - 1) * PER_HALAMAN + 1;
+const sampai = Math.min(halaman * PER_HALAMAN, daftar.total);
+
+function tautanHalaman(ke: number): string {
+  const p = new URLSearchParams(kueriDasar);
+  if (ke > 1) p.set('halaman', String(ke));
+  const s = p.toString();
+  return `/laporan/penjualan${s ? `?${s}` : ''}#daftar-penjualan`;
+}
+---
+
+<AppShell judul="Laporan · Penjualan" user={user}>
+  <TabLaporan saringan={saringan} />
+
+  <SaringanPeriode saringan={saringan} metodeJenis>
+    {/* Kata cari ikut terkirim saat saringan diganti, supaya mengganti periode tak diam-diam menghapus pencarian. */}
+    {cari && <input type="hidden" name="cari" value={cari} />}
+    <a slot="aksi" class="tombol-utama whitespace-nowrap max-md:hidden" href={tautanEkspor} download>↓ Ekspor CSV</a>
+    <a slot="aksi-ponsel" class="tombol-utama md:hidden" href={tautanEkspor} download>↓ Ekspor CSV</a>
+  </SaringanPeriode>
+
+  <section class="kartu-rapat overflow-x-auto">
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-garis)] px-5 py-4">
+      <div>
+        <h2 class="text-base font-bold">Penjualan · {labelPeriode(saringan)}</h2>
+        <p class="text-xs text-[var(--color-teks-lembut)]">
+          {daftar.total} transaksi{cari && ` cocok dengan "${cari}"`} · Ekspor CSV berisi seluruhnya
+        </p>
+      </div>
+
+      {/* Pencarian form GET tersendiri yang membawa saringan aktif lewat isian tersembunyi, jadi jalan tanpa JS dan selalu kembali ke halaman 1. */}
+      <form method="GET" role="search" class="flex w-full items-center gap-2 sm:w-auto" action="#daftar-penjualan">
+        {saringan.metode && <input type="hidden" name="metode" value={saringan.metode} />}
+        {saringan.jenis && <input type="hidden" name="jenis" value={saringan.jenis} />}
+        {saringan.periode === PERIODE_TANGGAL ? (
+          <>
+            {saringan.dari && <input type="hidden" name="dari" value={saringan.dari} />}
+            {saringan.sampai && <input type="hidden" name="sampai" value={saringan.sampai} />}
+          </>
+        ) : (
+          saringan.periode !== 'month' && <input type="hidden" name="periode" value={saringan.periode} />
+        )}
+        <label class="sr-only" for="cari">Cari penjualan</label>
+        <input
+          class="kolom !py-2 sm:w-72"
+          type="search"
+          id="cari"
+          name="cari"
+          value={cari}
+          maxlength="100"
+          placeholder="No. pesanan, kode, pembeli, barang"
+        />
+        <button class="tombol-halus shrink-0 !px-3 !py-2" type="submit">Cari</button>
+        {cari && (
+          <a class="aksi-baris shrink-0" href={tautanTanpaCari}>
+            Hapus
+          </a>
+        )}
+      </form>
+    </div>
+
+    <div id="daftar-penjualan" data-daftar>
+      <table class="tabel tabel-kartu">
+        <thead>
+          <tr>
+            <th>No. Pesanan</th>
+            <th>Kode Pengambilan</th>
+            <th>Waktu</th>
+            <th>Pembeli</th>
+            <th>Metode</th>
+            <th class="text-right">Item</th>
+            <th class="text-right">Omzet</th>
+            <th class="text-right">Ongkir</th>
+            <th class="text-right">Dibayar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            daftar.data.map((s) => (
+              <tr>
+                <td data-judul class="whitespace-nowrap">
+                  <a class="font-medium text-merah-700 hover:underline" href={`/laporan/transaksi/${s.id}`}>
+                    #{nomorPesanan(s.id)}
+                  </a>
+                </td>
+                <td data-label="Kode Pengambilan" class:list={['whitespace-nowrap font-medium', !s.pickup_code && 'max-md:hidden']}>
+                  {s.pickup_code ?? <span class="text-[var(--color-teks-samar)]">—</span>}
+                </td>
+                <td data-label="Waktu" class="whitespace-nowrap text-xs text-[var(--color-teks-lembut)]">
+                  {waktu(s.created_at)}
+                </td>
+                <td data-label="Pembeli">
+                  {s.customer_name ?? <span class="text-[var(--color-teks-lembut)]">{labelJenis(s.type)}</span>}
+                </td>
+                <td data-label="Metode" class="text-[var(--color-teks-lembut)]">{labelMetode(s.payment_method)}</td>
+                <td data-label="Item" class="sel-angka">{s.item_count}</td>
+                <td data-label="Omzet" class="sel-angka">{rupiah(s.revenue)}</td>
+                <td data-label="Ongkir" class="sel-angka text-[var(--color-teks-lembut)] max-md:hidden">{rupiah(s.shipping)}</td>
+                <td data-label="Dibayar" class="sel-angka font-semibold">{rupiah(s.total_amount)}</td>
+              </tr>
+            ))
+          }
+          {
+            daftar.data.length === 0 && (
+              <tr>
+                <td colspan="9" class="py-12 text-center text-[var(--color-teks-lembut)]">
+                  {cari ? `Tidak ada penjualan yang cocok dengan "${cari}".` : 'Tidak ada penjualan yang cocok dengan saringan ini.'}
+                </td>
+              </tr>
+            )
+          }
+        </tbody>
+      </table>
+
+      <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-garis)] px-5 py-3 text-sm">
+        <p class="text-[var(--color-teks-lembut)]">
+          Menampilkan <span class="tabular-nums">{dari}–{sampai}</span> dari <span class="tabular-nums">{daftar.total}</span>
+        </p>
+        <Paginasi ringkas {halaman} {halamanTerakhir} tautan={tautanHalaman} />
+      </div>
+    </div>
+  </section>
+</AppShell>

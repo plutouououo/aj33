@@ -2,6 +2,7 @@
 import type { APIRoute } from 'astro';
 import { api, ApiRequestError, type SalesReport } from '../../lib/api';
 import {
+  bacaCari,
   bacaSaringan,
   kueriApi,
   labelJenis,
@@ -32,10 +33,13 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
   if (!token) return redirect('/login', 302);
 
   const saringan = bacaSaringan(url);
+  const cari = bacaCari(url);
+  const q = new URLSearchParams(kueriApi(saringan, { batas: BARIS_MAKS, lewati: 0 }));
+  if (cari) q.set('q', cari);
 
   let laporan: SalesReport;
   try {
-    laporan = await api<SalesReport>(`/reports/sales?${kueriApi(saringan, { batas: BARIS_MAKS, lewati: 0 })}`, { token });
+    laporan = await api<SalesReport>(`/reports/sales?${q}`, { token });
   } catch (err) {
     // 401 sesi habis, 403 bukan owner; keduanya dijawab dengan mengembalikan pengguna ke aplikasi, bukan berkas berisi pesan galat.
     if (err instanceof ApiRequestError && (err.status === 401 || err.status === 403)) {
@@ -51,6 +55,8 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     baris(['Periode', labelPeriode(saringan)]),
     baris(['Metode bayar', saringan.metode ? labelMetode(saringan.metode) : 'Semua']),
     baris(['Jenis pembeli', saringan.jenis ? labelJenis(saringan.jenis) : 'Semua']),
+    // Ringkasan di bawah selalu seluruh periode; pencarian hanya menyaring daftar transaksi.
+    ...(cari ? [baris(['Pencarian daftar', cari])] : []),
     baris(['Diunduh', waktuEkspor(new Date().toISOString())]),
     '',
     baris(['Ringkasan', 'Nilai']),
@@ -70,6 +76,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     '',
     baris([
       'No. Pesanan',
+      'Kode Pengambilan',
       'Waktu',
       'ID Transaksi',
       'Pembeli',
@@ -83,6 +90,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     ...sales.map((s) =>
       baris([
         nomorPesanan(s.id),
+        s.pickup_code,
         waktuEkspor(s.created_at),
         s.id,
         s.customer_name,

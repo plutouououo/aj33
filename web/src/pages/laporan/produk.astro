@@ -52,7 +52,7 @@ function marjin(laba: number, omzet: number): string {
 <AppShell judul="Laporan · Produk" user={user}>
   <TabLaporan saringan={saringan} />
 
-  <SaringanPeriode saringan={saringan} kolom="lg:grid-cols-[12rem_10rem_10rem_12rem_auto]">
+  <SaringanPeriode saringan={saringan} aktifTambahan={urut !== 'profit' ? 1 : 0}>
     <div>
       <label class="label" for="urut">Urutkan</label>
       <select class="kolom" id="urut" name="urut">

@@ -684,7 +684,7 @@ pub struct Tren {
     pub points: Vec<TitikTren>,
 }
 
-/// Rentang nyata saringan: sisi akhir yang terbuka berarti hari ini, sisi awal yang terbuka berarti hari pertama ada transaksi atau beban.
+/// Rentang nyata saringan: sisi akhir yang terbuka berarti hari ini, sisi awal yang terbuka berarti hari pertama ada transaksi, beban, atau kerugian stok (tanpa yang terakhir, kerugian sebelum penjualan pertama hilang dari tren padahal ikut kartu Laba).
 async fn rentang_nyata(pool: &PgPool, filter: &SalesFilter) -> AppResult<(NaiveDate, NaiveDate)> {
     let (dari, sampai) = filter.jendela();
     let sampai = sampai.unwrap_or_else(hari_ini);
@@ -695,7 +695,10 @@ async fn rentang_nyata(pool: &PgPool, filter: &SalesFilter) -> AppResult<(NaiveD
             SELECT LEAST(
                        (SELECT min((t.created_at AT TIME ZONE 'Asia/Jakarta')::date)
                         FROM transactions t WHERE t.status = 'completed'),
-                       (SELECT min(e.expense_date) FROM expenses e)
+                       (SELECT min(e.expense_date) FROM expenses e),
+                       (SELECT min((sa.created_at AT TIME ZONE 'Asia/Jakarta')::date)
+                        FROM stock_adjustments sa
+                        WHERE sa.manual_reason IN ('rusak', 'kedaluwarsa', 'hilang'))
                    ) AS awal
             "#
         )
@@ -1119,9 +1122,29 @@ pub struct SaleRow {
     pub pickup_code: Option<String>,
 }
 
+/// Pola `ILIKE` dari kata cari daftar penjualan; `#` di depan dibuang karena nomor pesanan tampil sebagai `#AB12CD34`, dan `%`/`_` di-escape agar diketik sebagai huruf biasa.
+pub fn pola_cari(kata: Option<&str>) -> Option<String> {
+    let kata = kata?.trim().trim_start_matches('#').trim();
+    if kata.is_empty() {
+        return None;
+    }
+    let mut pola = String::with_capacity(kata.len() + 2);
+    pola.push('%');
+    for c in kata.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            pola.push('\\');
+        }
+        pola.push(c);
+    }
+    pola.push('%');
+    Some(pola)
+}
+
+/// Daftar penjualan per halaman; `cari` (dari `pola_cari`) mencocokkan nomor pesanan, nomor pesanan marketplace, kode pengambilan, nama pembeli, dan nama barang.
 pub async fn recent_sales(
     pool: &PgPool,
     filter: &SalesFilter,
+    cari: Option<&str>,
     limit: i64,
     offset: i64,
 ) -> AppResult<Vec<SaleRow>> {
@@ -1130,7 +1153,7 @@ pub async fn recent_sales(
         r#"
         SELECT t.id                    AS "id!",
                t.created_at            AS "created_at!",
-               c.name                  AS customer_name,
+               COALESCE(c.name, t.customer_name_snapshot) AS customer_name,
                t.type                  AS "transaction_type!",
                t.payment_method        AS "payment_method!",
                t.subtotal - t.discount_amount AS "revenue!",
@@ -1149,6 +1172,16 @@ pub async fn recent_sales(
                OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
           AND ($3::text IS NULL OR t.payment_method = $3)
           AND ($4::text IS NULL OR t.type = $4)
+          AND ($7::text IS NULL
+               OR t.id::text ILIKE $7
+               OR t.marketplace_order_no ILIKE $7
+               OR COALESCE(c.name, t.customer_name_snapshot) ILIKE $7
+               OR EXISTS (SELECT 1 FROM external_orders eo
+                          WHERE eo.transaction_id = t.id
+                            AND (eo.pickup_code ILIKE $7 OR eo.external_order_id ILIKE $7))
+               OR EXISTS (SELECT 1 FROM transaction_items ti
+                          WHERE ti.transaction_id = t.id
+                            AND ti.product_name_snapshot ILIKE $7))
         ORDER BY t.created_at DESC, t.id
         LIMIT $5 OFFSET $6
         "#,
@@ -1157,7 +1190,8 @@ pub async fn recent_sales(
         filter.payment_method.as_deref(),
         filter.transaction_type.as_deref(),
         limit,
-        offset
+        offset,
+        cari
     )
     .fetch_all(pool)
     .await?;
@@ -1177,6 +1211,48 @@ pub async fn recent_sales(
             pickup_code: r.pickup_code,
         })
         .collect())
+}
+
+/// Jumlah baris `recent_sales` tanpa batas halaman; saringannya harus sama persis dengan query itu.
+pub async fn sales_count(
+    pool: &PgPool,
+    filter: &SalesFilter,
+    cari: Option<&str>,
+) -> AppResult<i64> {
+    let (dari, sampai) = filter.jendela();
+    let jumlah = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "jumlah!"
+        FROM transactions t
+        LEFT JOIN customers c ON c.id = t.customer_id
+        WHERE t.status = 'completed'
+          AND ($1::date IS NULL
+               OR t.created_at >= $1::date::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($2::date IS NULL
+               OR t.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Jakarta')
+          AND ($3::text IS NULL OR t.payment_method = $3)
+          AND ($4::text IS NULL OR t.type = $4)
+          AND ($5::text IS NULL
+               OR t.id::text ILIKE $5
+               OR t.marketplace_order_no ILIKE $5
+               OR COALESCE(c.name, t.customer_name_snapshot) ILIKE $5
+               OR EXISTS (SELECT 1 FROM external_orders eo
+                          WHERE eo.transaction_id = t.id
+                            AND (eo.pickup_code ILIKE $5 OR eo.external_order_id ILIKE $5))
+               OR EXISTS (SELECT 1 FROM transaction_items ti
+                          WHERE ti.transaction_id = t.id
+                            AND ti.product_name_snapshot ILIKE $5))
+        "#,
+        dari,
+        sampai,
+        filter.payment_method.as_deref(),
+        filter.transaction_type.as_deref(),
+        cari
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(jumlah)
 }
 
 /// Satu baris item pada detail transaksi.
@@ -1999,6 +2075,17 @@ mod tests {
             Some(UrutanProduk::Marjin)
         ));
         assert!(UrutanProduk::parse(Some("acak")).is_none());
+    }
+
+    #[test]
+    fn pola_cari_membuang_pagar_dan_meng_escape_wildcard() {
+        assert_eq!(pola_cari(Some(" #ab12 ")).as_deref(), Some("%ab12%"));
+        assert_eq!(
+            pola_cari(Some("50%_a\\")).as_deref(),
+            Some("%50\\%\\_a\\\\%")
+        );
+        assert_eq!(pola_cari(Some("  # ")), None);
+        assert_eq!(pola_cari(None), None);
     }
 
     #[test]

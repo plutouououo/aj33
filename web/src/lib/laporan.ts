@@ -73,6 +73,20 @@ export function bacaSaringan(url: URL): Saringan {
   };
 }
 
+/** Kata cari daftar penjualan dari `?cari=`, dipangkas dan dibatasi panjangnya; kosong berarti tanpa pencarian. */
+export function bacaCari(url: URL): string {
+  return (url.searchParams.get('cari') ?? '').trim().slice(0, 100);
+}
+
+/** Tautan Google Sheets laporan harian dari env `LAPORAN_SHEET_URL` saat request (lihat `api.ts`); selain `https://` dianggap tak dipasang agar tak menjadi tautan `javascript:`. */
+export function tautanSheetHarian(): string | null {
+  const nilai =
+    (typeof process !== 'undefined' ? process.env.LAPORAN_SHEET_URL : undefined) ??
+    import.meta.env.LAPORAN_SHEET_URL ??
+    '';
+  return /^https:\/\//i.test(nilai.trim()) ? nilai.trim() : null;
+}
+
 /** Jendela satu daftar: `batas` baris mulai dari `lewati`. */
 export interface Jendela {
   batas: number;

@@ -22,6 +22,7 @@ pub fn router() -> Router<AppState> {
         .route("/dashboard", get(dashboard))
         .route("/reports/sales", get(sales_report))
         .route("/reports/sales/{id}", get(sales_transaction_detail))
+        .route("/reports/sales-list", get(sales_list))
         .route("/reports/profit-loss", get(profit_loss))
         .route("/reports/products", get(product_report))
         .route("/reports/cash-in", get(cash_in))
@@ -59,6 +60,8 @@ struct ReportQuery {
     top_offset: Option<i64>,
     /// Periode Produk Terlaris terpisah dari `period`; kosong = ikut `period`.
     top_period: Option<String>,
+    /// Kata cari daftar penjualan (lihat `repo::pola_cari`); angka ringkasan tak ikut tersaring.
+    q: Option<String>,
 }
 
 /// Menerjemahkan nama periode ke `Rentang`; nilai tak dikenal ditolak agar salah ketik tak menjadi laporan kosong.
@@ -118,6 +121,7 @@ pub fn rentang_kueri(
 impl ReportQuery {
     /// Mengembalikan saringan utama, saringan Produk Terlaris (periode boleh beda, metode bayar dan jenis transaksi ikut saringan utama), dan jendela halaman kedua daftar.
     fn menjadi_filter(self) -> AppResult<(SalesFilter, SalesFilter, Halaman)> {
+        let cari = repo::pola_cari(self.q.as_deref());
         let rentang = rentang_kueri(self.period.as_deref(), self.from, self.to)?;
         let payment_method = pilihan(
             self.payment_method,
@@ -156,6 +160,7 @@ impl ReportQuery {
                 .unwrap_or(TERLARIS_BAKU)
                 .clamp(1, TERLARIS_MAKS),
             top_offset: self.top_offset.unwrap_or(0).max(0),
+            cari,
         };
 
         Ok((filter, top_filter, halaman))
@@ -167,6 +172,7 @@ struct Halaman {
     sales_offset: i64,
     top_limit: i64,
     top_offset: i64,
+    cari: Option<String>,
 }
 
 // --- Dasbor ---
@@ -213,7 +219,7 @@ async fn dashboard(State(state): State<AppState>, user: CurrentUser) -> AppResul
 
     // Daftar penjualan terakhir tanpa batas periode karena dasbor kosong sepanjang pagi tak memberi tahu apa pun.
     let recent_sales =
-        repo::recent_sales(&state.pool, &SalesFilter::default(), DASBOR_DAFTAR, 0).await?;
+        repo::recent_sales(&state.pool, &SalesFilter::default(), None, DASBOR_DAFTAR, 0).await?;
     let low_stock_products = repo::low_stock(&state.pool, DASBOR_DAFTAR).await?;
 
     Ok(Json(Dashboard {
@@ -278,11 +284,45 @@ async fn sales_report(
         sales: repo::recent_sales(
             &state.pool,
             &filter,
+            halaman.cari.as_deref(),
             halaman.sales_limit,
             halaman.sales_offset,
         )
         .await?,
         sales_limit: halaman.sales_limit,
+    }))
+}
+
+// --- Daftar penjualan ---
+
+#[derive(Debug, Serialize)]
+struct SalesList {
+    data: Vec<SaleRow>,
+    /// Seluruh penjualan yang cocok dengan saringan dan kata cari, dasar jumlah halaman.
+    total: i64,
+}
+
+/// Daftar penjualan saja untuk tab Penjualan, tanpa ringkasan dan tren yang mahal; memakai `sales_limit`/`sales_offset`/`q` yang sama dengan `/reports/sales`.
+async fn sales_list(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<ReportQuery>,
+) -> AppResult<Json<SalesList>> {
+    user.require(&[Role::Owner])?;
+
+    let (filter, _, halaman) = q.menjadi_filter()?;
+    let cari = halaman.cari.as_deref();
+
+    Ok(Json(SalesList {
+        data: repo::recent_sales(
+            &state.pool,
+            &filter,
+            cari,
+            halaman.sales_limit,
+            halaman.sales_offset,
+        )
+        .await?,
+        total: repo::sales_count(&state.pool, &filter, cari).await?,
     }))
 }
 

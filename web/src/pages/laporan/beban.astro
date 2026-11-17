@@ -4,7 +4,7 @@ import Galat from '../../components/Galat.astro';
 import Paginasi from '../../components/Paginasi.astro';
 import SaringanPeriode from '../../components/SaringanPeriode.astro';
 import TabLaporan from '../../components/TabLaporan.astro';
-import { api, ApiRequestError, type Expense, type ExpenseList } from '../../lib/api';
+import { api, ApiRequestError, type Expense, type ExpenseList, type ProfitLossReport } from '../../lib/api';
 import { hariIni, rupiah, tanggal } from '../../lib/format';
 import { bacaSaringan, kueriPeriodeApi, kueriPeriodeHalaman, labelPeriode } from '../../lib/laporan';
 import { pesanDari, sesudahAksi } from '../../lib/pesan';
@@ -138,6 +138,20 @@ const nilai: Isian = isian ?? {
 };
 const modeUbah = nilai.id !== '';
 
+// Angka laba rugi dipakai supaya total semua beban sama persis dengan pengurang Laba di Ringkasan.
+const lr = (await api<ProfitLossReport>(`/reports/profit-loss?${kueriPeriodeApi(saringan)}`, { token })).current;
+const rincianBeban = [
+  { label: 'Beban operasional (dicatat manual)', nilai: lr.operating_expenses_total, ket: 'Rincian di tabel bawah' },
+  { label: 'Ongkir ditanggung toko', nilai: lr.shipping_subsidy, ket: 'Diskon ongkir dari transaksi' },
+  { label: 'Komisi platform', nilai: lr.commission_fee + lr.dynamic_commission_fee, ket: 'Shopee dan Tokopedia' },
+  { label: 'Biaya layanan', nilai: lr.service_fee, ket: 'Shopee' },
+  { label: 'Biaya layanan logistik', nilai: lr.logistics_fee, ket: 'Tokopedia' },
+  { label: 'Biaya proses pesanan', nilai: lr.order_processing_fee, ket: 'Marketplace' },
+  { label: 'Kerugian stok', nilai: lr.stock_loss_total, ket: 'Barang rusak, kedaluwarsa, hilang' },
+  { label: 'PPh final', nilai: lr.withholding_tax, ket: 'Tercatat per transaksi' },
+].filter((b) => b.nilai !== 0);
+const totalSemuaBeban = lr.selling_costs + lr.operating_expenses_total + lr.stock_loss_total + lr.withholding_tax;
+
 const halamanTerakhir = Math.max(1, Math.ceil(daftar.total / daftar.limit));
 const dari = daftar.total === 0 ? 0 : (daftar.page - 1) * daftar.limit + 1;
 const sampai = Math.min(daftar.page * daftar.limit, daftar.total);
@@ -174,8 +188,8 @@ const tautanBatal = `${batal.pathname}${batal.search}`;
     <p class="isian-bantu mb-4">
       Biaya menjalankan toko: gaji, sewa, listrik, kemasan, bensin, iklan. Belanja stok ayam
       <strong>tidak</strong> dicatat di sini, karena nilainya sudah masuk Harga Pokok lewat harga beli
-      batch saat barangnya terjual. Potongan marketplace, PPh, dan ongkir ditanggung toko juga sudah
-      dihitung otomatis dari transaksi.
+      batch saat barangnya terjual. Potongan marketplace, PPh, ongkir ditanggung toko, dan kerugian stok
+      dihitung otomatis dan tampil di tabel Semua Beban.
     </p>
 
     <form method="POST" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-[10rem_14rem_10rem_1fr_auto]">
@@ -241,7 +255,7 @@ const tautanBatal = `${batal.pathname}${batal.search}`;
     </form>
   </section>
 
-  <SaringanPeriode saringan={saringan} kolom="lg:grid-cols-[12rem_10rem_10rem_14rem_auto]">
+  <SaringanPeriode saringan={saringan} aktifTambahan={kategori ? 1 : 0}>
     <div>
       <label class="label" for="kategori">Kategori</label>
       <select class="kolom" id="kategori" name="kategori">
@@ -254,6 +268,44 @@ const tautanBatal = `${batal.pathname}${batal.search}`;
       </select>
     </div>
   </SaringanPeriode>
+
+  <section class="kartu-rapat mb-5 overflow-x-auto" id="semua-beban">
+    <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-garis)] px-5 py-4">
+      <h2 class="text-base font-bold">Semua Beban {labelPeriode(saringan)}</h2>
+      <p class="text-sm">
+        Total <span class="font-semibold tabular-nums">{rupiah(totalSemuaBeban)}</span>
+      </p>
+    </div>
+    <table class="tabel tabel-kartu">
+      <thead>
+        <tr>
+          <th>Jenis beban</th>
+          <th>Keterangan</th>
+          <th class="text-right">Jumlah</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rincianBeban.map((b) => (
+            <tr>
+              <td data-judul>{b.label}</td>
+              <td data-label="Keterangan" class="text-[var(--color-teks-lembut)]">{b.ket}</td>
+              <td data-label="Jumlah" class="sel-angka font-semibold">{rupiah(b.nilai)}</td>
+            </tr>
+          ))
+        }
+        {
+          rincianBeban.length === 0 && (
+            <tr>
+              <td colspan="3" class="py-8 text-center text-[var(--color-teks-lembut)]">
+                Belum ada beban pada periode ini.
+              </td>
+            </tr>
+          )
+        }
+      </tbody>
+    </table>
+  </section>
 
   <div id="daftar-beban" data-daftar>
     <div class="kartu-rapat overflow-x-auto">

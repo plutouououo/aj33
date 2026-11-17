@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT LEAST(\n                       (SELECT min((t.created_at AT TIME ZONE 'Asia/Jakarta')::date)\n                        FROM transactions t WHERE t.status = 'completed'),\n                       (SELECT min(e.expense_date) FROM expenses e),\n                       (SELECT min((sa.created_at AT TIME ZONE 'Asia/Jakarta')::date)\n                        FROM stock_adjustments sa\n                        WHERE sa.manual_reason IN ('rusak', 'kedaluwarsa', 'hilang'))\n                   ) AS awal\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "awal",
+        "type_info": "Date"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "88d0166228de1b029252f4f2c4ec034fa18d7495c102d6e7b21766318f63dbbf"
+}
