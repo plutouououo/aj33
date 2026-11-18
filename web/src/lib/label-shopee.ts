@@ -238,7 +238,12 @@ function bacaBarang(baris: Teks[][]): LabelShopee['items'] {
     if (!kini) break;
 
     for (const t of nomorBaru ? b.slice(1) : b) {
-      if (t.x0 < sku.x0 - 2) kini.name.push(t.s);
+      const nyasar = t.x0 < sku.x0 - 2 && t.x1 > sku.x0 && t.x1 <= variasi.x0 ? t.s.match(/^(.*\S)\s+(\S+)$/) : null;
+      // Nama yang pas selebar kolomnya digabung pdfjs dengan SKU di sebelahnya menjadi satu potongan; token terakhir adalah SKU.
+      if (nyasar) {
+        kini.name.push(nyasar[1]);
+        kini.sku.push(nyasar[2]);
+      } else if (t.x0 < sku.x0 - 2) kini.name.push(t.s);
       else if (t.x0 < variasi.x0 - 2) kini.sku.push(t.s.trim());
       else if (t.x0 < qty.x0 - 2) kini.variation.push(t.s);
       else kini.qty.push(t.s.trim());
