@@ -1,0 +1,177 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Hanya run PR yang dibatalkan oleh dorongan baru; run di main tak boleh dibatalkan karena bisa memotong deploy di tengah jalan.
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  backend:
+    name: Backend (Rust)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aj33
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aj33"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/aj33
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Format
+        working-directory: backend
+        # Dijalankan sebelum yang lain karena paling cepat dan kegagalannya paling mudah diperbaiki.
+        run: cargo fmt --check
+
+      - name: Siapkan database
+        run: |
+          cargo install sqlx-cli --version ^0.8 --no-default-features --features rustls,postgres --locked
+          sqlx migrate run --source db/migrations
+
+      - name: Clippy
+        working-directory: backend
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: backend
+        run: cargo test
+
+      - name: Cache query sqlx masih sesuai skema
+        working-directory: backend
+        # `.sqlx/` yang basi membuat build produksi (SQLX_OFFLINE=true) memakai bentuk query lama; diperiksa di sini agar ketahuan di PR, bukan saat deploy.
+        run: cargo sqlx prepare --check -- --all-targets
+
+  frontend:
+    name: Frontend (Astro)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      - name: Type check
+        working-directory: web
+        run: npm run check
+
+      - name: Build
+        working-directory: web
+        run: npm run build
+
+  deploy:
+    name: Build lalu kirim ke VPS
+    # Deploy hanya setelah backend dan frontend HIJAU, agar commit yang gagal test tak terpasang ke mesin kasir; PR tak pernah di-deploy.
+    needs: [backend, frontend]
+    if: github.event_name != 'pull_request'
+
+    # Dua deploy bersamaan berebut symlink `aktif`; diantre, jangan dibatalkan karena membatalkan di tengah bisa meninggalkan rilis setengah terpasang.
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+
+    # Runner dipatok (bukan `ubuntu-latest`) karena binary Rust ditautkan ke glibc pembangun; runner yang naik versi bisa menghasilkan binary yang menolak jalan di Debian 13.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build backend
+        working-directory: backend
+        # Memakai cache query di backend/.sqlx, jadi tidak perlu database.
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo build --release
+
+      - name: Build web
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Rakit paket
+        run: |
+          mkdir -p paket/web
+          cp backend/target/release/aj33-backend paket/
+          cp -r web/dist paket/web/dist
+          cp web/package.json web/package-lock.json paket/web/
+          du -sh paket
+
+      - name: Siapkan kunci SSH
+        env:
+          KUNCI: ${{ secrets.VPS_SSH_KEY }}
+          HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KUNCI" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Host key dipasang dari secret, bukan `ssh-keyscan` saat jalan, karena keyscan mempercayai apa pun yang menjawab dan membatalkan gunanya memverifikasi host.
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Kirim ke VPS
+        env:
+          TUJUAN: ${{ secrets.VPS_HOST }}
+        run: |
+          tar czf - -C paket . \
+            | ssh -i ~/.ssh/id_deploy \
+                  -o BatchMode=yes \
+                  -o ConnectTimeout=20 \
+                  "$TUJUAN"
+
+      - name: Pastikan situs melayani
+        # Penerima di VPS memeriksa dari dalam dan mengembalikan rilis lama bila gagal; ini memeriksa dari luar agar Caddy dan TLS ikut terbukti baik.
+        run: |
+          KODE=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
+                 https://tokoayamaj33.my.id/login)
+          echo "https://tokoayamaj33.my.id/login -> $KODE"
+          [ "$KODE" = "200" ]

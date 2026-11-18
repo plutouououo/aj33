@@ -230,8 +230,8 @@ TLS otomatis.
 **Skrip operasional** — backup harian dengan verifikasi, deploy atomik,
 rollback.
 
-**CD lewat GitHub Actions** (`.github/workflows/deploy.yml` +
-`scripts/aj33-terima`) — dipicu setelah CI hijau, membangun di runner, lalu
+**CD lewat GitHub Actions** (`.github/workflows/ci-cd.yml` +
+`scripts/aj33-terima`) — job `deploy` berjalan setelah job backend dan frontend hijau, membangun di runner, lalu
 mengirim tarball lewat SSH. Kunci CI dikunci `command=` di `authorized_keys`
 sehingga tidak bisa membuka shell; paket dikirim lewat stdin karena forced
 command mematikan scp. Penerima memeriksa kesehatan sampai 40 detik dan

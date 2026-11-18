@@ -87,7 +87,7 @@ npm run check    # type check — wajib lulus, dicek CI
 npm run build
 ```
 
-CI (`.github/workflows/ci.yml`) menjalankan, berurutan:
+CI/CD satu berkas (`.github/workflows/ci-cd.yml`; job `deploy` hanya jalan di push ke `main` setelah CI hijau). CI menjalankan, berurutan:
 `cargo fmt --check` → migrasi → `cargo clippy --all-targets -- -D warnings` →
 `cargo test` → `cargo sqlx prepare --check` (backend), lalu
 `npm run check` → `npm run build` (frontend). Jalankan yang relevan secara
